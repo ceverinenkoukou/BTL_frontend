@@ -1,0 +1,450 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useAuth } from "@/components/providers/auth-provider";
+import api from "@/lib/api";
+import type { CampagneDetail, Degustation, Vente } from "@/lib/types/backend";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import {
+  ArrowLeft, Calendar, MapPin, Target, Users, Building2, Loader2,
+  UtensilsCrossed, ShoppingCart, TrendingUp, BarChart3,
+  Sparkles, Star,
+} from "lucide-react";
+
+function initials(name: string) {
+  return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+}
+
+function fmtXOF(n: number) {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
+}
+
+export default function CampaignDetailPage() {
+  const { user } = useAuth();
+  const params = useParams();
+  const router = useRouter();
+  const id = params.id as string;
+
+  const [campaign, setCampaign] = useState<CampagneDetail | null>(null);
+  const [tastings, setTastings] = useState<Degustation[]>([]);
+  const [ventes, setVentes] = useState<Vente[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const isHostess = user?.role === "Hotesse";
+  const isAdmin = user?.role === "Administrateur";
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const campRes = await api.get<CampagneDetail>(`/campagnes/${id}/`);
+      setCampaign(campRes.data);
+
+      const [tastRes, ventesRes] = await Promise.all([
+        api.get<Degustation[]>("/degustations/"),
+        api.get<Vente[]>("/ventes/"),
+      ]);
+
+      const campNom = campRes.data.nom;
+      setTastings(tastRes.data.filter(t => t.campagne_nom === campNom));
+      setVentes(ventesRes.data.filter(v => v.campagne_nom === campNom));
+    } catch {
+      toast.error("Impossible de charger la campagne.");
+      router.push("/dashboard/campaigns");
+    } finally {
+      setLoading(false);
+    }
+  }, [id, router]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-32 bg-slate-50 rounded-2xl animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!campaign) return null;
+
+  const purchasedCount = tastings.filter(t => t.a_achete).length;
+  const totalRevenue = ventes.reduce((sum, v) => sum + Number(v.prix_total ?? 0), 0);
+  const convRate = tastings.length > 0 ? Math.round((purchasedCount / tastings.length) * 100) : 0;
+  const avgRating = tastings.length > 0
+    ? Math.round((tastings.reduce((s, t) => s + t.note_gout, 0) / tastings.length) * 10) / 10
+    : 0;
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+
+      {/* ── Hero banner (admin) ── */}
+      {isAdmin ? (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 text-white shadow-2xl shadow-indigo-200">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
+          <div className="absolute -right-12 -top-12 w-52 h-52 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute right-24 -bottom-10 w-28 h-28 rounded-full bg-white/10 blur-2xl" />
+          <div className="relative z-10 p-6 md:p-8">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <Link href="/dashboard/campaigns"
+                  className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors">
+                  <ArrowLeft className="w-4 h-4" />
+                </Link>
+                <span className="text-white/50 text-xs hidden sm:block">Campagnes / {campaign.nom}</span>
+              </div>
+            </div>
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 backdrop-blur-sm">
+                <Sparkles className="w-6 h-6 text-yellow-200" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight leading-tight">{campaign.nom}</h1>
+                <div className="flex flex-wrap gap-4 text-white/70 text-sm mt-2">
+                  <div className="flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span>{campaign.entreprise_nom}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>
+                      {new Date(campaign.date_debut).toLocaleDateString("fr-FR")} →{" "}
+                      {new Date(campaign.date_fin).toLocaleDateString("fr-FR")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
+              {[
+                { label: "Dégustations", value: tastings.length,   sub: "enregistrées",          icon: "🍷" },
+                { label: "Acheteurs",    value: purchasedCount,     sub: `conv. ${convRate}%`,     icon: "🛒" },
+                { label: "Note moy.",    value: `${avgRating}/5`,   sub: "satisfaction",           icon: "⭐" },
+                { label: "Chiffre d'aff.", value: fmtXOF(totalRevenue), sub: `${ventes.length} ventes`, icon: "💰" },
+              ].map((s, i) => (
+                <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
+                  <div className="text-base mb-1">{s.icon}</div>
+                  <div className="text-xl font-bold leading-none">
+                    {s.value}
+                    <span className="text-xs font-normal text-white/55 ml-1">{s.sub}</span>
+                  </div>
+                  <div className="text-xs text-white/60 mt-1">{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild>
+            <Link href="/dashboard/campaigns"><ArrowLeft className="w-5 h-5" /></Link>
+          </Button>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold text-foreground">{campaign.nom}</h1>
+            <p className="text-muted-foreground text-sm mt-0.5">{campaign.entreprise_nom}</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Admin two-column layout ── */}
+      {isAdmin && (
+        <div className="grid lg:grid-cols-3 gap-6">
+
+          {/* Left (2/3) */}
+          <div className="lg:col-span-2 space-y-5">
+
+            {/* Description */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground mb-3 flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                </div>
+                Description de la campagne
+              </h3>
+              {campaign.description ? (
+                <p className="text-sm text-muted-foreground leading-relaxed">{campaign.description}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground/50 italic">Aucune description disponible.</p>
+              )}
+              <div className="grid sm:grid-cols-2 gap-2.5 mt-4 pt-4 border-t border-slate-100">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>Du {new Date(campaign.date_debut).toLocaleDateString("fr-FR")} au {new Date(campaign.date_fin).toLocaleDateString("fr-FR")}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Building2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                  <span>{campaign.entreprise_nom}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <UtensilsCrossed className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span><strong className="text-foreground">{tastings.length}</strong> dégustation{tastings.length !== 1 ? "s" : ""} enregistrée{tastings.length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <ShoppingCart className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span><strong className="text-foreground">{ventes.length}</strong> vente{ventes.length !== 1 ? "s" : ""} réalisée{ventes.length !== 1 ? "s" : ""}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats strip */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
+                  <BarChart3 className="w-3.5 h-3.5 text-violet-600" />
+                </div>
+                Statistiques de la campagne
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Dégustations",  value: tastings.length,        color: "text-indigo-700", bg: "bg-indigo-50",  border: "border-indigo-100" },
+                  { label: "Acheteurs",     value: purchasedCount,          color: "text-violet-700", bg: "bg-violet-50",  border: "border-violet-100" },
+                  { label: "Taux conv.",    value: `${convRate}%`,          color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-100" },
+                  { label: "Note moy.",     value: `${avgRating}/5`,        color: "text-amber-700",  bg: "bg-amber-50",   border: "border-amber-100"  },
+                ].map((s, i) => (
+                  <div key={i} className={`rounded-xl border p-3 text-center ${s.bg} ${s.border}`}>
+                    <p className={`text-lg font-black ${s.color}`}>{s.value}</p>
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent tastings */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                    <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-600" />
+                  </div>
+                  Dernières dégustations
+                </h3>
+                <span className="text-xs text-muted-foreground bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
+                  {tastings.length} total
+                </span>
+              </div>
+              {tastings.length === 0 ? (
+                <div className="text-center py-10">
+                  <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                    <UtensilsCrossed className="w-7 h-7 text-slate-300" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">Aucune dégustation enregistrée</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {tastings.slice(0, 8).map((t, i) => (
+                    <div key={t.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl hover:bg-indigo-50/60 transition-colors">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-foreground">{t.produit_nom}</span>
+                          <span className="text-muted-foreground text-xs">·</span>
+                          <span className="text-xs text-muted-foreground">{t.hotesse_nom}</span>
+                          <span className="text-muted-foreground text-xs">·</span>
+                          <span className="text-xs text-muted-foreground">{t.tranche_age_display}</span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5">
+                          <span className="text-xs text-amber-500 flex items-center gap-0.5">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                            {t.note_gout}/5
+                          </span>
+                          <span className="text-xs text-muted-foreground">{t.intention_achat_display}</span>
+                          <span className="text-xs text-muted-foreground">{t.site_nom}</span>
+                        </div>
+                      </div>
+                      {t.a_achete && (
+                        <span className="text-xs bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full font-semibold shrink-0 border border-emerald-200">
+                          Achat ✓
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {tastings.length > 8 && (
+                    <p className="text-xs text-center text-muted-foreground pt-2">
+                      +{tastings.length - 8} autres dégustations
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right (1/3) */}
+          <div className="space-y-5">
+
+            {/* Team */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                  <Users className="w-3.5 h-3.5 text-blue-600" />
+                </div>
+                Équipe assignée
+              </h3>
+              <div className="space-y-3">
+                {campaign.hotesses.length > 0 ? (
+                  campaign.hotesses.map(h => (
+                    <div key={h.id} className="flex items-center gap-3 p-3 bg-rose-50 rounded-xl border border-rose-100">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
+                        {initials(h.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-rose-500 font-semibold uppercase tracking-wider mb-0.5">Hôtesse</p>
+                        <p className="text-sm font-bold text-foreground truncate">{h.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{h.email}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground text-center py-2">Aucune hôtesse assignée</p>
+                )}
+                {campaign.superviseurs.length > 0 ? (
+                  campaign.superviseurs.map(s => (
+                    <div key={s.id} className="flex items-center gap-3 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
+                        {initials(s.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-indigo-500 font-semibold uppercase tracking-wider mb-0.5">Superviseur</p>
+                        <p className="text-sm font-bold text-foreground truncate">{s.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{s.email}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground text-center py-2">Aucun superviseur assigné</p>
+                )}
+              </div>
+            </div>
+
+            {/* Revenue card */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 to-violet-600 rounded-2xl p-5 text-white shadow-xl shadow-indigo-200">
+              <div className="absolute -right-4 -top-4 w-20 h-20 rounded-full bg-white/10 blur-2xl" />
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp className="w-4 h-4 text-white/70" />
+                  <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">Chiffre d&apos;affaires</span>
+                </div>
+                <div className="text-3xl font-bold">{fmtXOF(totalRevenue)}</div>
+                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/20 text-xs text-white/65">
+                  <span>{ventes.length} vente{ventes.length !== 1 ? "s" : ""}</span>
+                  <span>·</span>
+                  <span>{purchasedCount} acheteur{purchasedCount !== 1 ? "s" : ""}</span>
+                  <span>·</span>
+                  <span>{convRate}% conv.</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ── Non-admin info card ── */}
+      {!isAdmin && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+          {campaign.description && (
+            <p className="text-muted-foreground leading-relaxed text-sm">{campaign.description}</p>
+          )}
+          <div className="grid sm:grid-cols-2 gap-3 text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Calendar className="w-4 h-4 shrink-0 text-indigo-400" />
+              <span>Du {new Date(campaign.date_debut).toLocaleDateString("fr-FR")} au {new Date(campaign.date_fin).toLocaleDateString("fr-FR")}</span>
+            </div>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Building2 className="w-4 h-4 shrink-0 text-blue-400" />
+              <span>{campaign.entreprise_nom}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Hostess: stats counter ── */}
+      {isHostess && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-foreground">
+                {tastings.length} dégustation{tastings.length !== 1 ? "s" : ""} sur cette campagne
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {purchasedCount} achat{purchasedCount !== 1 ? "s" : ""} enregistré{purchasedCount !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <Button size="sm" asChild className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl">
+              <Link href="/dashboard/tastings">
+                <UtensilsCrossed className="w-3.5 h-3.5 mr-1.5" />
+                Enregistrer une dégustation
+              </Link>
+            </Button>
+          </div>
+
+          {tastings.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                  <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                Mes dégustations sur cette campagne
+              </h3>
+              <div className="space-y-2">
+                {tastings.slice(0, 5).map((t, i) => (
+                  <div key={t.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-foreground">{t.produit_nom}</span>
+                      <span className="text-muted-foreground ml-2 text-xs">{t.tranche_age_display}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-amber-500">
+                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                      {t.note_gout}/5
+                    </div>
+                    {t.a_achete && (
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">✓</span>
+                    )}
+                  </div>
+                ))}
+                {tastings.length > 5 && (
+                  <p className="text-xs text-center text-muted-foreground">+{tastings.length - 5} autres</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Supervisor progress ── */}
+      {!isAdmin && !isHostess && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+          <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-teal-100 flex items-center justify-center shrink-0">
+              <Target className="w-3.5 h-3.5 text-teal-600" />
+            </div>
+            Suivi de la campagne
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[
+              { label: "Dégustations",  value: tastings.length,        color: "text-indigo-700",  bg: "bg-indigo-50",  border: "border-indigo-100" },
+              { label: "Acheteurs",     value: purchasedCount,          color: "text-violet-700",  bg: "bg-violet-50",  border: "border-violet-100" },
+              { label: "Conversion",    value: `${convRate}%`,          color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-100" },
+            ].map((s, i) => (
+              <div key={i} className={`rounded-xl border p-3 text-center ${s.bg} ${s.border}`}>
+                <p className={`text-xl font-black ${s.color}`}>{s.value}</p>
+                <p className="text-xs text-muted-foreground">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
