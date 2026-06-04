@@ -25,7 +25,6 @@ import {
 import { toast } from "sonner";
 import { Gift, Trophy, Sparkles, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import confetti from "canvas-confetti";
 
 const WHEEL_COLORS = [
   "#f97316", // orange
@@ -38,9 +37,17 @@ const WHEEL_COLORS = [
   "#ef4444", // red
 ];
 
+type WheelPrize = { 
+  id: string; 
+  name: string; 
+  probability: number; 
+  quantity_available: number; 
+  quantity_won: number; 
+  is_active: boolean; 
+};
+
 export default function WheelPage() {
   const { user } = useAuth();
-  type WheelPrize = { id: string; name: string; probability: number; quantity_available: number; quantity_won: number; is_active: boolean };
 
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<string>("");
@@ -52,18 +59,16 @@ export default function WheelPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => { fetchCampaigns(); }, [fetchCampaigns]);
+  
+  // Sécurisation : État pour savoir si le composant est monté côté client
+  const [isMounted, setIsMounted] = useState(false);
 
+  // Déclencher uniquement côté client une fois le navigateur prêt
   useEffect(() => {
-    if (selectedCampaign) fetchPrizes();
-  }, [selectedCampaign]);
+    setIsMounted(true);
+  }, []);
 
-  useEffect(() => {
-    if (prizes.length > 0) {
-      drawWheel();
-    }
-  }, [prizes, rotation]);
-
+  // 1. DÉCLARATION DES FONCTIONS (Placées avant les useEffect)
   const fetchCampaigns = useCallback(async () => {
     try {
       const { data } = await api.get<CampagneList[]>("/campagnes/");
@@ -78,7 +83,7 @@ export default function WheelPage() {
     }
   }, []);
 
-  const fetchPrizes = async () => {
+  const fetchPrizes = useCallback(async () => {
     setPrizes([
       { id: "1", name: "T-Shirt",       probability: 10, quantity_available: 50,   quantity_won: 0, is_active: true },
       { id: "2", name: "Casquette",      probability: 15, quantity_available: 100,  quantity_won: 0, is_active: true },
@@ -87,12 +92,23 @@ export default function WheelPage() {
       { id: "5", name: "Réduction 10%",  probability: 15, quantity_available: 100,  quantity_won: 0, is_active: true },
       { id: "6", name: "Réessayez",      probability: 5,  quantity_available: 9999, quantity_won: 0, is_active: true },
     ]);
-  };
+  }, []);
 
+  // 2. CONTRÔLE DES EFFETS D'APPLICATIONS
+  useEffect(() => { 
+    if (isMounted) fetchCampaigns(); 
+  }, [fetchCampaigns, isMounted]);
 
-  const drawWheel = () => {
+  useEffect(() => {
+    if (isMounted && selectedCampaign) {
+      fetchPrizes();
+    }
+  }, [selectedCampaign, fetchPrizes, isMounted]);
+
+  // 3. DESSIN DU CANVAS (Ajout d'une sécurité stricte si canvasRef n'est pas prêt)
+  const drawWheel = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || prizes.length === 0) return;
+    if (!canvas || !isMounted || prizes.length === 0) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -110,7 +126,6 @@ export default function WheelPage() {
       const startAngle = index * anglePerSlice + rotationRad;
       const endAngle = (index + 1) * anglePerSlice + rotationRad;
 
-      // Draw slice
       ctx.beginPath();
       ctx.moveTo(centerX, centerY);
       ctx.arc(centerX, centerY, radius, startAngle, endAngle);
@@ -121,7 +136,6 @@ export default function WheelPage() {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Draw text
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(startAngle + anglePerSlice / 2);
@@ -132,7 +146,6 @@ export default function WheelPage() {
       ctx.restore();
     });
 
-    // Draw center circle
     ctx.beginPath();
     ctx.arc(centerX, centerY, 30, 0, 2 * Math.PI);
     ctx.fillStyle = "#fff";
@@ -141,7 +154,6 @@ export default function WheelPage() {
     ctx.lineWidth = 4;
     ctx.stroke();
 
-    // Draw pointer
     ctx.beginPath();
     ctx.moveTo(centerX + radius + 15, centerY);
     ctx.lineTo(centerX + radius - 10, centerY - 15);
@@ -149,15 +161,21 @@ export default function WheelPage() {
     ctx.closePath();
     ctx.fillStyle = "#f97316";
     ctx.fill();
-  };
+  }, [prizes, rotation, isMounted]);
 
+  useEffect(() => {
+    if (isMounted && prizes.length > 0) {
+      drawWheel();
+    }
+  }, [prizes, rotation, drawWheel, isMounted]);
+
+  // 4. ANIMATION DE LA ROUE ET CONFETTIS DYNAMIQUES
   const spinWheel = () => {
-    if (spinning || prizes.length === 0) return;
+    if (spinning || prizes.length === 0 || !isMounted) return;
 
     setSpinning(true);
     setWonPrize(null);
 
-    // Weighted random selection
     const totalProbability = prizes.reduce((sum, p) => sum + p.probability, 0);
     let random = Math.random() * totalProbability;
     let selectedPrize = prizes[0];
@@ -170,13 +188,11 @@ export default function WheelPage() {
       }
     }
 
-    // Calculate winning angle
     const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
     const anglePerSlice = 360 / prizes.length;
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
     
-    // Spin animation
-    const totalSpins = 5 + Math.random() * 3; // 5-8 full rotations
+    const totalSpins = 5 + Math.random() * 3;
     const finalAngle = 360 * totalSpins + (360 - prizeAngle);
     
     let currentRotation = rotation;
@@ -187,8 +203,6 @@ export default function WheelPage() {
     const animate = () => {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      
-      // Easing function (ease-out cubic)
       const eased = 1 - Math.pow(1 - progress, 3);
       
       const newRotation = currentRotation + (targetRotation - currentRotation) * eased;
@@ -201,12 +215,15 @@ export default function WheelPage() {
         setWonPrize(selectedPrize);
         setShowWinDialog(true);
         
-        // Confetti effect
+        // Import dynamique sécurisé de canvas-confetti au moment du clic
         if (selectedPrize.name !== "Réessayez") {
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.6 },
+          import("canvas-confetti").then((module) => {
+            const confetti = module.default;
+            confetti({
+              particleCount: 100,
+              spread: 70,
+              origin: { y: 0.6 },
+            });
           });
         }
       }
@@ -219,7 +236,7 @@ export default function WheelPage() {
     if (!wonPrize) return;
 
     try {
-      toast.success("Gain enregistré!");
+      toast.success("Gain enregistré !");
       setShowWinDialog(false);
       setCustomerName("");
       setCustomerPhone("");
@@ -229,13 +246,18 @@ export default function WheelPage() {
     }
   };
 
+  // Empêche le pré-rendu serveur de manipuler le HTML instable avant le montage client
+  if (!isMounted) {
+    return <div className="p-6 text-muted-foreground text-center">Chargement de la roue...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground">Roue à Cadeaux</h1>
           <p className="text-muted-foreground mt-1">
-            Faites tourner la roue pour gagner des goodies!
+            Faites tourner la roue pour gagner des goodies !
           </p>
         </div>
         <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
@@ -253,7 +275,6 @@ export default function WheelPage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Wheel Section */}
         <div className="lg:col-span-2">
           <Card>
             <CardContent className="p-6 flex flex-col items-center">
@@ -287,12 +308,11 @@ export default function WheelPage() {
                 ) : (
                   <>
                     <Sparkles className="w-6 h-6 mr-2" />
-                    Faire tourner!
+                    Faire tourner !
                   </>
                 )}
               </Button>
 
-              {/* Prizes Legend */}
               <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
                 {prizes.map((prize, index) => (
                   <div
@@ -311,7 +331,6 @@ export default function WheelPage() {
           </Card>
         </div>
 
-        {/* Recent Spins */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -328,18 +347,17 @@ export default function WheelPage() {
         </Card>
       </div>
 
-      {/* Win Dialog */}
       <Dialog open={showWinDialog} onOpenChange={setShowWinDialog}>
         <DialogContent className="text-center">
           <DialogHeader>
             <DialogTitle className="text-2xl flex items-center justify-center gap-2">
               <Trophy className="w-8 h-8 text-primary" />
-              {wonPrize?.name === "Réessayez" ? "Pas de chance!" : "Félicitations!"}
+              {wonPrize?.name === "Réessayez" ? "Pas de chance !" : "Félicitations !"}
             </DialogTitle>
             <DialogDescription>
               {wonPrize?.name === "Réessayez"
-                ? "Vous pouvez retenter votre chance!"
-                : `Vous avez gagné: ${wonPrize?.name}`}
+                ? "Vous pouvez retenter votre chance !"
+                : `Vous avez gagné : ${wonPrize?.name}`}
             </DialogDescription>
           </DialogHeader>
 
