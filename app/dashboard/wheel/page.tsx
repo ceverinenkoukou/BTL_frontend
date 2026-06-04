@@ -25,7 +25,6 @@ import {
 import { toast } from "sonner";
 import { Gift, Trophy, Sparkles, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import confetti from "canvas-confetti";
 
 const WHEEL_COLORS = [
   "#f97316", // orange
@@ -60,8 +59,16 @@ export default function WheelPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // Sécurisation : État pour savoir si le composant est monté côté client
+  const [isMounted, setIsMounted] = useState(false);
 
-  // 1. DÉCLARATION DES FONCTIONS (Placées avant les useEffect pour éviter l'erreur de build)
+  // Déclencher uniquement côté client une fois le navigateur prêt
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // 1. DÉCLARATION DES FONCTIONS (Placées avant les useEffect)
   const fetchCampaigns = useCallback(async () => {
     try {
       const { data } = await api.get<CampagneList[]>("/campagnes/");
@@ -77,7 +84,6 @@ export default function WheelPage() {
   }, []);
 
   const fetchPrizes = useCallback(async () => {
-    // Remplacer plus tard par un appel API si nécessaire
     setPrizes([
       { id: "1", name: "T-Shirt",       probability: 10, quantity_available: 50,   quantity_won: 0, is_active: true },
       { id: "2", name: "Casquette",      probability: 15, quantity_available: 100,  quantity_won: 0, is_active: true },
@@ -88,21 +94,21 @@ export default function WheelPage() {
     ]);
   }, []);
 
-  // 2. MANAGEMENT DES EFFETS (useEffect)
+  // 2. CONTRÔLE DES EFFETS D'APPLICATIONS
   useEffect(() => { 
-    fetchCampaigns(); 
-  }, [fetchCampaigns]);
+    if (isMounted) fetchCampaigns(); 
+  }, [fetchCampaigns, isMounted]);
 
   useEffect(() => {
-    if (selectedCampaign) {
+    if (isMounted && selectedCampaign) {
       fetchPrizes();
     }
-  }, [selectedCampaign, fetchPrizes]);
+  }, [selectedCampaign, fetchPrizes, isMounted]);
 
-  // 3. ENTRAÎNEMENT DU CANVAS ET LOGIQUE GRAPHIQUE
+  // 3. DESSIN DU CANVAS (Ajout d'une sécurité stricte si canvasRef n'est pas prêt)
   const drawWheel = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || prizes.length === 0) return;
+    if (!canvas || !isMounted || prizes.length === 0) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -120,7 +126,6 @@ export default function WheelPage() {
       const startAngle = index * anglePerSlice + rotationRad;
       const endAngle = (index + 1) * anglePerSlice + rotationRad;
 
-      // Dessiner la part
       ctx.beginPath();
       ctx.moveTo(centerX, centerY);
       ctx.arc(centerX, centerY, radius, startAngle, endAngle);
@@ -131,7 +136,6 @@ export default function WheelPage() {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Dessiner le texte du lot
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(startAngle + anglePerSlice / 2);
@@ -142,7 +146,6 @@ export default function WheelPage() {
       ctx.restore();
     });
 
-    // Dessiner le cercle central
     ctx.beginPath();
     ctx.arc(centerX, centerY, 30, 0, 2 * Math.PI);
     ctx.fillStyle = "#fff";
@@ -151,7 +154,6 @@ export default function WheelPage() {
     ctx.lineWidth = 4;
     ctx.stroke();
 
-    // Dessiner le curseur d'indication (flèche droite)
     ctx.beginPath();
     ctx.moveTo(centerX + radius + 15, centerY);
     ctx.lineTo(centerX + radius - 10, centerY - 15);
@@ -159,22 +161,21 @@ export default function WheelPage() {
     ctx.closePath();
     ctx.fillStyle = "#f97316";
     ctx.fill();
-  }, [prizes, rotation]);
+  }, [prizes, rotation, isMounted]);
 
   useEffect(() => {
-    if (prizes.length > 0) {
+    if (isMounted && prizes.length > 0) {
       drawWheel();
     }
-  }, [prizes, rotation, drawWheel]);
+  }, [prizes, rotation, drawWheel, isMounted]);
 
-  // 4. ANIMATION ET SÉLECTION DU LOT
+  // 4. ANIMATION DE LA ROUE ET CONFETTIS DYNAMIQUES
   const spinWheel = () => {
-    if (spinning || prizes.length === 0) return;
+    if (spinning || prizes.length === 0 || !isMounted) return;
 
     setSpinning(true);
     setWonPrize(null);
 
-    // Sélection aléatoire pondérée
     const totalProbability = prizes.reduce((sum, p) => sum + p.probability, 0);
     let random = Math.random() * totalProbability;
     let selectedPrize = prizes[0];
@@ -187,13 +188,11 @@ export default function WheelPage() {
       }
     }
 
-    // Calcul de l'angle d'arrêt
     const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
     const anglePerSlice = 360 / prizes.length;
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
     
-    // Animation de rotation
-    const totalSpins = 5 + Math.random() * 3; // 5 à 8 tours complets
+    const totalSpins = 5 + Math.random() * 3;
     const finalAngle = 360 * totalSpins + (360 - prizeAngle);
     
     let currentRotation = rotation;
@@ -204,8 +203,6 @@ export default function WheelPage() {
     const animate = () => {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      
-      // Fonction de lissage (ease-out cubic)
       const eased = 1 - Math.pow(1 - progress, 3);
       
       const newRotation = currentRotation + (targetRotation - currentRotation) * eased;
@@ -218,12 +215,15 @@ export default function WheelPage() {
         setWonPrize(selectedPrize);
         setShowWinDialog(true);
         
-        // Effet confettis si ce n'est pas "Réessayez"
+        // Import dynamique sécurisé de canvas-confetti au moment du clic
         if (selectedPrize.name !== "Réessayez") {
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.6 },
+          import("canvas-confetti").then((module) => {
+            const confetti = module.default;
+            confetti({
+              particleCount: 100,
+              spread: 70,
+              origin: { y: 0.6 },
+            });
           });
         }
       }
@@ -245,6 +245,11 @@ export default function WheelPage() {
       toast.error("Erreur lors de l'enregistrement");
     }
   };
+
+  // Empêche le pré-rendu serveur de manipuler le HTML instable avant le montage client
+  if (!isMounted) {
+    return <div className="p-6 text-muted-foreground text-center">Chargement de la roue...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -270,7 +275,6 @@ export default function WheelPage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Section de la Roue */}
         <div className="lg:col-span-2">
           <Card>
             <CardContent className="p-6 flex flex-col items-center">
@@ -309,7 +313,6 @@ export default function WheelPage() {
                 )}
               </Button>
 
-              {/* Légende des Lots */}
               <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
                 {prizes.map((prize, index) => (
                   <div
@@ -328,7 +331,6 @@ export default function WheelPage() {
           </Card>
         </div>
 
-        {/* Derniers Gains */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -345,7 +347,6 @@ export default function WheelPage() {
         </Card>
       </div>
 
-      {/* Boîte de dialogue du résultat */}
       <Dialog open={showWinDialog} onOpenChange={setShowWinDialog}>
         <DialogContent className="text-center">
           <DialogHeader>
