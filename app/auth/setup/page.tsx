@@ -52,7 +52,8 @@ export default function SetupPage() {
     const client = isAuthenticated ? api : axios.create({ baseURL: API_URL });
 
     try {
-      const { data } = await client.post(isAuthenticated ? "/auth/setup/" : `${API_URL}/auth/setup/`, {
+      // CORRECTION : On passe uniquement le chemin relatif car la baseURL est déjà configurée dans l'instance du client
+      const { data } = await client.post("/auth/setup/", {
         name,
         email,
         password,
