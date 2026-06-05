@@ -43,8 +43,8 @@ export default function LoginPage() {
           <div className="mx-auto w-16 h-16 bg-[#006776] rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-[#006776]/30">
             <TrendingUp className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Mhedia BTL</h1>
-          <p className="text-muted-foreground mt-2">Agence Marketing Terrain</p>
+          <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">MHédia BTL</h1>
+          <p className="text-muted-foreground mt-2">Agence Digitale</p>
         </div>
 
         <Card className="border-0 shadow-xl">

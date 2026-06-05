@@ -95,7 +95,7 @@ export default function SetupPage() {
             <ShieldCheck className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">
-            Mhedia BTL
+            MHédia BTL
           </h1>
           <p className="text-muted-foreground mt-2">
             {isFirstSetup ? "Configuration initiale" : "Gestion des administrateurs"}

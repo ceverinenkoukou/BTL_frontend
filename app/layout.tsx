@@ -19,13 +19,13 @@ const openSans = Open_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'Mhedia BTL',
+  title: 'MHédia BTL',
   description: 'Plateforme de gestion des campagnes BTL — dégustations, ventes et reporting en temps réel',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Mhedia BTL',
+    title: 'MHédia BTL',
   },
   icons: {
     icon: '/LOGO-MHEDIA-01.svg',

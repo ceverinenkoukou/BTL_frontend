@@ -17,6 +17,10 @@ export type TrancheAge =
 export type IntentionAchat = "FAIBLE" | "MOYENNE" | "ELEVEE";
 export type TypeConditionnement = "UNITE" | "PACK";
 
+export type TypeCampagne = "DEGUSTATION" | "VENTE" | "DEGUSTATION_VENTE";
+export type TypeRecompense = "AUCUNE" | "GOODIES" | "PROMOTIONS";
+export type TypePromotion = "OFFERT" | "GAGNE";
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -109,6 +113,10 @@ export interface CampagneList {
   couleur_primaire: string;
   couleur_secondaire: string;
   logo_url: string | null;
+  type_campagne: TypeCampagne;
+  type_campagne_display: string;
+  type_recompense: TypeRecompense;
+  type_recompense_display: string;
   date_debut: string;
   date_fin: string;
   description: string | null;
@@ -117,6 +125,17 @@ export interface CampagneList {
   nb_sites: number;
   nb_hotesses: number;
   nb_superviseurs: number;
+  created_at: string;
+}
+
+export interface Promotion {
+  id: string;
+  campagne: string;
+  type_promotion: TypePromotion;
+  type_promotion_display: string;
+  quantite_requise: number;
+  recompense_description: string;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -138,6 +157,7 @@ export interface TeamMember {
 export interface CampagneDetail extends Omit<CampagneList, "nb_sites" | "nb_hotesses" | "nb_superviseurs"> {
   superviseurs: TeamMember[];
   hotesses: TeamMember[];
+  promotions: Promotion[];
 }
 
 export interface CampagneSiteProduitStat {
@@ -188,8 +208,18 @@ export interface CreateCampagnePayload {
   date_debut: string;
   date_fin: string;
   description?: string;
+  type_campagne?: TypeCampagne;
+  type_recompense?: TypeRecompense;
   objectif_degustations?: number | null;
   objectif_ventes?: number | null;
+}
+
+export interface CreatePromotionPayload {
+  campagne: string;
+  type_promotion: TypePromotion;
+  quantite_requise: number;
+  recompense_description: string;
+  is_active?: boolean;
 }
 
 export interface ManageTeamPayload {

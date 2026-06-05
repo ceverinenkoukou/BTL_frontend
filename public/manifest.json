@@ -1,6 +1,6 @@
 {
-  "name": "Mhedia BTL",
-  "short_name": "Mhedia BTL",
+  "name": "MHédia BTL",
+  "short_name": "MHédia BTL",
   "description": "Plateforme de gestion des campagnes BTL — dégustations, ventes et reporting en temps réel",
   "start_url": "/",
   "display": "standalone",

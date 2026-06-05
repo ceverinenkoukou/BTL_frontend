@@ -6,7 +6,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import api, { invalidateCache } from "@/lib/api";
 import type {
   CampagneList, CreateCampagnePayload,
-  Entreprise, TeamMember,
+  Entreprise, TeamMember, TypeCampagne, TypeRecompense,
 } from "@/lib/types/backend";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus, Search, Calendar, Target, MoreVertical, Eye, Trash2,
   Loader2, Building2, Sparkles, Users, ChevronRight, ChevronLeft,
-  X, Check,
+  X, Check, UtensilsCrossed, ShoppingCart, Gift, Tag,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -41,7 +41,7 @@ const DEFAULT_STATUS_CFG = { label: "—", badge: "bg-slate-100 text-slate-500 b
 
 type SiteEntry = { nom: string; ville: string; emplacement_precis: string; superviseurs_ids: string[]; hotesses_ids: string[] };
 const EMPTY_SITE: SiteEntry = { nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [] };
-const EMPTY_FORM = { nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", objectif_degustations: "", objectif_ventes: "", sites: [{ ...EMPTY_SITE }] as SiteEntry[] };
+const EMPTY_FORM = { nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, objectif_degustations: "", objectif_ventes: "", sites: [{ ...EMPTY_SITE }] as SiteEntry[] };
 
 export default function CampaignsPage() {
   const { user } = useAuth();
@@ -93,8 +93,10 @@ export default function CampaignsPage() {
         date_debut: form.date_debut,
         date_fin: form.date_fin,
         description: form.description.trim() || undefined,
-        objectif_degustations: form.objectif_degustations ? parseInt(form.objectif_degustations) : null,
-        objectif_ventes: form.objectif_ventes ? parseInt(form.objectif_ventes) : null,
+        type_campagne: form.type_campagne,
+        type_recompense: form.type_recompense,
+        objectif_degustations: (form.type_campagne !== "VENTE" && form.objectif_degustations) ? parseInt(form.objectif_degustations) : null,
+        objectif_ventes: (form.type_campagne !== "DEGUSTATION" && form.objectif_ventes) ? parseInt(form.objectif_ventes) : null,
       };
       const { data: created } = await api.post<CampagneList>("/campagnes/", payload);
 
@@ -228,19 +230,80 @@ export default function CampaignsPage() {
               <input type="date" className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 py-1 text-sm shadow-sm" value={form.date_fin} onChange={e => setForm(f => ({ ...f, date_fin: e.target.value }))} />
             </div>
           </div>
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objectifs de la campagne</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Dégustations (quantité)</Label>
-                <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_degustations} onChange={e => setForm(f => ({ ...f, objectif_degustations: e.target.value }))} placeholder="Ex: 500" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Ventes (quantité)</Label>
-                <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_ventes} onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))} placeholder="Ex: 100" />
-              </div>
+          {/* Type de campagne */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Type de campagne *</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { v: "DEGUSTATION",       label: "Dégustation",        icon: <UtensilsCrossed className="w-4 h-4" />, color: "#006776" },
+                { v: "VENTE",             label: "Vente",              icon: <ShoppingCart    className="w-4 h-4" />, color: "#10b981" },
+                { v: "DEGUSTATION_VENTE", label: "Dég. + Vente",       icon: <Target          className="w-4 h-4" />, color: "#7c3aed" },
+              ] as { v: TypeCampagne; label: string; icon: React.ReactNode; color: string }[]).map(o => (
+                <button key={o.v} type="button"
+                  onClick={() => setForm(f => ({ ...f, type_campagne: o.v }))}
+                  className={cn("flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-sm font-medium",
+                    form.type_campagne === o.v
+                      ? "border-current bg-current/5"
+                      : "border-slate-200 hover:border-slate-300 text-slate-500")}
+                  style={form.type_campagne === o.v ? { color: o.color, borderColor: o.color } : {}}>
+                  {o.icon}
+                  <span className="text-xs leading-tight text-center">{o.label}</span>
+                </button>
+              ))}
             </div>
           </div>
+
+          {/* Type de récompense */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Récompenses</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { v: "AUCUNE",     label: "Aucune",     icon: <X    className="w-4 h-4" />, color: "#94a3b8" },
+                { v: "GOODIES",    label: "Goodies 🎡", icon: <Gift className="w-4 h-4" />, color: "#f59e0b" },
+                { v: "PROMOTIONS", label: "Promotions", icon: <Tag  className="w-4 h-4" />, color: "#3b82f6" },
+              ] as { v: TypeRecompense; label: string; icon: React.ReactNode; color: string }[]).map(o => (
+                <button key={o.v} type="button"
+                  onClick={() => setForm(f => ({ ...f, type_recompense: o.v }))}
+                  className={cn("flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-sm font-medium",
+                    form.type_recompense === o.v
+                      ? "border-current bg-current/5"
+                      : "border-slate-200 hover:border-slate-300 text-slate-500")}
+                  style={form.type_recompense === o.v ? { color: o.color, borderColor: o.color } : {}}>
+                  {o.icon}
+                  <span className="text-xs leading-tight text-center">{o.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Objectifs (conditionnels selon type) */}
+          {form.type_campagne !== "VENTE" && form.type_campagne !== "DEGUSTATION" && (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objectifs de la campagne</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Dégustations (quantité)</Label>
+                  <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_degustations} onChange={e => setForm(f => ({ ...f, objectif_degustations: e.target.value }))} placeholder="Ex: 500" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Ventes (quantité)</Label>
+                  <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_ventes} onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))} placeholder="Ex: 100" />
+                </div>
+              </div>
+            </div>
+          )}
+          {form.type_campagne === "DEGUSTATION" && (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Objectif dégustations</p>
+              <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_degustations} onChange={e => setForm(f => ({ ...f, objectif_degustations: e.target.value }))} placeholder="Ex: 500" />
+            </div>
+          )}
+          {form.type_campagne === "VENTE" && (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Objectif ventes</p>
+              <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_ventes} onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))} placeholder="Ex: 100" />
+            </div>
+          )}
           <div className="flex justify-end pt-2">
             <Button type="button" onClick={handleStep1Next} className="rounded-xl bg-[#006776] hover:bg-[#00566a] text-white">
               Suivant : Sites <ChevronRight className="w-4 h-4 ml-2" />
@@ -441,6 +504,35 @@ export default function CampaignsPage() {
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Calendar className="w-3.5 h-3.5 shrink-0" style={{ color: p1 }} />
                     <span>{new Date(campaign.date_debut).toLocaleDateString("fr-FR")} → {new Date(campaign.date_fin).toLocaleDateString("fr-FR")}</span>
+                  </div>
+
+                  {/* Type badges */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {campaign.type_campagne === "DEGUSTATION" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+                        <UtensilsCrossed className="w-3 h-3" />Dégustation
+                      </span>
+                    )}
+                    {campaign.type_campagne === "VENTE" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <ShoppingCart className="w-3 h-3" />Vente
+                      </span>
+                    )}
+                    {campaign.type_campagne === "DEGUSTATION_VENTE" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                        <Target className="w-3 h-3" />Dég. + Vente
+                      </span>
+                    )}
+                    {campaign.type_recompense === "GOODIES" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                        <Gift className="w-3 h-3" />Goodies 🎡
+                      </span>
+                    )}
+                    {campaign.type_recompense === "PROMOTIONS" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                        <Tag className="w-3 h-3" />Promotions
+                      </span>
+                    )}
                   </div>
 
                   {/* Mini KPI chips — tinted with brand colors */}

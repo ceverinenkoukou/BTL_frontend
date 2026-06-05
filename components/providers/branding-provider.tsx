@@ -22,7 +22,7 @@ const DEFAULT_BRANDING: BrandingConfig = {
   couleur_primaire: "#006776",
   couleur_secondaire: "#00899b",
   logo_url: null,
-  nom_commercial: "Mhedia BTL",
+  nom_commercial: "MHédia BTL",
 };
 
 const BrandingContext = createContext<BrandingContextType>({
