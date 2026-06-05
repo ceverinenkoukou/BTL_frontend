@@ -24,7 +24,7 @@ import {
   ArrowLeft, Calendar, Target, Users, Building2,
   UtensilsCrossed, ShoppingCart, TrendingUp, BarChart3,
   Sparkles, Star, Plus, Loader2, CheckCircle2,
-  Frown, Meh, Smile, Laugh, Heart, Gift, Trophy, RotateCcw, MapPin, Package,
+  Frown, Meh, Smile, Laugh, Heart, Gift, Trophy, RotateCcw, MapPin, Package, Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import confetti from "canvas-confetti";
@@ -210,11 +210,13 @@ export default function CampaignDetailPage() {
       toast.success("Dégustation enregistrée !");
       const clientName = degForm.nom_client.trim();
       setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
-      setWheelClientName(clientName || "Client");
-      setWonPrize(null);
-      wheelRotationRef.current = 0;
-      setWheelSpinning(false);
-      setWheelOpen(true);
+      if (campaign?.type_recompense === "GOODIES") {
+        setWheelClientName(clientName || "Client");
+        setWonPrize(null);
+        wheelRotationRef.current = 0;
+        setWheelSpinning(false);
+        setWheelOpen(true);
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast.error(msg ?? "Erreur lors de l'enregistrement.");
@@ -251,9 +253,7 @@ export default function CampaignDetailPage() {
     });
     ctx.beginPath(); ctx.arc(cx, cy, 26, 0, 2 * Math.PI);
     ctx.fillStyle = "#fff"; ctx.fill();
-    ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; stroke();
-    ctx.beginPath();
-    ctx.stroke();
+    ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.stroke();
     ctx.moveTo(cx + radius + 14, cy);
     ctx.lineTo(cx + radius - 8, cy - 12);
     ctx.lineTo(cx + radius - 8, cy + 12);
@@ -369,6 +369,11 @@ export default function CampaignDetailPage() {
   const p2 = campaign.couleur_secondaire || "#00899b";
   const brandGrad = `linear-gradient(135deg, ${p1} 0%, ${p2} 100%)`;
 
+  const showTasting  = campaign.type_campagne !== "VENTE";
+  const showVente    = campaign.type_campagne !== "DEGUSTATION";
+  const showWheel    = campaign.type_recompense === "GOODIES";
+  const showPromos   = campaign.type_recompense === "PROMOTIONS";
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
 
@@ -407,20 +412,31 @@ export default function CampaignDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
+            {/* Type + reward badges */}
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/20 border border-white/30 backdrop-blur-sm">
+                {campaign.type_campagne_display}
+              </span>
+              {campaign.type_recompense !== "AUCUNE" && (
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/20 border border-white/30 backdrop-blur-sm">
+                  {campaign.type_recompense_display}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
               {[
-                { label: "Dégustations", value: tastings.length,    sub: "enregistrées",           icon: "🍷" },
-                { label: "Acheteurs",    value: purchasedCount,      sub: `conv. ${convRate}%`,      icon: "🛒" },
-                { label: "Note moy.",    value: `${avgRating}/5`,    sub: "satisfaction",            icon: "⭐" },
-                { label: "Chiffre d'aff.", value: fmtXOF(totalRevenue), sub: `${ventes.length} ventes`, icon: "💰" },
-              ].map((s, i) => (
+                showTasting && { label: "Dégustations", value: tastings.length,      sub: "enregistrées",           icon: "🍷" },
+                showTasting && { label: "Acheteurs",    value: purchasedCount,        sub: `conv. ${convRate}%`,      icon: "🛒" },
+                showTasting && { label: "Note moy.",    value: `${avgRating}/5`,      sub: "satisfaction",            icon: "⭐" },
+                showVente   && { label: "Chiffre d'aff.", value: fmtXOF(totalRevenue), sub: `${ventes.length} ventes`, icon: "💰" },
+              ].filter(Boolean).map((s, i) => (
                 <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
-                  <div className="text-base mb-1">{s.icon}</div>
+                  <div className="text-base mb-1">{(s as {icon:string}).icon}</div>
                   <div className="text-xl font-bold leading-none">
-                    {s.value}
-                    <span className="text-xs font-normal text-white/55 ml-1">{s.sub}</span>
+                    {(s as {value: string|number}).value}
+                    <span className="text-xs font-normal text-white/55 ml-1">{(s as {sub:string}).sub}</span>
                   </div>
-                  <div className="text-xs text-white/60 mt-1">{s.label}</div>
+                  <div className="text-xs text-white/60 mt-1">{(s as {label:string}).label}</div>
                 </div>
               ))}
             </div>
@@ -441,6 +457,16 @@ export default function CampaignDetailPage() {
               <div className="min-w-0">
                 <h1 className="text-xl font-bold leading-tight truncate">{campaign.nom}</h1>
                 <p className="text-white/70 text-sm">{campaign.entreprise_nom}</p>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/20 border border-white/30">
+                    {campaign.type_campagne_display}
+                  </span>
+                  {campaign.type_recompense !== "AUCUNE" && (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/20 border border-white/30">
+                      {campaign.type_recompense_display}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -711,9 +737,9 @@ export default function CampaignDetailPage() {
           )}
 
           {/* Objectives mini-bars */}
-          {(campaign.objectif_degustations || campaign.objectif_ventes) && (
+          {((showTasting && campaign.objectif_degustations) || (showVente && campaign.objectif_ventes)) && (
             <div className="pt-3 border-t border-slate-100 grid sm:grid-cols-2 gap-3">
-              {campaign.objectif_degustations ? (
+              {showTasting && campaign.objectif_degustations ? (
                 <div className="rounded-xl p-3 space-y-1.5" style={{ background: hex(p1, 0.07) }}>
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5" style={{ color: p1 }}>
@@ -736,7 +762,7 @@ export default function CampaignDetailPage() {
                 </div>
               ) : null}
 
-              {campaign.objectif_ventes ? (
+              {showVente && campaign.objectif_ventes ? (
                 <div className="rounded-xl p-3 space-y-1.5" style={{ background: hex(p2, 0.07) }}>
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5" style={{ color: p2 }}>
@@ -767,15 +793,16 @@ export default function CampaignDetailPage() {
       {isEntreprise && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: "Sites", value: siteRapport?.totaux.sites ?? campaignSites.length, icon: MapPin },
-              { label: "Dégustations", value: siteRapport?.totaux.degustations ?? tastings.length, icon: UtensilsCrossed },
-              { label: "Goodies distribués", value: siteRapport?.totaux.goodies_distribues ?? 0, icon: Gift },
-              { label: "Conversion", value: `${convRate}%`, icon: TrendingUp },
-            ].map((k, i) => (
+            {(([
+              { label: "Sites",              value: siteRapport?.totaux.sites ?? campaignSites.length, Icon: MapPin          },
+              showTasting ? { label: "Dégustations",     value: siteRapport?.totaux.degustations ?? tastings.length, Icon: UtensilsCrossed } : null,
+              showVente   ? { label: "Ventes",            value: (siteRapport?.totaux as {ventes?:number})?.ventes ?? ventes.length, Icon: ShoppingCart } : null,
+              showWheel   ? { label: "Goodies distribués",value: siteRapport?.totaux.goodies_distribues ?? 0, Icon: Gift } : null,
+              showTasting ? { label: "Conversion",        value: `${convRate}%`, Icon: TrendingUp } : null,
+            ] as ({label:string; value:string|number; Icon: React.ElementType} | null)[]).filter((x): x is {label:string; value:string|number; Icon: React.ElementType} => x !== null)).map((k, i) => (
               <div key={i} className="rounded-2xl border p-4 text-center"
                 style={{ background: hex(i % 2 === 0 ? p1 : p2, 0.08), borderColor: hex(i % 2 === 0 ? p1 : p2, 0.2) }}>
-                <k.icon className="w-4 h-4 mx-auto mb-2" style={{ color: i % 2 === 0 ? p1 : p2 }} />
+                <k.Icon className="w-4 h-4 mx-auto mb-2" style={{ color: i % 2 === 0 ? p1 : p2 }} />
                 <p className="text-xl font-black" style={{ color: i % 2 === 0 ? p1 : p2 }}>{k.value}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{k.label}</p>
               </div>
@@ -809,8 +836,8 @@ export default function CampaignDetailPage() {
                       cursor={{ fill: "rgba(0,0,0,0.03)" }}
                       contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
                     />
-                    <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="ventes" name="Ventes" fill={p2} radius={[4, 4, 0, 0]} />
+                    {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />}
+                    {showVente   && <Bar dataKey="ventes" name="Ventes" fill={p2} radius={[4, 4, 0, 0]} />}
                     <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -956,7 +983,7 @@ export default function CampaignDetailPage() {
             </div>
 
             <div className="space-y-5">
-              {campaign.objectif_degustations ? (
+              {showTasting && campaign.objectif_degustations ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
@@ -988,7 +1015,7 @@ export default function CampaignDetailPage() {
                 </div>
               )}
 
-              {campaign.objectif_ventes ? (
+              {showVente && campaign.objectif_ventes ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
@@ -1060,7 +1087,7 @@ export default function CampaignDetailPage() {
           )}
 
           {/* Inline tasting form */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          {showTasting && <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-4 border-b border-slate-100" style={{ background: hex(p1, 0.06) }}>
               <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
                 <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.15) }}>
@@ -1182,10 +1209,10 @@ export default function CampaignDetailPage() {
               )}
 
               <Button type="submit" disabled={savingDeg} className="w-full h-12 text-white text-base font-semibold" style={{ background: brandGrad }}>
-                {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : <><UtensilsCrossed className="w-4 h-4 mr-2" />Enregistrer &amp; lancer la roue 🎡</>}
+                {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : <><UtensilsCrossed className="w-4 h-4 mr-2" />{showWheel ? "Enregistrer & lancer la roue 🎡" : "Enregistrer la dégustation"}</>}
               </Button>
             </form>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1199,11 +1226,12 @@ export default function CampaignDetailPage() {
             Suivi de la campagne
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[
-              { label: "Dégustations", value: tastings.length },
-              { label: "Acheteurs",    value: purchasedCount   },
-              { label: "Conversion",   value: `${convRate}%`   },
-            ].map((s, i) => (
+            {([
+              showTasting ? { label: "Dégustations", value: tastings.length } : null,
+              showTasting ? { label: "Acheteurs",    value: purchasedCount   } : null,
+              showVente   ? { label: "Ventes",       value: ventes.length    } : null,
+              showTasting ? { label: "Conversion",   value: `${convRate}%`   } : null,
+            ] as ({label:string;value:string|number}|null)[]).filter((x): x is {label:string;value:string|number} => x !== null).map((s, i) => (
               <div key={i} className="rounded-xl border p-3 text-center"
                 style={{ background: hex(i % 2 === 0 ? p1 : p2, 0.08), borderColor: hex(i % 2 === 0 ? p1 : p2, 0.2) }}>
                 <p className="text-xl font-black" style={{ color: i % 2 === 0 ? p1 : p2 }}>{s.value}</p>
@@ -1214,8 +1242,39 @@ export default function CampaignDetailPage() {
         </div>
       )}
 
+      {/* ── Promotions section ── */}
+      {!isAdmin && showPromos && (campaign.promotions ?? []).length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 border-b border-slate-100" style={{ background: hex("#3b82f6", 0.06) }}>
+            <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 bg-blue-100">
+                <Tag className="w-3.5 h-3.5 text-blue-600" />
+              </div>
+              Promotions en cours
+            </h3>
+          </div>
+          <div className="p-4 space-y-2.5">
+            {(campaign.promotions ?? []).filter(p => p.is_active).map(promo => (
+              <div key={promo.id} className="flex items-start gap-3 p-3 rounded-xl border border-blue-100 bg-blue-50">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+                  <Tag className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Acheter{" "}<span className="text-blue-700">{promo.quantite_requise} produit{promo.quantite_requise > 1 ? "s" : ""}</span>
+                    {promo.type_promotion === "OFFERT" ? " → offert : " : " → à gagner : "}
+                    <span className="text-blue-700">{promo.recompense_description}</span>
+                  </p>
+                  <p className="text-xs text-blue-500 mt-0.5">{promo.type_promotion_display}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Wheel Dialog ── */}
-      {isHostess && campaign && (
+      {isHostess && campaign && showWheel && (
         <Dialog open={wheelOpen} onOpenChange={open => { if (!open) { setWheelOpen(false); setWonPrize(null); wheelRotationRef.current = 0; } }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>

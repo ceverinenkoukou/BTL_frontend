@@ -136,7 +136,7 @@ export default function HomePage() {
             Prêt à transformer vos campagnes?
           </h2>
           <p className="mt-4 text-lg text-primary-foreground/80">
-            Rejoignez les équipes qui utilisent Mhedia BTL pour maximiser leur impact terrain
+            Rejoignez les équipes qui utilisent MHédia BTL pour maximiser leur impact terrain
           </p>
           <Button size="lg" variant="secondary" className="mt-8 h-14 px-8 text-base" asChild>
             <Link href="/auth/signup">
@@ -154,7 +154,7 @@ export default function HomePage() {
             <img src="/LOGO-MHEDIA-01.svg" alt="Mhedia BTL" className="h-10 w-auto" />
           </div>
           <p className="text-sm text-muted-foreground">
-            2024 Mhedia BTL. Tous droits réservés.
+            2024 MHédia BTL. Tous droits réservés.
           </p>
         </div>
       </footer>
