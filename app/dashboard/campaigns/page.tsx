@@ -202,7 +202,8 @@ export default function CampaignsPage() {
       </div>
 
       {step === 1 && (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-0">
+          <div className="space-y-4 max-h-[58vh] overflow-y-auto pr-1 pb-1">
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Nom *</Label>
@@ -304,7 +305,8 @@ export default function CampaignsPage() {
               <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_ventes} onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))} placeholder="Ex: 100" />
             </div>
           )}
-          <div className="flex justify-end pt-2">
+          </div>{/* end scrollable */}
+          <div className="flex justify-end pt-3 border-t border-slate-100 mt-3">
             <Button type="button" onClick={handleStep1Next} className="rounded-xl bg-[#006776] hover:bg-[#00566a] text-white">
               Suivant : Sites <ChevronRight className="w-4 h-4 ml-2" />
             </Button>
@@ -406,7 +408,7 @@ export default function CampaignsPage() {
                   <Plus className="w-4 h-4 mr-2" />Nouvelle campagne
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
                 <DialogHeader>
                   <DialogTitle>Nouvelle campagne</DialogTitle>
                 </DialogHeader>

@@ -18,8 +18,20 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-type ProductEntry = { name: string; sku: string; unit_price: string; description: string };
-const EMPTY_PRODUCT: ProductEntry = { name: "", sku: "", unit_price: "", description: "" };
+type ProductEntry = {
+  name:           string;
+  description:    string;
+  modes:          ("UNITE" | "PACK")[];   // au moins un requis
+  prix_unite:      string;                  // prix détail/unité
+  quantite_unite:  string;                  // quantité vendue (ex: 1, 6, 12…)
+  prix_pack:       string;                  // prix du pack
+  items_par_pack:  string;                  // nb d'items dans le pack (optionnel)
+};
+const EMPTY_PRODUCT: ProductEntry = {
+  name: "", description: "",
+  modes: ["UNITE"],
+  prix_unite: "", quantite_unite: "", prix_pack: "", items_par_pack: "",
+};
 
 const isLight = (hex: string) => {
   const c = hex.replace("#", "");
@@ -53,6 +65,17 @@ export default function CompaniesPage() {
 
   // Step-2 fields
   const [entries, setEntries] = useState<ProductEntry[]>([{ ...EMPTY_PRODUCT }]);
+
+  const updateEntry = (i: number, patch: Partial<ProductEntry>) =>
+    setEntries(prev => prev.map((e, idx) => idx === i ? { ...e, ...patch } : e));
+
+  const toggleMode = (i: number, mode: "UNITE" | "PACK") =>
+    setEntries(prev => prev.map((e, idx) => {
+      if (idx !== i) return e;
+      const has = e.modes.includes(mode);
+      if (has && e.modes.length === 1) return e; // always keep at least one
+      return { ...e, modes: has ? e.modes.filter(m => m !== mode) : [...e.modes, mode] };
+    }));
 
 
   // ── Fetch companies from API ────────────────────────────────
@@ -142,11 +165,18 @@ export default function CompaniesPage() {
     try {
       const validProducts = entries
         .filter(e => e.name.trim())
-        .map(e => ({
+        .flatMap(e => e.modes.map(mode => ({
           nom: e.name.trim(),
-          description: e.description.trim() || undefined,
-          prix_indicatif: parseFloat(e.unit_price) || undefined,
-        }));
+          type_conditionnement: mode,
+          description: [
+            e.description.trim(),
+            mode === "UNITE" && e.quantite_unite ? `${e.quantite_unite} unité(s)` : "",
+            mode === "PACK"  && e.items_par_pack  ? `${e.items_par_pack} unités/pack`  : "",
+          ].filter(Boolean).join(" — ") || undefined,
+          prix_indicatif: mode === "UNITE"
+            ? parseFloat(e.prix_unite) || undefined
+            : parseFloat(e.prix_pack)  || undefined,
+        })));
 
       if (editingCompany) {
         const payload = {
@@ -194,8 +224,6 @@ export default function CompaniesPage() {
 
   const addEntry    = () => setEntries(prev => [...prev, { ...EMPTY_PRODUCT }]);
   const removeEntry = (i: number) => setEntries(prev => prev.filter((_, idx) => idx !== i));
-  const updateEntry = (i: number, f: keyof ProductEntry, v: string) =>
-    setEntries(prev => prev.map((e, idx) => idx === i ? { ...e, [f]: v } : e));
 
 
   return (
@@ -589,37 +617,96 @@ export default function CompaniesPage() {
                         </button>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="col-span-2">
-                        <Input
-                          placeholder="Nom du produit *"
-                          value={entry.name}
-                          onChange={e => updateEntry(i, "name", e.target.value)}
-                          className="rounded-lg text-sm h-8"
-                        />
-                      </div>
+                    <div className="space-y-2.5">
+                      {/* Nom */}
                       <Input
-                        placeholder="SKU (ex: FU-001)"
-                        value={entry.sku}
-                        onChange={e => updateEntry(i, "sku", e.target.value)}
+                        placeholder="Nom du produit *"
+                        value={entry.name}
+                        onChange={e => updateEntry(i, { name: e.target.value })}
                         className="rounded-lg text-sm h-8"
                       />
+
+                      {/* Mode de vente */}
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Mode de vente</p>
+                        <div className="flex gap-2">
+                          {([
+                            { mode: "UNITE" as const, label: "Détail / Unité", icon: "🛍️" },
+                            { mode: "PACK"  as const, label: "Pack",           icon: "📦" },
+                          ]).map(({ mode, label, icon }) => {
+                            const active = entry.modes.includes(mode);
+                            return (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => toggleMode(i, mode)}
+                                className={cn(
+                                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all",
+                                  active
+                                    ? "border-sky-500 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 text-slate-400 hover:border-slate-300"
+                                )}
+                              >
+                                <span>{icon}</span>{label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Champs conditionnels */}
+                      <div className="space-y-2">
+                        {entry.modes.includes("UNITE") && (
+                          <div className="rounded-lg bg-white border border-sky-100 p-2.5 space-y-1.5">
+                            <p className="text-[10px] font-bold text-sky-600 uppercase tracking-wide">Détail / Unité</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                placeholder="Quantité (ex : 1, 6, 12…)"
+                                type="number" min="1"
+                                value={entry.quantite_unite}
+                                onChange={e => updateEntry(i, { quantite_unite: e.target.value })}
+                                className="rounded-lg text-sm h-8"
+                              />
+                              <Input
+                                placeholder="Prix unitaire (F CFA)"
+                                type="number" min="0"
+                                value={entry.prix_unite}
+                                onChange={e => updateEntry(i, { prix_unite: e.target.value })}
+                                className="rounded-lg text-sm h-8"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {entry.modes.includes("PACK") && (
+                          <div className="rounded-lg bg-white border border-amber-100 p-2.5 space-y-1.5">
+                            <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide">Pack</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                placeholder="Prix du pack (F CFA)"
+                                type="number" min="0"
+                                value={entry.prix_pack}
+                                onChange={e => updateEntry(i, { prix_pack: e.target.value })}
+                                className="rounded-lg text-sm h-8"
+                              />
+                              <Input
+                                placeholder="Nb d'items / pack (optionnel)"
+                                type="number" min="1"
+                                value={entry.items_par_pack}
+                                onChange={e => updateEntry(i, { items_par_pack: e.target.value })}
+                                className="rounded-lg text-sm h-8"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Description */}
                       <Input
-                        placeholder="Prix unitaire (F)"
-                        type="number"
-                        min="0"
-                        value={entry.unit_price}
-                        onChange={e => updateEntry(i, "unit_price", e.target.value)}
+                        placeholder="Description (optionnel)"
+                        value={entry.description}
+                        onChange={e => updateEntry(i, { description: e.target.value })}
                         className="rounded-lg text-sm h-8"
                       />
-                      <div className="col-span-2">
-                        <Input
-                          placeholder="Description (optionnel)"
-                          value={entry.description}
-                          onChange={e => updateEntry(i, "description", e.target.value)}
-                          className="rounded-lg text-sm h-8"
-                        />
-                      </div>
                     </div>
                   </div>
                 ))}
