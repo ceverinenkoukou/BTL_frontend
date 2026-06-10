@@ -5,8 +5,9 @@ import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type {
   Degustation, CreateDegustationPayload, SiteList, MonSiteInfo,
-  TrancheAge, IntentionAchat, TypeConditionnement,
+  TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion,
 } from "@/lib/types/backend";
+import { enregistrerGainPromotion } from "@/lib/services/promotionService";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +30,7 @@ import {
   Plus, UtensilsCrossed, Loader2, CheckCircle2,
   Frown, Meh, Smile, Laugh, Heart,
   Download, Search, Calendar, UserRound, Package, TrendingUp, X, MapPin,
+  Gift, Ticket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +66,25 @@ const EMPTY_FORM = {
   conditionnement: "UNITE" as TypeConditionnement,
   quantite: 1,
   nom_client: "",
+  promotion_selectionnee: "" as string | "",
+};
+
+// Couleurs pour les types de promotion
+const PROMO_TYPE_STYLES: Record<TypePromotion, { bg: string; border: string; text: string; icon: string; label: string }> = {
+  OFFERT: {
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-700",
+    icon: "🎁",
+    label: "Produit offert",
+  },
+  GAGNE: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+    icon: "🎲",
+    label: "À gagner",
+  },
 };
 
 export default function TastingsPage() {
@@ -140,6 +161,21 @@ export default function TastingsPage() {
         }),
       };
       const { data: created } = await api.post<Degustation>("/degustations/", payload);
+
+      // Si une promotion a été sélectionnée, enregistrer le gain
+      if (form.a_achete && form.promotion_selectionnee && siteInfo) {
+        try {
+          const gainResult = await enregistrerGainPromotion(form.promotion_selectionnee, {
+            site_id: form.site,
+            nom_client: form.nom_client.trim() || undefined,
+          });
+          toast.success(`🎉 ${gainResult.recompense} enregistré !`);
+        } catch (promoErr: unknown) {
+          const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.warning(promoMsg ?? "Erreur lors de l'enregistrement de la promotion.");
+        }
+      }
+
       setTastings(prev => [created, ...prev]);
       toast.success("Dégustation enregistrée !");
       setDialogOpen(false);
@@ -477,6 +513,108 @@ export default function TastingsPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* ── Promotions configurées par l'admin ── */}
+                  {siteInfo?.promotions && siteInfo.promotions.length > 0 && (
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-semibold text-blue-600">
+                          Offres promotionnelles de la campagne
+                        </Label>
+                        <span className="text-xs text-muted-foreground">
+                          ({siteInfo.promotions.length} règle{siteInfo.promotions.length > 1 ? "s" : ""})
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Sélectionnez l&apos;offre correspondant à l&apos;achat du client :
+                      </p>
+
+                      <div className="space-y-2">
+                        {siteInfo.promotions.map((promo) => {
+                          const styles = PROMO_TYPE_STYLES[promo.type_promotion];
+                          const isSelected = form.promotion_selectionnee === promo.id;
+
+                          return (
+                            <button
+                              key={promo.id}
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, promotion_selectionnee: promo.id }))}
+                              className={cn(
+                                "w-full text-left rounded-xl border-2 p-3 transition-all",
+                                isSelected
+                                  ? `${styles.bg} ${styles.border} ${styles.text}`
+                                  : "border-slate-200 hover:border-slate-300 bg-white"
+                              )}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className={cn(
+                                  "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                                  isSelected ? "bg-white/60" : "bg-slate-100"
+                                )}>
+                                  <span className="text-xl">{styles.icon}</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className={cn(
+                                      "text-xs font-bold px-2 py-0.5 rounded-full",
+                                      isSelected ? "bg-white/60" : "bg-slate-100 text-slate-600"
+                                    )}>
+                                      {promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}
+                                    </span>
+                                    <span className={cn(
+                                      "text-xs font-medium",
+                                      isSelected ? styles.text : "text-slate-500"
+                                    )}>
+                                      → {styles.label}
+                                    </span>
+                                  </div>
+                                  <p className={cn(
+                                    "font-semibold text-sm mt-1",
+                                    isSelected ? styles.text : "text-foreground"
+                                  )}>
+                                    {promo.recompense_description}
+                                  </p>
+                                </div>
+                                {isSelected && (
+                                  <div className={cn(
+                                    "w-6 h-6 rounded-full flex items-center justify-center shrink-0",
+                                    styles.text.replace("text-", "bg-").replace("700", "100")
+                                  )}>
+                                    <CheckCircle2 className={cn("w-4 h-4", styles.text)} />
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Option "Aucune promotion" */}
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, promotion_selectionnee: "" }))}
+                        className={cn(
+                          "w-full text-left rounded-xl border-2 p-3 transition-all",
+                          form.promotion_selectionnee === ""
+                            ? "border-slate-400 bg-slate-50 text-slate-700"
+                            : "border-slate-200 hover:border-slate-300 bg-white"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                            form.promotion_selectionnee === "" ? "bg-slate-200" : "bg-slate-100"
+                          )}>
+                            <span className="text-xl">🚫</span>
+                          </div>
+                          <span className="font-medium text-sm">Aucune promotion applicable</span>
+                          {form.promotion_selectionnee === "" && (
+                            <CheckCircle2 className="w-5 h-5 text-slate-500 ml-auto" />
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

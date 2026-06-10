@@ -189,6 +189,13 @@ export interface CampagneSiteRapport {
   produits: CampagneSiteProduitStat[];
   goodies: CampagneSiteGoodieStat[];
   goodies_distribues_total: number;
+ promotions_stats?: {
+    promotion_id: string;
+    recompense_description: string;
+    quantite_requise: number;
+    gains_count: number;
+    produits_concernes: number;
+  }[];
 }
 
 export interface CampagneRapportSites {
@@ -306,9 +313,18 @@ export interface MonSiteInfo {
   campagne_id: string;
   campagne_nom: string;
   entreprise_nom: string;
+  type_recompense: TypeRecompense;
+  type_recompense_display: string;
   auto_select_produit: boolean;
   produits: { id: string; nom: string; prix_indicatif: string | null }[];
   goodies_disponibles: { id: string; nom: string; quantite_restante: number }[];
+  promotions: {
+    id: string;
+    type_promotion: TypePromotion;
+    type_promotion_display: string;
+    quantite_requise: number;
+    recompense_description: string;
+  }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +351,53 @@ export interface VenteStats {
   total_unites_vendues: number;
   ventes_en_pack: number;
   ventes_a_lunite: number;
+}
+
+// ---------------------------------------------------------------------------
+// Goodie
+// ---------------------------------------------------------------------------
+
+export interface Goodie {
+  id: string;
+  nom: string;
+  description: string | null;
+  campagne: string;
+  campagne_nom: string;
+  entreprise_nom: string;
+  quantite_total: number;
+  quantite_restante: number;
+  quantite_distribuee: number;
+  created_at: string;
+}
+
+export interface GoodieStockSite {
+  site_id: string;
+  site_nom: string;
+  quantite_allouee: number;
+  quantite_restante: number;
+  quantite_distribuee: number;
+}
+
+export interface GoodieDetail extends Goodie {
+  stocks_sites: GoodieStockSite[];
+}
+
+export interface CreateGoodiePayload {
+  nom: string;
+  description?: string;
+  campagne: string;
+  quantite_total: number;
+}
+
+export interface UpdateGoodiePayload {
+  nom?: string;
+  description?: string;
+  quantite_total?: number;
+}
+
+export interface AllouerGoodiePayload {
+  site_id: string;
+  quantite: number;
 }
 
 // ---------------------------------------------------------------------------
