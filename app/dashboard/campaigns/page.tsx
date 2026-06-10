@@ -29,6 +29,52 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {cn} from "@/lib/utils";
 
+// Fonction utilitaire pour les couleurs (cohérent avec [id]/page.tsx)
+function hex(color: string, alpha: number) {
+  const c = (color || "#006776").replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Helpers pour déterminer l'affichage selon le type (cohérent avec [id]/page.tsx)
+const getShowTasting = (typeCampagne: TypeCampagne) => typeCampagne !== "VENTE";
+const getShowVente = (typeCampagne: TypeCampagne) => typeCampagne !== "DEGUSTATION";
+const getShowWheel = (typeRecompense: TypeRecompense) => typeRecompense === "GOODIES";
+const getShowPromos = (typeRecompense: TypeRecompense) => typeRecompense === "PROMOTIONS";
+
+// Configuration des couleurs pour types de campagne (cohérent avec [id]/page.tsx)
+const TYPE_CAMPAGNE_COLORS: Record<TypeCampagne, string> = {
+  DEGUSTATION: "#0d9488",      // teal-600
+  VENTE: "#059669",            // emerald-600
+  DEGUSTATION_VENTE: "#7c3aed", // violet-600
+};
+
+const TYPE_RECOMPENSE_COLORS: Record<TypeRecompense, string> = {
+  AUCUNE: "#64748b",   // slate-500
+  GOODIES: "#f97316",  // orange-500
+  PROMOTIONS: "#3b82f6", // blue-500
+};
+
+// Couleurs pour les types de promotion (cohérent avec [id]/page.tsx)
+const PROMO_TYPE_COLORS: Record<TypePromoRule, { bg: string; border: string; text: string; dot: string; label: string }> = {
+  OFFERT: {
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-700",
+    dot: "bg-emerald-500",
+    label: "Produit offert",
+  },
+  GAGNE: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+    dot: "bg-amber-500",
+    label: "À gagner (tirage)",
+  },
+};
+
 const STATUS_CFG: Record<string, { label: string; badge: string; strip: string }> = {
   brouillon:  { label: "Brouillon",  badge: "bg-slate-100 text-slate-600 border border-slate-200",       strip: "from-slate-400 to-slate-300" },
   planifiee:  { label: "Planifiée",  badge: "bg-blue-100 text-blue-700 border border-blue-200",          strip: "from-blue-500 to-cyan-400" },
@@ -39,9 +85,13 @@ const STATUS_CFG: Record<string, { label: string; badge: string; strip: string }
 
 const DEFAULT_STATUS_CFG = { label: "—", badge: "bg-slate-100 text-slate-500 border border-slate-200", strip: "from-slate-300 to-slate-200" };
 
-type SiteEntry = { nom: string; ville: string; emplacement_precis: string; superviseurs_ids: string[]; hotesses_ids: string[] };
-const EMPTY_SITE: SiteEntry = { nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [] };
-const EMPTY_FORM = { nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, objectif_degustations: "", objectif_ventes: "", sites: [{ ...EMPTY_SITE }] as SiteEntry[] };
+type SiteEntry  = { nom: string; ville: string; emplacement_precis: string; superviseurs_ids: string[]; hotesses_ids: string[] };
+type TypePromoRule = "OFFERT" | "GAGNE";
+type ReglePromo = { quantite_requise: string; recompense_description: string; type_promotion: TypePromoRule };
+
+const EMPTY_SITE:  SiteEntry  = { nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [] };
+const EMPTY_REGLE: ReglePromo = { quantite_requise: "", recompense_description: "", type_promotion: "OFFERT" };
+const EMPTY_FORM = { nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, objectif_degustations: "", objectif_ventes: "", regles_promotions: [] as ReglePromo[], sites: [{ ...EMPTY_SITE }] as SiteEntry[] };
 
 export default function CampaignsPage() {
   const { user } = useAuth();
@@ -117,10 +167,35 @@ export default function CampaignsPage() {
         }
       }));
 
+      // Créer les règles promotionnelles si le type de récompense est PROMOTIONS
+      if (form.type_recompense === "PROMOTIONS") {
+        const reglesValides = form.regles_promotions.filter(
+          r => r.quantite_requise && r.recompense_description.trim()
+        );
+        if (reglesValides.length > 0) {
+          await Promise.all(reglesValides.map(r =>
+            api.post("/promotions/", {
+              campagne: created.id,
+              type_promotion: r.type_promotion,
+              quantite_requise: parseInt(r.quantite_requise),
+              recompense_description: r.recompense_description.trim(),
+              is_active: true,
+            })
+          ));
+        }
+      }
+
       setCampaigns(prev => [created, ...prev]);
       invalidateCache("/campagnes");
       invalidateCache("/sites");
-      toast.success(`Campagne créée${validSites.length ? ` avec ${validSites.length} site(s)` : ""}.`);
+      const promoCount = form.type_recompense === "PROMOTIONS"
+        ? form.regles_promotions.filter(r => r.quantite_requise && r.recompense_description.trim()).length
+        : 0;
+      const parts = [
+        validSites.length   ? `${validSites.length} site(s)` : null,
+        promoCount > 0      ? `${promoCount} règle(s) promo` : null,
+      ].filter(Boolean).join(", ");
+      toast.success(`Campagne créée${parts ? ` avec ${parts}` : ""}.`);
       setDialogOpen(false);
       resetForm();
     } catch (err: unknown) {
@@ -185,6 +260,11 @@ export default function CampaignsPage() {
       }),
     }));
 
+  const addRegle    = () => setForm(f => ({ ...f, regles_promotions: [...f.regles_promotions, { ...EMPTY_REGLE }] }));
+  const removeRegle = (idx: number) => setForm(f => ({ ...f, regles_promotions: f.regles_promotions.filter((_, i) => i !== idx) }));
+  const updateRegle = (idx: number, patch: Partial<ReglePromo>) =>
+    setForm(f => ({ ...f, regles_promotions: f.regles_promotions.map((r, i) => i === idx ? { ...r, ...patch } : r) }));
+
   const campaignFormContent = (
     <div className="mt-2">
       <div className="flex items-center gap-3 mb-5">
@@ -231,14 +311,14 @@ export default function CampaignsPage() {
               <input type="date" className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 py-1 text-sm shadow-sm" value={form.date_fin} onChange={e => setForm(f => ({ ...f, date_fin: e.target.value }))} />
             </div>
           </div>
-          {/* Type de campagne */}
+          {/* Type de campagne - couleurs cohérentes avec [id]/page.tsx */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Type de campagne *</Label>
             <div className="grid grid-cols-3 gap-2">
               {([
-                { v: "DEGUSTATION",       label: "Dégustation",        icon: <UtensilsCrossed className="w-4 h-4" />, color: "#006776" },
-                { v: "VENTE",             label: "Vente",              icon: <ShoppingCart    className="w-4 h-4" />, color: "#10b981" },
-                { v: "DEGUSTATION_VENTE", label: "Dég. + Vente",       icon: <Target          className="w-4 h-4" />, color: "#7c3aed" },
+                { v: "DEGUSTATION",       label: "Dégustation",        icon: <UtensilsCrossed className="w-4 h-4" />, color: TYPE_CAMPAGNE_COLORS.DEGUSTATION },
+                { v: "VENTE",             label: "Vente",              icon: <ShoppingCart    className="w-4 h-4" />, color: TYPE_CAMPAGNE_COLORS.VENTE },
+                { v: "DEGUSTATION_VENTE", label: "Dég. + Vente",       icon: <Target          className="w-4 h-4" />, color: TYPE_CAMPAGNE_COLORS.DEGUSTATION_VENTE },
               ] as { v: TypeCampagne; label: string; icon: React.ReactNode; color: string }[]).map(o => (
                 <button key={o.v} type="button"
                   onClick={() => setForm(f => ({ ...f, type_campagne: o.v }))}
@@ -254,17 +334,17 @@ export default function CampaignsPage() {
             </div>
           </div>
 
-          {/* Type de récompense */}
+          {/* Type de récompense - couleurs cohérentes avec [id]/page.tsx */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Récompenses</Label>
             <div className="grid grid-cols-3 gap-2">
               {([
-                { v: "AUCUNE",     label: "Aucune",     icon: <X    className="w-4 h-4" />, color: "#94a3b8" },
-                { v: "GOODIES",    label: "Goodies 🎡", icon: <Gift className="w-4 h-4" />, color: "#f59e0b" },
-                { v: "PROMOTIONS", label: "Promotions", icon: <Tag  className="w-4 h-4" />, color: "#3b82f6" },
+                { v: "AUCUNE",     label: "Aucune",     icon: <X    className="w-4 h-4" />, color: TYPE_RECOMPENSE_COLORS.AUCUNE },
+                { v: "GOODIES",    label: "Goodies 🎡", icon: <Gift className="w-4 h-4" />, color: TYPE_RECOMPENSE_COLORS.GOODIES },
+                { v: "PROMOTIONS", label: "Promotions", icon: <Tag  className="w-4 h-4" />, color: TYPE_RECOMPENSE_COLORS.PROMOTIONS },
               ] as { v: TypeRecompense; label: string; icon: React.ReactNode; color: string }[]).map(o => (
                 <button key={o.v} type="button"
-                  onClick={() => setForm(f => ({ ...f, type_recompense: o.v }))}
+                  onClick={() => setForm(f => ({ ...f, type_recompense: o.v, regles_promotions: o.v !== "PROMOTIONS" ? [] : f.regles_promotions }))}
                   className={cn("flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-sm font-medium",
                     form.type_recompense === o.v
                       ? "border-current bg-current/5"
@@ -277,8 +357,8 @@ export default function CampaignsPage() {
             </div>
           </div>
 
-          {/* Objectifs (conditionnels selon type) */}
-          {form.type_campagne !== "VENTE" && form.type_campagne !== "DEGUSTATION" && (
+          {/* Objectifs (conditionnels selon type) - utilisation des helpers cohérents */}
+          {getShowTasting(form.type_campagne) && getShowVente(form.type_campagne) && (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objectifs de la campagne</p>
               <div className="grid grid-cols-2 gap-4">
@@ -305,6 +385,142 @@ export default function CampaignsPage() {
               <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_ventes} onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))} placeholder="Ex: 100" />
             </div>
           )}
+
+          {/* ── Règles promotionnelles (affiché uniquement si PROMOTIONS) ── */}
+          {getShowPromos(form.type_recompense) && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-3"
+              style={{ background: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.06), borderColor: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.2) }}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 flex items-center gap-1.5"
+                  style={{ color: TYPE_RECOMPENSE_COLORS.PROMOTIONS }}>
+                  <Tag className="w-3.5 h-3.5" /> Offres promotionnelles
+                </p>
+                {form.regles_promotions.length === 0 && (
+                  <span className="text-xs text-blue-400 italic" style={{ color: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.6) }}>Aucune offre configurée</span>
+                )}
+              </div>
+
+              {form.regles_promotions.length === 0 && (
+                <div className="text-xs rounded-lg p-3"
+                  style={{ background: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.08), color: TYPE_RECOMPENSE_COLORS.PROMOTIONS }}>
+                  <p className="font-medium mb-1">Exemple pour la campagne 33 Export :</p>
+                  <ul className="list-disc list-inside space-y-0.5" style={{ color: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.7) }}>
+                    <li>Offre 1 : 3 canettes achetées = 1 offerte (type "Produit offert")</li>
+                    <li>Offre 2 : 6 canettes achetées = 1 offerte + tirage (type "À gagner")</li>
+                  </ul>
+                </div>
+              )}
+
+              {form.regles_promotions.map((regle, idx) => {
+                const promoStyle = PROMO_TYPE_COLORS[regle.type_promotion];
+                return (
+                <div key={idx} className={`bg-white rounded-xl border ${promoStyle.border} shadow-sm p-3 space-y-3`}>
+                  {/* Header with type selector */}
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold ${promoStyle.text}`}>Offre {idx + 1}</span>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={regle.type_promotion}
+                        onValueChange={(v: TypePromoRule) => updateRegle(idx, { type_promotion: v })}
+                      >
+                        <SelectTrigger className={`h-7 w-36 text-xs rounded-lg ${promoStyle.border}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="OFFERT">
+                            <span className="flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${PROMO_TYPE_COLORS.OFFERT.dot}`} />
+                              {PROMO_TYPE_COLORS.OFFERT.label}
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="GAGNE">
+                            <span className="flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${PROMO_TYPE_COLORS.GAGNE.dot}`} />
+                              {PROMO_TYPE_COLORS.GAGNE.label}
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => removeRegle(idx)}
+                        className="text-slate-300 hover:text-rose-500 transition-colors"
+                        title="Supprimer cette offre"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rule configuration */}
+                  <div className="grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-3">
+                      <Label className="text-[10px] uppercase text-muted-foreground">Quantité requise</Label>
+                      <input
+                        type="number" min="1"
+                        className="flex h-8 w-full rounded-lg border border-input bg-slate-50 px-2 text-sm text-center font-semibold shadow-sm"
+                        placeholder="3"
+                        value={regle.quantite_requise}
+                        onChange={e => updateRegle(idx, { quantite_requise: e.target.value })}
+                      />
+                    </div>
+                    <div className="col-span-1 text-center text-xs text-muted-foreground">→</div>
+                    <div className="col-span-8">
+                      <Label className="text-[10px] uppercase text-muted-foreground">
+                        {regle.type_promotion === "OFFERT" ? "Produit(s) offert(s)" : "Récompense / Gain"}
+                      </Label>
+                      <input
+                        className="flex h-8 w-full rounded-lg border border-input bg-slate-50 px-3 text-sm shadow-sm"
+                        placeholder={regle.type_promotion === "OFFERT" ? "Ex: 1 canette offerte" : "Ex: 1 canette + tirage goodie"}
+                        value={regle.recompense_description}
+                        onChange={e => updateRegle(idx, { recompense_description: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Type indicator */}
+                  <div className="flex items-center gap-2 text-xs">
+                    {regle.type_promotion === "OFFERT" ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Le client reçoit immédiatement la récompense
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        Le client participe au tirage pour gagner un goodie
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+              })}
+
+              <button
+                type="button"
+                onClick={addRegle}
+                className="flex items-center gap-2 text-sm font-semibold w-full justify-center rounded-xl border-2 border-dashed py-2.5 transition-all"
+                style={{ color: TYPE_RECOMPENSE_COLORS.PROMOTIONS, borderColor: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.3) }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = TYPE_RECOMPENSE_COLORS.PROMOTIONS; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.3); }}
+              >
+                <Plus className="w-4 h-4" /> Ajouter une offre
+              </button>
+
+              {form.regles_promotions.length > 0 && (
+                <p className="text-xs text-center" style={{ color: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.7) }}>
+                  <span style={{ color: PROMO_TYPE_COLORS.OFFERT.text }}>
+                    {form.regles_promotions.filter(r => r.type_promotion === "OFFERT").length} offre(s) directe(s)
+                  </span>
+                  {" • "}
+                  <span style={{ color: PROMO_TYPE_COLORS.GAGNE.text }}>
+                    {form.regles_promotions.filter(r => r.type_promotion === "GAGNE").length} tirage(s)
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
+
           </div>{/* end scrollable */}
           <div className="flex justify-end pt-3 border-t border-slate-100 mt-3">
             <Button type="button" onClick={handleStep1Next} className="rounded-xl bg-[#006776] hover:bg-[#00566a] text-white">
@@ -508,30 +724,35 @@ export default function CampaignsPage() {
                     <span>{new Date(campaign.date_debut).toLocaleDateString("fr-FR")} → {new Date(campaign.date_fin).toLocaleDateString("fr-FR")}</span>
                   </div>
 
-                  {/* Type badges */}
+                  {/* Type badges - cohérent avec [id]/page.tsx */}
                   <div className="flex flex-wrap gap-1.5">
-                    {campaign.type_campagne === "DEGUSTATION" && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+                    {getShowTasting(campaign.type_campagne) && !getShowVente(campaign.type_campagne) && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200"
+                        style={{ background: hex(TYPE_CAMPAGNE_COLORS.DEGUSTATION, 0.08), color: TYPE_CAMPAGNE_COLORS.DEGUSTATION, borderColor: hex(TYPE_CAMPAGNE_COLORS.DEGUSTATION, 0.2) }}>
                         <UtensilsCrossed className="w-3 h-3" />Dégustation
                       </span>
                     )}
-                    {campaign.type_campagne === "VENTE" && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {!getShowTasting(campaign.type_campagne) && getShowVente(campaign.type_campagne) && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        style={{ background: hex(TYPE_CAMPAGNE_COLORS.VENTE, 0.08), color: TYPE_CAMPAGNE_COLORS.VENTE, borderColor: hex(TYPE_CAMPAGNE_COLORS.VENTE, 0.2) }}>
                         <ShoppingCart className="w-3 h-3" />Vente
                       </span>
                     )}
-                    {campaign.type_campagne === "DEGUSTATION_VENTE" && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                    {getShowTasting(campaign.type_campagne) && getShowVente(campaign.type_campagne) && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200"
+                        style={{ background: hex(TYPE_CAMPAGNE_COLORS.DEGUSTATION_VENTE, 0.08), color: TYPE_CAMPAGNE_COLORS.DEGUSTATION_VENTE, borderColor: hex(TYPE_CAMPAGNE_COLORS.DEGUSTATION_VENTE, 0.2) }}>
                         <Target className="w-3 h-3" />Dég. + Vente
                       </span>
                     )}
-                    {campaign.type_recompense === "GOODIES" && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                    {getShowWheel(campaign.type_recompense) && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
+                        style={{ background: hex(TYPE_RECOMPENSE_COLORS.GOODIES, 0.08), color: TYPE_RECOMPENSE_COLORS.GOODIES, borderColor: hex(TYPE_RECOMPENSE_COLORS.GOODIES, 0.2) }}>
                         <Gift className="w-3 h-3" />Goodies 🎡
                       </span>
                     )}
-                    {campaign.type_recompense === "PROMOTIONS" && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    {getShowPromos(campaign.type_recompense) && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"
+                        style={{ background: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.08), color: TYPE_RECOMPENSE_COLORS.PROMOTIONS, borderColor: hex(TYPE_RECOMPENSE_COLORS.PROMOTIONS, 0.2) }}>
                         <Tag className="w-3 h-3" />Promotions
                       </span>
                     )}

@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList } from "@/lib/types/backend";
+import type { CampagneList, Goodie } from "@/lib/types/backend";
+import { getGoodiesByCampagne } from "@/lib/services/goodieService";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,7 +44,8 @@ type WheelPrize = {
   probability: number; 
   quantity_available: number; 
   quantity_won: number; 
-  is_active: boolean; 
+  is_active: boolean;
+  isGoodie: boolean;  // Pour identifier si c'est un goodie réel
 };
 
 export default function WheelPage() {
@@ -52,6 +54,7 @@ export default function WheelPage() {
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<string>("");
   const [prizes, setPrizes] = useState<WheelPrize[]>([]);
+  const [goodies, setGoodies] = useState<Goodie[]>([]);  // Goodies de la campagne
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [wonPrize, setWonPrize] = useState<WheelPrize | null>(null);
@@ -83,16 +86,55 @@ export default function WheelPage() {
     }
   }, []);
 
+  // Charger les goodies de la campagne et construire les prix de la roue
   const fetchPrizes = useCallback(async () => {
-    setPrizes([
-      { id: "1", name: "T-Shirt",       probability: 10, quantity_available: 50,   quantity_won: 0, is_active: true },
-      { id: "2", name: "Casquette",      probability: 15, quantity_available: 100,  quantity_won: 0, is_active: true },
-      { id: "3", name: "Porte-clés",     probability: 25, quantity_available: 200,  quantity_won: 0, is_active: true },
-      { id: "4", name: "Stylo",          probability: 30, quantity_available: 500,  quantity_won: 0, is_active: true },
-      { id: "5", name: "Réduction 10%",  probability: 15, quantity_available: 100,  quantity_won: 0, is_active: true },
-      { id: "6", name: "Réessayez",      probability: 5,  quantity_available: 9999, quantity_won: 0, is_active: true },
-    ]);
-  }, []);
+    if (!selectedCampaign) {
+      setPrizes([]);
+      setGoodies([]);
+      return;
+    }
+    
+    try {
+      const campGoodies = await getGoodiesByCampagne(selectedCampaign);
+      setGoodies(campGoodies);
+      
+      // Filtrer les goodies avec stock disponible
+      const activeGoodies = campGoodies.filter(g => g.quantite_restante > 0);
+      
+      if (activeGoodies.length === 0) {
+        setPrizes([]);
+        return;
+      }
+      
+      // Convertir les goodies en prix de roue
+      const wheelPrizes: WheelPrize[] = activeGoodies.map(g => ({
+        id: g.id,
+        name: g.nom,
+        probability: 100 / (activeGoodies.length + 1),  // Distribution équitable
+        quantity_available: g.quantite_restante,
+        quantity_won: g.quantite_distribuee || 0,
+        is_active: true,
+        isGoodie: true,
+      }));
+      
+      // Ajouter l'option "Réessayez"
+      wheelPrizes.push({
+        id: "retry",
+        name: "Réessayez",
+        probability: 100 / (activeGoodies.length + 1),
+        quantity_available: 9999,
+        quantity_won: 0,
+        is_active: true,
+        isGoodie: false,
+      });
+      
+      setPrizes(wheelPrizes);
+    } catch {
+      toast.error("Impossible de charger les goodies de la campagne");
+      setPrizes([]);
+      setGoodies([]);
+    }
+  }, [selectedCampaign]);
 
   // 2. CONTRÔLE DES EFFETS D'APPLICATIONS
   useEffect(() => { 
