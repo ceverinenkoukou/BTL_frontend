@@ -16,6 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -23,7 +27,7 @@ import {
   ArrowLeft, Calendar, Target, Users, Building2,
   UtensilsCrossed, ShoppingCart, TrendingUp, BarChart3,
   Sparkles, Star, Plus, Loader2, CheckCircle2, Edit,
-  Frown, Meh, Smile, Laugh, Heart, Gift, Trophy, RotateCcw, MapPin, Package, Tag,
+  Frown, Meh, Smile, Laugh, Heart, Gift, Trophy, RotateCcw, MapPin, Package, Tag, UserPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import confetti from "canvas-confetti";
@@ -144,6 +148,12 @@ export default function CampaignDetailPage() {
   const [entrepriseStats, setEntrepriseStats] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
+  // ── Manage-team dialog ──
+  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
+  const [allStaff, setAllStaff] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [teamSel, setTeamSel] = useState<{ superviseurs_ids: string[]; hotesses_ids: string[] }>({ superviseurs_ids: [], hotesses_ids: [] });
+  const [savingTeam, setSavingTeam] = useState(false);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -206,6 +216,43 @@ export default function CampaignDetailPage() {
   }, [id, router, user?.role, user]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const openTeamDialog = useCallback(async () => {
+    try {
+      const { data } = await api.get<{ id: string; name: string; role: string }[]>("/users/terrain-staff/");
+      const staff = Array.isArray(data) ? data : (data as any).results ?? [];
+      setAllStaff(staff);
+      setTeamSel({
+        superviseurs_ids: (campaign?.superviseurs ?? []).map(s => s.id),
+        hotesses_ids:     (campaign?.hotesses     ?? []).map(h => h.id),
+      });
+      setTeamDialogOpen(true);
+    } catch {
+      toast.error("Impossible de charger le personnel.");
+    }
+  }, [campaign]);
+
+  const toggleTeamMember = (role: "superviseurs_ids" | "hotesses_ids", memberId: string) => {
+    setTeamSel(prev => {
+      const arr = prev[role];
+      return { ...prev, [role]: arr.includes(memberId) ? arr.filter(x => x !== memberId) : [...arr, memberId] };
+    });
+  };
+
+  const handleSaveTeam = async () => {
+    if (!campaign) return;
+    setSavingTeam(true);
+    try {
+      await api.post(`/campagnes/${campaign.id}/manage-team/`, { ...teamSel, notify: true });
+      toast.success("Équipe mise à jour. Les nouveaux membres ont été notifiés.");
+      setTeamDialogOpen(false);
+      fetchAll();
+    } catch {
+      toast.error("Erreur lors de la mise à jour de l'équipe.");
+    } finally {
+      setSavingTeam(false);
+    }
+  };
 
   const handleSiteChange = async (siteId: string) => {
     setDegForm(f => ({ ...f, site: siteId, produit: "" }));
@@ -498,6 +545,7 @@ export default function CampaignDetailPage() {
   const showPromos   = campaign.type_recompense === "PROMOTIONS";
 
   return (
+    <>
     <div className="space-y-6 max-w-5xl mx-auto">
 
       {/* ── Admin hero banner ── */}
@@ -687,10 +735,17 @@ export default function CampaignDetailPage() {
           <div className="space-y-5">
             {/* Team */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
-                <div className="w-6 h-6 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><Users className="w-3.5 h-3.5 text-blue-600" /></div>
-                Équipe assignée
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><Users className="w-3.5 h-3.5 text-blue-600" /></div>
+                  Équipe assignée
+                </h3>
+                {(isAdmin || isEntreprise) && (
+                  <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs rounded-lg" onClick={openTeamDialog}>
+                    <UserPlus className="w-3.5 h-3.5" /> Gérer
+                  </Button>
+                )}
+              </div>
               <div className="space-y-3">
                 {campaign.hotesses.length > 0 && (
                   <div className="space-y-2">
@@ -1562,6 +1617,98 @@ export default function CampaignDetailPage() {
             </div>
           )}
     </div>
-    
+
+    {/* Dialog gestion equipe */}
+    <Dialog open={teamDialogOpen} onOpenChange={setTeamDialogOpen}>
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="w-4 h-4" style={{ color: p1 }} />
+            Gérer l&apos;équipe &mdash; {campaign?.nom}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex-1 overflow-y-auto space-y-5 pr-1 mt-2">
+          {/* Superviseurs */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
+              Superviseurs ({teamSel.superviseurs_ids.length} sélectionné{teamSel.superviseurs_ids.length > 1 ? "s" : ""})
+            </p>
+            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
+              {allStaff.filter(m => m.role === "Superviseur").length === 0 && (
+                <p className="text-xs text-muted-foreground p-3 italic">Aucun superviseur disponible</p>
+              )}
+              {allStaff.filter(m => m.role === "Superviseur").map(m => (
+                <label key={m.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <Checkbox
+                    checked={teamSel.superviseurs_ids.includes(m.id)}
+                    onCheckedChange={() => toggleTeamMember("superviseurs_ids", m.id)}
+                    className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
+                  />
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                    {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
+                    <p className="text-xs text-muted-foreground">Superviseur</p>
+                  </div>
+                  {teamSel.superviseurs_ids.includes(m.id) && (
+                    <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Hôtesses */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
+              Hôtesses ({teamSel.hotesses_ids.length} sélectionnée{teamSel.hotesses_ids.length > 1 ? "s" : ""})
+            </p>
+            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
+              {allStaff.filter(m => m.role === "Hotesse").length === 0 && (
+                <p className="text-xs text-muted-foreground p-3 italic">Aucune hôtesse disponible</p>
+              )}
+              {allStaff.filter(m => m.role === "Hotesse").map(m => (
+                <label key={m.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <Checkbox
+                    checked={teamSel.hotesses_ids.includes(m.id)}
+                    onCheckedChange={() => toggleTeamMember("hotesses_ids", m.id)}
+                    className="data-[state=checked]:bg-rose-500 data-[state=checked]:border-rose-500"
+                  />
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                    {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
+                    <p className="text-xs text-muted-foreground">Hôtesse</p>
+                  </div>
+                  {teamSel.hotesses_ids.includes(m.id) && (
+                    <CheckCircle2 className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length} membre{teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length > 1 ? "s" : ""} sélectionné{teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length > 1 ? "s" : ""}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setTeamDialogOpen(false)}>
+              Annuler
+            </Button>
+            <Button size="sm" className="rounded-xl text-white" style={{ background: p1 }}
+              onClick={handleSaveTeam} disabled={savingTeam}>
+              {savingTeam ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Enregistrement…</> : "Enregistrer l'équipe"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

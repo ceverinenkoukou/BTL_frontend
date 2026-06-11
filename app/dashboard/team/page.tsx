@@ -15,7 +15,7 @@ import {
 import { toast } from "sonner";
 import {
   Plus, Search, Users, UserCheck, UserX, Mail, ShieldCheck,
-  Clock, Edit2, Trash2, X, Loader2, Sparkles,
+  Clock, Edit2, Trash2, X, Loader2, Sparkles, SendHorizonal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +44,7 @@ export default function TeamPage() {
   const [submitting, setSubmitting]       = useState(false);
   const [form, setForm]                   = useState<CreateUserPayload>({ ...EMPTY_FORM });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [resendingId, setResendingId]       = useState<string | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -117,6 +118,19 @@ export default function TeamPage() {
       toast.success(updated.is_active ? "Compte réactivé." : "Compte désactivé.");
     } catch {
       toast.error("Erreur lors de la mise à jour.");
+    }
+  };
+
+  const handleResendCredentials = async (member: RemoteUser) => {
+    setResendingId(member.id);
+    try {
+      await api.post(`/users/${member.id}/resend-credentials/`);
+      setMembers(prev => prev.map(m => m.id === member.id ? { ...m, is_password_changed: false } : m));
+      toast.success(`Nouveaux identifiants envoyés à ${member.email}.`);
+    } catch {
+      toast.error("Erreur lors de l'envoi des identifiants.");
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -291,34 +305,49 @@ export default function TeamPage() {
                 </div>
 
                 {/* Actions */}
-                <div className="px-4 pb-4 flex items-center gap-2 border-t border-slate-50 pt-3">
-                  <Button size="sm" variant="outline" className="flex-1 rounded-xl text-xs" onClick={() => openEdit(member)}>
-                    <Edit2 className="w-3.5 h-3.5 mr-1.5" />Modifier
-                  </Button>
+                <div className="px-4 pb-4 flex flex-col gap-2 border-t border-slate-50 pt-3">
+                  {/* Row 1: Edit + Toggle active + Delete */}
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="flex-1 rounded-xl text-xs" onClick={() => openEdit(member)}>
+                      <Edit2 className="w-3.5 h-3.5 mr-1.5" />Modifier
+                    </Button>
+                    <Button
+                      size="sm" variant="outline"
+                      className={cn("flex-1 rounded-xl text-xs", member.is_active ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50")}
+                      onClick={() => handleToggleActive(member)}
+                    >
+                      {member.is_active
+                        ? <><UserX className="w-3.5 h-3.5 mr-1.5" />Désactiver</>
+                        : <><UserCheck className="w-3.5 h-3.5 mr-1.5" />Réactiver</>
+                      }
+                    </Button>
+                    {deleteConfirm === member.id ? (
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="destructive" className="rounded-xl text-xs px-2.5" onClick={() => handleDelete(member.id)}>
+                          Confirmer
+                        </Button>
+                        <Button size="sm" variant="ghost" className="rounded-xl text-xs px-2" onClick={() => setDeleteConfirm(null)}>
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="ghost" className="rounded-xl text-rose-500 hover:bg-rose-50 hover:text-rose-600 px-2.5" onClick={() => setDeleteConfirm(member.id)}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  {/* Row 2: Resend credentials */}
                   <Button
                     size="sm" variant="outline"
-                    className={cn("flex-1 rounded-xl text-xs", member.is_active ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50")}
-                    onClick={() => handleToggleActive(member)}
+                    className="w-full rounded-xl text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
+                    onClick={() => handleResendCredentials(member)}
+                    disabled={resendingId === member.id}
                   >
-                    {member.is_active
-                      ? <><UserX className="w-3.5 h-3.5 mr-1.5" />Désactiver</>
-                      : <><UserCheck className="w-3.5 h-3.5 mr-1.5" />Réactiver</>
+                    {resendingId === member.id
+                      ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Envoi en cours…</>
+                      : <><SendHorizonal className="w-3.5 h-3.5 mr-1.5" />Renvoyer les identifiants</>
                     }
                   </Button>
-                  {deleteConfirm === member.id ? (
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="destructive" className="rounded-xl text-xs px-2.5" onClick={() => handleDelete(member.id)}>
-                        Confirmer
-                      </Button>
-                      <Button size="sm" variant="ghost" className="rounded-xl text-xs px-2" onClick={() => setDeleteConfirm(null)}>
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button size="sm" variant="ghost" className="rounded-xl text-rose-500 hover:bg-rose-50 hover:text-rose-600 px-2.5" onClick={() => setDeleteConfirm(member.id)}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  )}
                 </div>
               </div>
             );
