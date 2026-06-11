@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, CampagneRapportSites, Degustation, Vente, VenteStats, SiteList, Entreprise } from "@/lib/types/backend";
+import type { CampagneList, CampagneRapportSites, Degustation, Vente, VenteStats, SiteList, Entreprise, ObjectifSite } from "@/lib/types/backend";
+import { getObjectifs } from "@/lib/services/objectifService";
 import { getMyEntreprise } from "@/lib/services/entrepriseService";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -71,17 +72,19 @@ export default function CompanyDashboardPage() {
   const [entreprise, setEntreprise] = useState<Entreprise | null>(null);
   const [goodiesTotal, setGoodiesTotal] = useState(0);
   const [goodiesDistribues, setGoodiesDistribues] = useState(0);
+  const [objectifs, setObjectifs] = useState<ObjectifSite[]>([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [campRes, tastRes, ventesRes, statsRes, siteRes, ent] = await Promise.all([
+      const [campRes, tastRes, ventesRes, statsRes, siteRes, ent, objData] = await Promise.all([
         api.get<CampagneList[]>("/campagnes/"),
         api.get<Degustation[]>("/degustations/"),
         api.get<Vente[]>("/ventes/"),
         api.get<VenteStats>("/ventes/stats/").catch(() => ({ data: null })),
         api.get<SiteList[]>("/sites/"),
         getMyEntreprise(),
+        getObjectifs().catch(() => [] as ObjectifSite[]),
       ]);
       const campList = Array.isArray(campRes.data) ? campRes.data : ((campRes.data as { results?: CampagneList[] }).results ?? []);
       setCampaigns(campList);
@@ -90,6 +93,7 @@ export default function CompanyDashboardPage() {
       setVenteStats(statsRes.data as VenteStats | null);
       setSites(Array.isArray(siteRes.data) ? siteRes.data : ((siteRes.data as { results?: SiteList[] }).results ?? []));
       setEntreprise(ent);
+      setObjectifs(objData);
 
       // Fetch goodies stats for campaigns with goodies
       const goodiesCamps = campList.filter(c => c.type_recompense === "GOODIES");
@@ -105,7 +109,7 @@ export default function CompanyDashboardPage() {
           if (!r?.data) return;
           totalDistribue += r.data.totaux?.goodies_distribues ?? 0;
           r.data.sites?.forEach(site => {
-            (site.goodies ?? []).forEach(g => { totalAlloue += g.quantite_initiale; });
+            (site.goodies ?? []).forEach(g => { totalAlloue += g.quantite_initiale ?? 0; });
           });
         });
         setGoodiesTotal(totalAlloue);
@@ -496,6 +500,86 @@ export default function CompanyDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Objectifs par site/hôtesse ── */}
+      {objectifs.length > 0 && (() => {
+        const siteIds = [...new Set(objectifs.map(o => o.site))];
+        return (
+          <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Target className="w-4 h-4 text-red-500" />
+                Objectifs par site / hôtesse
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {siteIds.map(siteId => {
+                const siteObj = objectifs.find(o => o.site === siteId);
+                if (!siteObj) return null;
+                const siteObjList = objectifs.filter(o => o.site === siteId);
+                const siteTastings = tastings.filter(t => t.site_nom === siteObj.site_nom).length;
+                const siteSales    = ventes.filter(v => v.site_nom === siteObj.site_nom).length;
+                const totalObjDeg  = siteObjList.reduce((s, o) => s + o.objectif_degustations, 0);
+                const totalObjVen  = siteObjList.reduce((s, o) => s + o.objectif_ventes, 0);
+                const pctDeg = totalObjDeg > 0 ? Math.min(100, Math.round((siteTastings / totalObjDeg) * 100)) : 0;
+                const pctVen = totalObjVen > 0 ? Math.min(100, Math.round((siteSales / totalObjVen) * 100)) : 0;
+                return (
+                  <div key={siteId} className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-sm">{siteObj.site_nom}</p>
+                        <p className="text-xs text-muted-foreground">{siteObjList.length} hôtesse{siteObjList.length > 1 ? "s" : ""}</p>
+                      </div>
+                    </div>
+                    {totalObjDeg > 0 && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground flex items-center gap-1"><CalendarDays className="w-3 h-3" /> Dégustations</span>
+                          <span className="font-semibold">{fmt(siteTastings)} <span className="text-muted-foreground font-normal">/ {fmt(totalObjDeg)}</span></span>
+                        </div>
+                        <div className="h-2 rounded-full bg-red-100 overflow-hidden">
+                          <div className="h-full rounded-full bg-gradient-to-r from-red-600 to-orange-400 transition-all duration-700" style={{ width: `${pctDeg}%` }} />
+                        </div>
+                        <p className="text-xs text-right text-red-600 font-medium">{pctDeg}%</p>
+                      </div>
+                    )}
+                    {totalObjVen > 0 && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground flex items-center gap-1"><ShoppingCart className="w-3 h-3" /> Ventes</span>
+                          <span className="font-semibold">{fmt(siteSales)} <span className="text-muted-foreground font-normal">/ {fmt(totalObjVen)}</span></span>
+                        </div>
+                        <div className="h-2 rounded-full bg-amber-100 overflow-hidden">
+                          <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-700" style={{ width: `${pctVen}%` }} />
+                        </div>
+                        <p className="text-xs text-right text-amber-600 font-medium">{pctVen}%</p>
+                      </div>
+                    )}
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="text-xs font-semibold text-muted-foreground mb-2">Détail par hôtesse</p>
+                      <div className="space-y-1">
+                        {siteObjList.map(o => (
+                          <div key={o.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-2 border border-slate-100">
+                            <span className="font-medium truncate max-w-[45%]">{o.hotesse_nom}</span>
+                            <div className="flex items-center gap-3 text-muted-foreground">
+                              {o.objectif_degustations > 0 && (
+                                <span>🍷 obj. <strong className="text-foreground">{fmt(o.objectif_degustations)}</strong></span>
+                              )}
+                              {o.objectif_ventes > 0 && (
+                                <span>🛒 obj. <strong className="text-foreground">{fmt(o.objectif_ventes)}</strong></span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* ── Sites list ── */}
       {sites.length > 0 && (

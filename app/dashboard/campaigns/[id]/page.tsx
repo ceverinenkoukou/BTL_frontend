@@ -11,6 +11,7 @@ import type {
   CampagneRapportSites, TypePromotion, Goodie,
 } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
+import { genererObjectifsCampagne } from "@/lib/services/objectifService";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -518,6 +519,20 @@ export default function CampaignDetailPage() {
                 {campaign.type_recompense !== "AUCUNE" && (
                   <span className="text-xs font-semibold px-3 py-1 rounded-full bg-white/20 border border-white/30">{campaign.type_recompense_display}</span>
                 )}
+                <button
+                  title="Générer les objectifs par hôtesse"
+                  onClick={async () => {
+                    try {
+                      const res = await genererObjectifsCampagne(id as string);
+                      toast.success(res.detail);
+                    } catch {
+                      toast.error("Erreur lors de la génération des objectifs.");
+                    }
+                  }}
+                  className="text-xs font-semibold px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 border border-white/30 transition-colors"
+                >
+                  Objectifs
+                </button>
                 <Link href={`/dashboard/campaigns/${id}/edit`} className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors">
                   <Edit className="w-3.5 h-3.5" />
                 </Link>

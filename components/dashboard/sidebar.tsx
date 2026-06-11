@@ -31,6 +31,7 @@ import {
   Menu,
   X,
   ChevronDown,
+  Tag,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
@@ -52,12 +53,15 @@ const navItems: NavItem[] = [
   { href: "/dashboard/stats", label: "Statistiques", icon: <BarChart3 className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/wheel", label: "Roue à cadeaux", icon: <Gift className="w-5 h-5" />, roles: ["Hotesse", "Superviseur"] },
   { href: "/dashboard/goodies", label: "Goodies", icon: <Gift className="w-5 h-5" />, roles: ["Administrateur"] },
+  { href: "/dashboard/objectifs", label: "Objectifs", icon: <Target className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
+  { href: "/dashboard/rapports", label: "Rapports journaliers", icon: <FileText className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
 ];
 
 const adminNavItems: NavItem[] = [
   { href: "/dashboard/companies", label: "Entreprises", icon: <Building2 className="w-5 h-5" />, roles: ["Administrateur"] },
   { href: "/dashboard/products", label: "Produits", icon: <Package className="w-5 h-5" />, roles: ["Administrateur"] },
   { href: "/dashboard/team", label: "Équipe terrain", icon: <Users className="w-5 h-5" />, roles: ["Administrateur"] },
+  { href: "/dashboard/prix-sites", label: "Prix par site", icon: <Tag className="w-5 h-5" />, roles: ["Administrateur"] },
   // { href: "/dashboard/zones", label: "Zones", icon: <MapPin className="w-5 h-5" />, roles: ["Administrateur"] },
   // { href: "/dashboard/reports", label: "Rapports", icon: <FileText className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
 ];

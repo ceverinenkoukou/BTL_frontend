@@ -424,6 +424,68 @@ export interface GainPromotion {
 }
 
 // ---------------------------------------------------------------------------
+// ObjectifSite
+// ---------------------------------------------------------------------------
+
+export interface ObjectifSite {
+  id: string;
+  site: string;
+  site_nom: string;
+  hotesse: string;
+  hotesse_nom: string;
+  date: string;
+  objectif_degustations: number;
+  objectif_ventes: number;
+  created_at: string;
+}
+
+export interface CreateObjectifSitePayload {
+  site: string;
+  hotesse: string;
+  date: string;
+  objectif_degustations: number;
+  objectif_ventes: number;
+}
+
+// ---------------------------------------------------------------------------
+// RapportJournalier
+// ---------------------------------------------------------------------------
+
+export interface RapportJournalier {
+  id: string;
+  site: string;
+  site_nom: string;
+  hotesse: string;
+  hotesse_nom: string;
+  date: string;
+  nb_degustations: number;
+  nb_ventes: number;
+  chiffre_affaires: string;
+  email_envoye: boolean;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// SiteProduitPrix
+// ---------------------------------------------------------------------------
+
+export interface SiteProduitPrix {
+  id: string;
+  site: string;
+  site_nom: string;
+  produit: string;
+  produit_nom: string;
+  prix: string;
+  created_at: string;
+}
+
+export interface CreateSiteProduitPrixPayload {
+  site: string;
+  produit: string;
+  prix: number;
+}
+
+// ---------------------------------------------------------------------------
 // Pagination DRF standard
 // ---------------------------------------------------------------------------
 
