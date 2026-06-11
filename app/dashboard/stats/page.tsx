@@ -174,7 +174,7 @@ export default function StatsPage() {
       ["Total dégustations", stats.totalTastings],
       ["Total ventes", stats.totalSales],
       ["Chiffre d'affaires", stats.totalRevenue],
-      ["Taux de conversion", `${stats.conversionRate}%`],
+      // ["Taux de conversion", `${stats.conversionRate}%`],
       ["Note moyenne", stats.avgRating],
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), "Résumé");

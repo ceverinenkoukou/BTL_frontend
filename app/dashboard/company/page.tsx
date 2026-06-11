@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, CampagneRapportSites, Degustation, Vente, VenteStats, SiteList, Entreprise, ObjectifSite } from "@/lib/types/backend";
+import type { CampagneList, CampagneRapportSites, CampagneSiteRapport, Degustation, Vente, VenteStats, SiteList, Entreprise, ObjectifSite } from "@/lib/types/backend";
 import { getObjectifs } from "@/lib/services/objectifService";
 import { getMyEntreprise } from "@/lib/services/entrepriseService";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Target, Trophy, ShoppingCart, TrendingUp, Users,
-  CalendarDays, MapPin, ArrowUp, Beer, Gift,
+  CalendarDays, MapPin, ArrowUp, Beer, Gift, Box, Clock, CheckCircle2, AlertCircle,
+  Download, FileText, RefreshCw, Tag, Activity, Gauge,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -72,7 +73,11 @@ export default function CompanyDashboardPage() {
   const [entreprise, setEntreprise] = useState<Entreprise | null>(null);
   const [goodiesTotal, setGoodiesTotal] = useState(0);
   const [goodiesDistribues, setGoodiesDistribues] = useState(0);
+  const [goodiesCampsCount, setGoodiesCampsCount] = useState(0);
   const [objectifs, setObjectifs] = useState<ObjectifSite[]>([]);
+  const [rapports, setRapports] = useState<CampagneRapportSites[]>([]);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -95,23 +100,28 @@ export default function CompanyDashboardPage() {
       setEntreprise(ent);
       setObjectifs(objData);
 
+      // Fetch all campaign rapports
+      const rapportResults = await Promise.all(
+        campList.map(c =>
+          api.get<CampagneRapportSites>(`/campagnes/${c.id}/rapport-sites/`).catch(() => null)
+        )
+      );
+      const validRapports = rapportResults.filter(Boolean).map(r => r!.data);
+      setRapports(validRapports);
+      setLastRefresh(new Date());
+
       // Fetch goodies stats for campaigns with goodies
       const goodiesCamps = campList.filter(c => c.type_recompense === "GOODIES");
-      if (goodiesCamps.length > 0) {
-        const rapports = await Promise.all(
-          goodiesCamps.map(c =>
-            api.get<CampagneRapportSites>(`/campagnes/${c.id}/rapport-sites/`).catch(() => null)
-          )
-        );
-        let totalAlloue = 0;
-        let totalDistribue = 0;
-        rapports.forEach(r => {
-          if (!r?.data) return;
-          totalDistribue += r.data.totaux?.goodies_distribues ?? 0;
-          r.data.sites?.forEach(site => {
-            (site.goodies ?? []).forEach(g => { totalAlloue += g.quantite_initiale ?? 0; });
-          });
+      setGoodiesCampsCount(goodiesCamps.length);
+      let totalAlloue = 0;
+      let totalDistribue = 0;
+      validRapports.forEach(r => {
+        totalDistribue += r.totaux?.goodies_distribues ?? 0;
+        r.sites?.forEach(site => {
+          (site.goodies ?? []).forEach(g => { totalAlloue += g.quantite_initiale ?? 0; });
         });
+      });
+      if (totalAlloue > 0 || totalDistribue > 0) {
         setGoodiesTotal(totalAlloue);
         setGoodiesDistribues(totalDistribue);
       }
@@ -127,6 +137,8 @@ export default function CompanyDashboardPage() {
       if (!user) { router.push("/auth/login"); return; }
       if (user.role !== "Entreprise") { router.push("/dashboard"); return; }
       fetchAll();
+      refreshTimer.current = setInterval(fetchAll, 30000);
+      return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
     }
   }, [user, authLoading, router, fetchAll]);
 
@@ -161,6 +173,17 @@ export default function CompanyDashboardPage() {
     ? [...ageMap.entries()].map(([name, count]) => ({ name, value: Math.round((count / totalTastings) * 100) }))
     : [];
 
+  // Campaign timing helpers
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const activeCamps = campaigns.filter(c => new Date(c.date_fin) >= today);
+  const campJoursEcoules = campaigns.length > 0
+    ? Math.max(0, Math.floor((today.getTime() - new Date(campaigns[0].date_debut).getTime()) / 86400000))
+    : 0;
+  const campJoursRestants = activeCamps.length > 0
+    ? Math.max(0, Math.floor((new Date(activeCamps[0].date_fin).getTime() - today.getTime()) / 86400000))
+    : 0;
+
   // Per-day chart (last 14 days)
   const dailyData = Array.from({ length: 14 }, (_, i) => {
     const d = new Date(); d.setDate(d.getDate() - (13 - i));
@@ -174,7 +197,7 @@ export default function CompanyDashboardPage() {
 
   const kpis = [
     {
-      label: "Dégustations totales",
+      label: "Distributions totales",
       value: fmt(totalTastings),
       icon: <Beer className="w-6 h-6" />,
       trend: `${totalTastings} enreg.`,
@@ -182,21 +205,42 @@ export default function CompanyDashboardPage() {
       shadow: "shadow-red-300/50",
     },
     {
-      label: "Ventes réalisées",
-      value: fmt(totalSales),
-      icon: <ShoppingCart className="w-6 h-6" />,
-      trend: `${conversionRate}% conv.`,
-      gradient: "from-amber-500 via-orange-500 to-yellow-400",
-      shadow: "shadow-amber-300/50",
+      label: "Produits totals",
+      value: fmt(byProduct.reduce((s, p) => s + p.sales, 0)),
+      icon: <Box className="w-6 h-6" />,
+      trend: `${byProduct.reduce((s, p) => s + p.sales, 0)} enreg.`,
+      gradient: "from-sky-600 via-sky-500 to-cyan-400",
+      shadow: "shadow-sky-300/50",  
+      
     },
+    // {
+    // //   label: "Ventes réalisées",
+    // //   value: fmt(totalSales),
+    // //   icon: <ShoppingCart className="w-6 h-6" />,
+    // //   trend: `${conversionRate}% conv.`,
+    // //   gradient: "from-amber-500 via-orange-500 to-yellow-400",
+    // //   shadow: "shadow-amber-300/50",
+    // // },
     {
-      label: "Chiffre d'affaires",
-      value: fmtXOF(totalRevenue),
-      icon: <TrendingUp className="w-6 h-6" />,
-      trend: `${ventes.length} trans.`,
-      gradient: "from-emerald-600 via-green-500 to-teal-400",
-      shadow: "shadow-emerald-300/50",
+      label: "Campagnes goodies",
+      value: fmt(goodiesCampsCount),
+      icon: <Gift className="w-6 h-6" />,
+      trend: `${goodiesCampsCount} camp.`,
+      gradient: "from-pink-600 via-pink-500 to-rose-400",
+      shadow: "shadow-pink-300/50",
     },
+
+
+    
+
+    // {
+    //   label: "Chiffre d'affaires",
+    //   value: fmtXOF(totalRevenue),
+    //   icon: <TrendingUp className="w-6 h-6" />,
+    //   trend: `${ventes.length} trans.`,
+    //   gradient: "from-emerald-600 via-green-500 to-teal-400",
+    //   shadow: "shadow-emerald-300/50",
+    // },
     {
       label: "Sites actifs",
       value: fmt(sites.length),
@@ -265,25 +309,109 @@ export default function CompanyDashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-3 text-center">
+              <Clock className="w-4 h-4 text-white/70 mx-auto mb-1" />
+              <p className="font-bold text-lg">{campJoursEcoules}</p>
+              <p className="text-white/70 text-xs">Jours écoulés</p>
+            </div>
+            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-3 text-center">
+              <CalendarDays className="w-4 h-4 text-white/70 mx-auto mb-1" />
+              <p className="font-bold text-lg">{campJoursRestants}</p>
+              <p className="text-white/70 text-xs">Jours restants</p>
+            </div>
+            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-3 text-center">
+              <MapPin className="w-4 h-4 text-white/70 mx-auto mb-1" />
+              <p className="font-bold text-lg">{sites.length}</p>
+              <p className="text-white/70 text-xs">Sites actifs</p>
+            </div>
             <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-3 text-center">
               <Target className="w-4 h-4 text-white/70 mx-auto mb-1" />
               <p className="font-bold text-lg">{campaigns.length}</p>
               <p className="text-white/70 text-xs">Campagnes</p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-3 text-center">
-              <MapPin className="w-4 h-4 text-white/70 mx-auto mb-1" />
-              <p className="font-bold text-lg">{sites.length}</p>
-              <p className="text-white/70 text-xs">Sites</p>
-            </div>
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl px-3 py-3 text-center">
-              <TrendingUp className="w-4 h-4 text-white/70 mx-auto mb-1" />
-              <p className="font-bold text-lg">{conversionRate}%</p>
-              <p className="text-white/70 text-xs">Conversion</p>
-            </div>
           </div>
         </div>
       </div>
+
+      {/* ── Mes campagnes ── */}
+      {campaigns.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">Mes campagnes</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {campaigns.map(camp => {
+              const debut = new Date(camp.date_debut);
+              const fin   = new Date(camp.date_fin);
+              const isActive = fin >= today;
+              const duree = Math.max(1, Math.floor((fin.getTime() - debut.getTime()) / 86400000));
+              const ecoules = Math.max(0, Math.min(duree, Math.floor((today.getTime() - debut.getTime()) / 86400000)));
+              const pct = Math.round((ecoules / duree) * 100);
+              const fmtDate = (d: Date) => d.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+              const objDeg = camp.objectif_degustations;
+              const objVen = camp.objectif_ventes;
+              const realDeg = tastings.filter(t => t.campagne_nom === camp.nom).length;
+              const realVen = ventes.filter(v => v.campagne_nom === camp.nom).length;
+              return (
+                <div key={camp.id} className="rounded-2xl border border-slate-100 bg-white shadow-sm p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-base text-foreground leading-tight">{camp.nom}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {fmtDate(debut)} → {fmtDate(fin)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {isActive
+                        ? <><CheckCircle2 className="w-4 h-4 text-emerald-500" /><span className="text-xs font-semibold text-emerald-600">Active</span></>
+                        : <><AlertCircle className="w-4 h-4 text-slate-400" /><span className="text-xs font-semibold text-slate-400">Terminée</span></>}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                    <Badge variant="outline" className="text-xs">{camp.type_campagne_display}</Badge>
+                    <Badge variant="outline" className="text-xs">{camp.type_recompense_display}</Badge>
+                    <Badge variant="outline" className="text-xs"><MapPin className="w-3 h-3 mr-1" />{camp.nb_sites} site{camp.nb_sites > 1 ? "s" : ""}</Badge>
+                    <Badge variant="outline" className="text-xs"><Users className="w-3 h-3 mr-1" />{camp.nb_hotesses} hôtesse{camp.nb_hotesses > 1 ? "s" : ""}</Badge>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Progression</span>
+                      <span className="font-semibold text-foreground">{ecoules}j / {duree}j ({pct}%)</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-700" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+
+                  {(objDeg || objVen) && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {objDeg != null && objDeg > 0 && (
+                        <div className="rounded-xl bg-red-50 p-3 space-y-1">
+                          <p className="text-xs text-muted-foreground flex items-center gap-1"><Beer className="w-3 h-3" />Dégustations</p>
+                          <p className="font-bold text-sm text-red-700">{fmt(realDeg)} <span className="font-normal text-muted-foreground text-xs">/ {fmt(objDeg)}</span></p>
+                          <div className="h-1.5 rounded-full bg-red-100 overflow-hidden">
+                            <div className="h-full rounded-full bg-gradient-to-r from-red-600 to-orange-400" style={{ width: `${Math.min(100, Math.round((realDeg / objDeg) * 100))}%` }} />
+                          </div>
+                        </div>
+                      )}
+                      {objVen != null && objVen > 0 && (
+                        <div className="rounded-xl bg-amber-50 p-3 space-y-1">
+                          <p className="text-xs text-muted-foreground flex items-center gap-1"><ShoppingCart className="w-3 h-3" />Ventes</p>
+                          <p className="font-bold text-sm text-amber-700">{fmt(realVen)} <span className="font-normal text-muted-foreground text-xs">/ {fmt(objVen)}</span></p>
+                          <div className="h-1.5 rounded-full bg-amber-100 overflow-hidden">
+                            <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400" style={{ width: `${Math.min(100, Math.round((realVen / objVen) * 100))}%` }} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── KPI cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -309,95 +437,121 @@ export default function CompanyDashboardPage() {
         ))}
       </div>
 
-      {/* ── Daily chart ── */}
-      {totalTastings > 0 && (
-        <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
+      {/* ── Progression journalière des distributions ── */}
+      <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center justify-between">
+            <span className="flex items-center gap-2 text-white">
+              <TrendingUp className="w-4 h-4 text-cyan-400" />
+              Progression journalière des distributions
+            </span>
+            <span className="text-xs font-normal text-slate-400 flex items-center gap-1">
+              <RefreshCw className="w-3 h-3" />
+              {lastRefresh.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {totalTastings === 0 && (
+            <div className="flex flex-col items-center justify-center h-60 gap-3">
+              <TrendingUp className="w-10 h-10 text-slate-600" />
+              <p className="text-slate-400 text-sm">Aucune distribution enregistrée pour le moment</p>
+              <p className="text-slate-500 text-xs">Les données apparaîtront dès la première activité</p>
+            </div>
+          )}
+          {totalTastings > 0 && (
+            <>
+              <div className="h-60">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dailyData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
+                    <defs>
+                      <linearGradient id="gTastingsCo" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.6} />
+                        <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="gSalesCo" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={AMBER} stopOpacity={0.5} />
+                        <stop offset="100%" stopColor={AMBER} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(255,255,255,0.1)", strokeWidth: 2 }} />
+                    <Area type="monotone" dataKey="tastings" stroke="#06b6d4" strokeWidth={2.5}
+                      fill="url(#gTastingsCo)" name="Distributions" dot={false}
+                      activeDot={{ r: 5, fill: "#06b6d4", stroke: "#fff", strokeWidth: 2 }} />
+                    <Area type="monotone" dataKey="sales" stroke={AMBER} strokeWidth={2.5}
+                      fill="url(#gSalesCo)" name="Ventes" dot={false}
+                      activeDot={{ r: 5, fill: AMBER, stroke: "#fff", strokeWidth: 2 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex items-center gap-6 mt-2 justify-center">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
+                  <span className="text-xs text-slate-400 font-medium">Distributions</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: AMBER }} />
+                  <span className="text-xs text-slate-400 font-medium">Ventes</span>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Performance par site + Profil consommateurs ── */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 border-0 shadow-lg shadow-slate-100 rounded-2xl">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-red-500" />
-              Progression des 14 derniers jours
+              <MapPin className="w-4 h-4 text-red-500" />
+              Performance par site
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={dailyData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
-                  <defs>
-                    <linearGradient id="gTastingsCo" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={RED} stopOpacity={0.5} />
-                      <stop offset="100%" stopColor={RED} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gSalesCo" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={AMBER} stopOpacity={0.5} />
-                      <stop offset="100%" stopColor={AMBER} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(0,0,0,0.06)", strokeWidth: 2 }} />
-                  <Area type="monotone" dataKey="tastings" stroke={RED} strokeWidth={3}
-                    fill="url(#gTastingsCo)" name="Dégustations" dot={false}
-                    activeDot={{ r: 6, fill: RED, stroke: "#fff", strokeWidth: 2 }} />
-                  <Area type="monotone" dataKey="sales" stroke={AMBER} strokeWidth={3}
-                    fill="url(#gSalesCo)" name="Ventes" dot={false}
-                    activeDot={{ r: 6, fill: AMBER, stroke: "#fff", strokeWidth: 2 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex items-center gap-6 mt-2 justify-center">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: RED }} />
-                <span className="text-xs text-muted-foreground font-medium">Dégustations</span>
+            {bySite.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-56 gap-3">
+                <MapPin className="w-10 h-10 text-slate-200" />
+                <p className="text-muted-foreground text-sm">Aucune activité par site pour le moment</p>
+                <p className="text-muted-foreground text-xs">Les données apparaîtront dès la première activité</p>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: AMBER }} />
-                <span className="text-xs text-muted-foreground font-medium">Ventes</span>
+            ) : (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={bySite} margin={{ top: 5, right: 10, bottom: 30, left: -20 }} barSize={18}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                    <XAxis dataKey="zone" tick={{ fill: "#94a3b8", fontSize: 9 }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
+                    <Bar dataKey="tastings" name="Distributions" fill={RED}  radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="sales"    name="Ventes"       fill={AMBER} radius={[4, 4, 0, 0]} />
+                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
-      )}
 
-      {/* ── Site breakdown + Age pie ── */}
-      {(bySite.length > 0 || byAge.length > 0) && (
-        <div className="grid lg:grid-cols-3 gap-6">
-          {bySite.length > 0 && (
-            <Card className="lg:col-span-2 border-0 shadow-lg shadow-slate-100 rounded-2xl">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-red-500" />
-                  Performance par site
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={bySite} margin={{ top: 5, right: 10, bottom: 30, left: -20 }} barSize={18}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                      <XAxis dataKey="zone" tick={{ fill: "#94a3b8", fontSize: 9 }} axisLine={false} tickLine={false}
-                        angle={-20} textAnchor="end" interval={0} />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-                      <Bar dataKey="tastings" name="Dégustations" fill={RED}  radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="sales"    name="Ventes"       fill={AMBER} radius={[4, 4, 0, 0]} />
-                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {byAge.length > 0 && (
-            <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <Users className="w-4 h-4 text-red-500" />
-                  Tranches d&apos;âge
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+        <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Users className="w-4 h-4 text-red-500" />
+              Profil consommateurs
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {byAge.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-52 gap-3">
+                <Users className="w-10 h-10 text-slate-200" />
+                <p className="text-muted-foreground text-sm text-center">Aucun profil consommateur</p>
+                <p className="text-muted-foreground text-xs text-center">Les tranches d&apos;âge apparaîtront après les premières dégustations</p>
+              </div>
+            ) : (
+              <>
                 <div className="h-44">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -420,23 +574,28 @@ export default function CompanyDashboardPage() {
                     </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* ── Product performance + Conversion KPI ── */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {byProduct.length > 0 && (
-          <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Beer className="w-4 h-4 text-red-500" />
-                Performance produits
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+      {/* ── Performance produits ── */}
+      <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <Beer className="w-4 h-4 text-red-500" />
+            Performance produits
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {byProduct.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-32 gap-3">
+              <Beer className="w-8 h-8 text-slate-200" />
+              <p className="text-muted-foreground text-sm">Aucune vente enregistrée pour le moment</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
               {byProduct.map((p, i) => (
                 <div key={i}>
                   <div className="flex justify-between items-center mb-1">
@@ -444,13 +603,8 @@ export default function CompanyDashboardPage() {
                     <span className="text-sm font-bold text-red-600">{fmt(p.sales)} vente{p.sales > 1 ? "s" : ""}</span>
                   </div>
                   <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-700"
-                      style={{
-                        width: `${Math.round((p.sales / (byProduct[0].sales || 1)) * 100)}%`,
-                        background: i === 0 ? RED : AMBER,
-                      }}
-                    />
+                    <div className="h-full rounded-full transition-all duration-700"
+                      style={{ width: `${Math.round((p.sales / (byProduct[0].sales || 1)) * 100)}%`, background: i === 0 ? RED : AMBER }} />
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">{fmtXOF(p.revenue)}</p>
                 </div>
@@ -459,47 +613,11 @@ export default function CompanyDashboardPage() {
                 <span className="text-sm text-muted-foreground font-medium">Total CA</span>
                 <span className="text-base font-bold text-foreground">{fmtXOF(totalRevenue)}</span>
               </div>
-            </CardContent>
-          </Card>
-        )}
-
-        <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl overflow-hidden bg-gradient-to-br from-red-50 via-rose-50 to-orange-50">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-sm text-muted-foreground font-medium">Taux de conversion</p>
-                <div className="text-5xl font-bold mt-1 text-red-600">{conversionRate}%</div>
-                <p className="text-sm text-muted-foreground mt-1">dégustations → achats</p>
-              </div>
-              <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-orange-400 rounded-2xl flex items-center justify-center shadow-lg shadow-red-300">
-                <TrendingUp className="w-8 h-8 text-white" />
-              </div>
             </div>
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Objectif 50%</span>
-                <span className="font-semibold text-red-600 flex items-center gap-1">
-                  <ArrowUp className="w-3 h-3" />{conversionRate}%
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-red-100 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-red-600 to-orange-400 rounded-full transition-all duration-700"
-                  style={{ width: `${Math.min(conversionRate * 2, 100)}%` }}
-                />
-              </div>
-            </div>
+          )}
+        </CardContent>
+      </Card>
 
-            {totalTastings === 0 && (
-              <div className="mt-6 text-center py-6">
-                <Trophy className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Aucune donnée pour le moment.</p>
-                <p className="text-xs text-muted-foreground mt-1">Les statistiques apparaîtront dès les premières dégustations.</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       {/* ── Objectifs par site/hôtesse ── */}
       {objectifs.length > 0 && (() => {
@@ -581,38 +699,194 @@ export default function CompanyDashboardPage() {
         );
       })()}
 
-      {/* ── Sites list ── */}
-      {sites.length > 0 && (
+      {/* ── Mécaniques Promotionnelles par site ── */}
+      {rapports.some(r => r.sites?.some(s => (s.promotions_stats?.length ?? 0) > 0)) && (
         <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-red-500" />
-              Sites de vos campagnes
+              <Tag className="w-4 h-4 text-violet-500" />
+              Mécaniques Promotionnelles par site
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {rapports.map(rapport =>
+              rapport.sites
+                ?.filter(s => (s.promotions_stats?.length ?? 0) > 0)
+                .map(site => (
+                  <div key={site.id} className="rounded-xl border border-violet-100 bg-violet-50/40 p-4 space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <MapPin className="w-3.5 h-3.5 text-violet-500" />
+                      <p className="font-semibold text-sm">{site.nom}</p>
+                      <Badge className="bg-violet-100 text-violet-700 border-0 text-xs ml-auto">{rapport.campagne_nom}</Badge>
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {site.promotions_stats!.map((ps, i) => (
+                        <div key={i} className="bg-white rounded-lg p-3 border border-violet-100 space-y-1">
+                          <p className="text-xs font-semibold text-violet-700 truncate">{ps.recompense_description}</p>
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>Seuil : <strong className="text-foreground">{ps.quantite_requise}</strong></span>
+                            <span>Gains : <strong className="text-violet-600">{ps.gains_count}</strong></span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Dernières actions sur les sites ── */}
+      {(tastings.length > 0 || ventes.length > 0) && (() => {
+        const actions = [
+          ...tastings.slice(-20).map(t => ({
+            id: t.id, type: "dist" as const,
+            label: `Distribution — ${t.produit_nom}`,
+            sub: `${t.site_nom} · ${t.hotesse_nom}`,
+            date: t.created_at,
+          })),
+          ...ventes.slice(-20).map(v => ({
+            id: v.id, type: "vente" as const,
+            label: `Vente — ${v.produit_nom}`,
+            sub: `${v.site_nom} · ${v.hotesse_nom}`,
+            date: v.created_at,
+          })),
+        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 15);
+        return (
+          <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-500" />
+                Dernières actions sur les sites
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1">
+                {actions.map((a, i) => (
+                  <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                      a.type === "dist" ? "bg-cyan-100" : "bg-amber-100"
+                    }`}>
+                      {a.type === "dist"
+                        ? <Beer className="w-3.5 h-3.5 text-cyan-600" />
+                        : <ShoppingCart className="w-3.5 h-3.5 text-amber-600" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{a.label}</p>
+                      <p className="text-xs text-muted-foreground truncate">{a.sub}</p>
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                      {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* ── Jauge Goodies distribués ── */}
+      {goodiesTotal > 0 && (
+        <Card className="relative border-0 shadow-lg shadow-slate-100 rounded-2xl overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-emerald-50 to-green-50 pointer-events-none" />
+          <CardHeader className="pb-2 relative">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Gauge className="w-4 h-4 text-teal-600" />
+              Goodies distribués
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="relative space-y-4">
+            <div className="flex items-end justify-between">
+              <div>
+                <span className="text-4xl font-black text-teal-700">{fmt(goodiesDistribues)}</span>
+                <span className="text-lg text-muted-foreground font-medium ml-2">/ {fmt(goodiesTotal)}</span>
+              </div>
+              <span className="text-2xl font-bold text-teal-600">
+                {Math.round((goodiesDistribues / goodiesTotal) * 100)}%
+              </span>
+            </div>
+            <div className="relative h-5 rounded-full bg-teal-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-teal-500 via-emerald-400 to-green-400 transition-all duration-1000"
+                style={{ width: `${Math.min(100, Math.round((goodiesDistribues / goodiesTotal) * 100))}%` }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white mix-blend-luminosity">
+                {fmt(goodiesDistribues)} distribués sur {fmt(goodiesTotal)}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-xl bg-white/70 p-3 text-center border border-teal-100">
+                <p className="text-xs text-muted-foreground">Total alloués</p>
+                <p className="font-bold text-teal-700">{fmt(goodiesTotal)}</p>
+              </div>
+              <div className="rounded-xl bg-white/70 p-3 text-center border border-teal-100">
+                <p className="text-xs text-muted-foreground">Distribués</p>
+                <p className="font-bold text-emerald-700">{fmt(goodiesDistribues)}</p>
+              </div>
+              <div className="rounded-xl bg-white/70 p-3 text-center border border-teal-100">
+                <p className="text-xs text-muted-foreground">Restants</p>
+                <p className="font-bold text-slate-600">{fmt(goodiesTotal - goodiesDistribues)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Télécharger les rapports ── */}
+      {campaigns.length > 0 && (
+        <Card className="border-0 shadow-lg shadow-slate-100 rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Download className="w-4 h-4 text-blue-500" />
+                Télécharger les rapports
+              </span>
+              <span className="text-xs font-normal text-muted-foreground flex items-center gap-1">
+                <RefreshCw className="w-3 h-3" />
+                Mis à jour {lastRefresh.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {sites.map(site => {
-                const siteTastings = tastings.filter(t => t.site_nom === site.nom).length;
-                const siteSales = ventes.filter(v => v.site_nom === site.nom).length;
+            <div className="grid sm:grid-cols-2 gap-3">
+              {campaigns.map(camp => {
+                const fin = new Date(camp.date_fin);
+                const isFinished = fin < today;
                 return (
-                  <div key={site.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-sm text-foreground leading-tight">{site.nom}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{site.campagne_nom}</p>
-                      </div>
-                      <Badge className="bg-green-100 text-green-700 border-0 text-xs shrink-0">Actif</Badge>
+                  <div key={camp.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 space-y-3">
+                    <div>
+                      <p className="font-semibold text-sm truncate">{camp.nom}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(camp.date_debut).toLocaleDateString("fr-FR")} → {fin.toLocaleDateString("fr-FR")}
+                      </p>
                     </div>
-                    <div className="flex gap-3">
-                      <div className="flex-1 bg-white rounded-lg p-2 text-center border border-slate-100">
-                        <p className="text-xs text-muted-foreground">Dégust.</p>
-                        <p className="font-bold text-red-600 text-sm">{fmt(siteTastings)}</p>
-                      </div>
-                      <div className="flex-1 bg-white rounded-lg p-2 text-center border border-slate-100">
-                        <p className="text-xs text-muted-foreground">Ventes</p>
-                        <p className="font-bold text-amber-600 text-sm">{fmt(siteSales)}</p>
-                      </div>
+                    <div className="flex gap-2">
+                      <a
+                        href={`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/campagnes/${camp.id}/rapport-sites/`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-3 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Rapport intermédiaire
+                      </a>
+                      {isFinished && (
+                        <a
+                          href={`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/campagnes/${camp.id}/rapport-sites/?format=pdf`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 px-3 transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Rapport final PDF
+                        </a>
+                      )}
+                      {!isFinished && (
+                        <span className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-slate-100 text-slate-400 text-xs font-medium py-2 px-3 cursor-not-allowed">
+                          <FileText className="w-3.5 h-3.5" />
+                          PDF fin de camp.
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

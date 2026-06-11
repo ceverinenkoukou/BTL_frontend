@@ -222,7 +222,7 @@ export default function DashboardPage() {
     { title: "Campagnes actives",    value: stats?.activeCampaigns ?? 0, icon: <Target className="w-6 h-6" />,        trend: "+2",    trendUp: true },
     { title: "Dégustations",         value: stats?.totalTastings ?? 0,   icon: <UtensilsCrossed className="w-6 h-6" />,trend: "+12%",  trendUp: true },
     { title: "Ventes",               value: stats?.totalSales ?? 0,      icon: <ShoppingCart className="w-6 h-6" />,   trend: "+8%",   trendUp: true },
-    { title: "Taux de conversion",   value: `${stats?.conversionRate ?? 0}%`, icon: <TrendingUp className="w-6 h-6" />,trend: "+2.5%", trendUp: true },
+    // { title: "Taux de conversion",   value: `${stats?.conversionRate ?? 0}%`, icon: <TrendingUp className="w-6 h-6" />,trend: "+2.5%", trendUp: true },
   ];
 
   const tooltipStyle = {
@@ -326,7 +326,7 @@ export default function DashboardPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <UtensilsCrossed className="w-3 h-3" /> Dégustations
+                        <UtensilsCrossed className="w-3 h-3" /> Distributions
                       </span>
                       <span className="text-xs font-bold">
                         <span className={c.tastingPct < 30 ? "text-rose-600" : c.tastingPct < 70 ? "text-amber-600" : "text-lime-600"}>{c.tastings}</span>

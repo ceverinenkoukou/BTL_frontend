@@ -37,6 +37,8 @@ import {
   Users,
   ArrowUp,
   Package,
+  Activity,
+  Beer,
 } from "lucide-react";
 import {
   AreaChart,
@@ -446,7 +448,7 @@ export default function CompanyCampaignDetailPage() {
             </div>
           </div>
         )}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 via-purple-500 to-fuchsia-400 p-5 text-white shadow-xl shadow-violet-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+        {/* <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 via-purple-500 to-fuchsia-400 p-5 text-white shadow-xl shadow-violet-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
           <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-3">
@@ -460,7 +462,7 @@ export default function CompanyCampaignDetailPage() {
             <div className="text-2xl font-bold">{stats.conversionRate}%</div>
             <p className="text-white/80 text-xs mt-1">Taux de conversion</p>
           </div>
-        </div>
+        </div> */}
       </div>
 
       {/* ── Jauges des objectifs ── */}
@@ -567,29 +569,222 @@ export default function CompanyCampaignDetailPage() {
         </div></CardContent>
       </Card>
 
-      {/* ── Performance par site (chart) ── */}
-      {rapport && rapport.sites.length > 0 && (
-        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-red-500" /> Performance par site
-            </CardTitle>
-          </CardHeader>
-          <CardContent><div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={rapport.sites} margin={{ top: 5, right: 10, bottom: 30, left: -20 }} barSize={24}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" interval={0} />
-                <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-                {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={COLORS.primary} radius={[4, 4, 0, 0]} />}
-                {showVente && <Bar dataKey="ventes" name="Ventes" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />}
-                <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div></CardContent>
-        </Card>
-      )}
+      {/* ── Performance par site — tableau ── */}
+      {rapport && rapport.sites.length > 0 && (() => {
+        const maxDeg = Math.max(1, ...rapport.sites.map(s => s.degustations));
+        const maxVen = Math.max(1, ...rapport.sites.map(s => s.ventes));
+        return (
+          <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+            <CardHeader className="pb-3 bg-gradient-to-r from-slate-50 to-white">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-red-500" /> Performance par site
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/60">
+                      <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">Site</th>
+                      {showTasting && <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Dégust.</th>}
+                      {showVente && <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Ventes</th>}
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Conv.</th>
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">CA</th>
+                      {showGoodies && <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Goodies</th>}
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Hôtesses</th>
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Aujour. dégust.</th>
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Aujour. ventes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rapport.sites.map((site, idx) => {
+                      const perf = siteDailyPerf.find(p => p.nom === site.nom);
+                      const degPct = Math.round((site.degustations / maxDeg) * 100);
+                      const venPct = Math.round((site.ventes / maxVen) * 100);
+                      const ca = Number(site.chiffre_affaires ?? 0);
+                      return (
+                        <tr key={site.id} className={`border-b border-slate-50 hover:bg-slate-50/60 transition-colors ${idx % 2 === 0 ? "" : "bg-slate-50/30"}`}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: `linear-gradient(135deg, ${p1}, ${p2})` }}>
+                                <MapPin className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="font-semibold text-foreground leading-tight">{site.nom}</p>
+                                <p className="text-[10px] text-muted-foreground">{site.ville}</p>
+                              </div>
+                            </div>
+                          </td>
+                          {showTasting && (
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="font-bold text-red-600">{fmt(site.degustations)}</span>
+                                <div className="w-16 h-1.5 bg-red-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-red-500 rounded-full" style={{ width: `${degPct}%` }} />
+                                </div>
+                              </div>
+                            </td>
+                          )}
+                          {showVente && (
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="font-bold text-amber-600">{fmt(site.ventes)}</span>
+                                <div className="w-16 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-amber-500 rounded-full" style={{ width: `${venPct}%` }} />
+                                </div>
+                              </div>
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-right">
+                            <Badge className={`text-[10px] border-0 ${
+                              site.taux_conversion >= 50 ? "bg-emerald-100 text-emerald-700" :
+                              site.taux_conversion >= 25 ? "bg-amber-100 text-amber-700" :
+                              "bg-red-100 text-red-700"
+                            }`}>
+                              {site.taux_conversion}%
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-semibold text-foreground text-xs">
+                              {ca > 0 ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(ca) : "—"}
+                            </span>
+                          </td>
+                          {showGoodies && (
+                            <td className="px-4 py-3 text-right">
+                              <span className="text-xs font-semibold text-emerald-700">
+                                {fmt(site.goodies_distribues_total ?? 0)}
+                              </span>
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-xs text-muted-foreground">{site.nb_hotesses}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={`text-xs font-bold ${
+                              (perf?.degustations_today ?? 0) > 0 ? "text-red-600" : "text-slate-400"
+                            }`}>{fmt(perf?.degustations_today ?? 0)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={`text-xs font-bold ${
+                              (perf?.ventes_today ?? 0) > 0 ? "text-amber-600" : "text-slate-400"
+                            }`}>{fmt(perf?.ventes_today ?? 0)}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-200 bg-slate-50">
+                      <td className="px-4 py-3 font-bold text-sm text-foreground">Total</td>
+                      {showTasting && <td className="px-4 py-3 text-right font-bold text-red-600">{fmt(rapport.sites.reduce((s, x) => s + x.degustations, 0))}</td>}
+                      {showVente && <td className="px-4 py-3 text-right font-bold text-amber-600">{fmt(rapport.sites.reduce((s, x) => s + x.ventes, 0))}</td>}
+                      <td className="px-4 py-3 text-right">
+                        <Badge className="bg-slate-200 text-slate-700 border-0 text-[10px]">
+                          {rapport.sites.length > 0 ? Math.round(rapport.sites.reduce((s, x) => s + x.taux_conversion, 0) / rapport.sites.length) : 0}% moy.
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold text-xs">
+                        {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(
+                          rapport.sites.reduce((s, x) => s + Number(x.chiffre_affaires ?? 0), 0)
+                        )}
+                      </td>
+                      {showGoodies && <td className="px-4 py-3 text-right font-bold text-emerald-700">{fmt(rapport.totaux?.goodies_distribues ?? 0)}</td>}
+                      <td className="px-4 py-3 text-right text-xs text-muted-foreground">{rapport.sites.reduce((s, x) => s + x.nb_hotesses, 0)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-red-600">{fmt(siteDailyPerf.reduce((s, p) => s + p.degustations_today, 0))}</td>
+                      <td className="px-4 py-3 text-right font-bold text-amber-600">{fmt(siteDailyPerf.reduce((s, p) => s + p.ventes_today, 0))}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* ── Dernières actions sur les sites ── */}
+      {(tastings.length > 0 || ventes.length > 0) && (() => {
+        const actions = [
+          ...tastings.slice(-30).map(t => ({
+            id: t.id, type: "deg" as const,
+            label: t.produit_nom,
+            site: t.site_nom,
+            agent: t.hotesse_nom,
+            meta: t.a_achete ? "acheté" : `note ${t.note_gout}/5`,
+            date: t.created_at,
+          })),
+          ...ventes.slice(-30).map(v => ({
+            id: v.id, type: "vente" as const,
+            label: v.produit_nom,
+            site: v.site_nom,
+            agent: v.hotesse_nom,
+            meta: v.prix_total ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(Number(v.prix_total)) : "",
+            date: v.created_at,
+          })),
+        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 20);
+
+        const siteNames = [...new Set(actions.map(a => a.site))];
+
+        return (
+          <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+            <CardHeader className="pb-3 bg-gradient-to-r from-slate-50 to-white">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-500" /> Dernières actions sur les sites
+                <Badge className="ml-auto bg-slate-100 text-slate-600 border-0 text-xs font-normal">{actions.length} action{actions.length > 1 ? "s" : ""}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 space-y-4">
+              {siteNames.map(siteName => {
+                const siteActions = actions.filter(a => a.site === siteName);
+                return (
+                  <div key={siteName}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: `linear-gradient(135deg, ${p1}, ${p2})` }}>
+                        <MapPin className="w-3 h-3" />
+                      </div>
+                      <p className="text-xs font-semibold text-foreground">{siteName}</p>
+                      <span className="text-[10px] text-muted-foreground ml-auto">{siteActions.length} action{siteActions.length > 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="rounded-xl border border-slate-100 overflow-hidden">
+                      {siteActions.map((a, i) => (
+                        <div key={i} className={`flex items-center gap-3 px-3 py-2.5 ${
+                          i < siteActions.length - 1 ? "border-b border-slate-50" : ""
+                        } ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                            a.type === "deg" ? "bg-red-100" : "bg-amber-100"
+                          }`}>
+                            {a.type === "deg"
+                              ? <Beer className="w-3.5 h-3.5 text-red-500" />
+                              : <ShoppingCart className="w-3.5 h-3.5 text-amber-500" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs font-semibold text-foreground truncate">{a.label}</p>
+                              <Badge className={`text-[9px] border-0 shrink-0 ${
+                                a.type === "deg" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"
+                              }`}>
+                                {a.type === "deg" ? "Dégust." : "Vente"}
+                              </Badge>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate">{a.agent} · {a.meta}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-[10px] text-muted-foreground">
+                              {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {new Date(a.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* ── Écoulements des offres promotionnelles par jour ── */}
       {showPromotions && promoChartData.length > 0 && (

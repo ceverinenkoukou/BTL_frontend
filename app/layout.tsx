@@ -48,7 +48,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="fr" className={`${montserrat.variable} ${openSans.variable} bg-background`}>
-      <body className="font-sans antialiased bg-fixed bg-cover bg-center bg-no-repeat" style={{ backgroundImage: "url('/mediapuzzle.jpg')" }}>
+      {/* bg-puzzle applique le fond via globals.css avec pseudo-élément ::before */}
+      <body className="font-sans antialiased bg-puzzle">
         {children}
         <Toaster richColors position="top-center" />
         {process.env.NODE_ENV === 'production' && <Analytics />}
