@@ -32,7 +32,9 @@ import {
   X,
   ChevronDown,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import api from "@/lib/api";
+import type { CampagneList } from "@/lib/types/backend";
 
 interface NavItem {
   href: string;
@@ -44,10 +46,10 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Tableau de bord", icon: <LayoutDashboard className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/company", label: "Mon tableau de bord", icon: <LayoutDashboard className="w-5 h-5" />, roles: ["Entreprise"] },
-  { href: "/dashboard/campaigns", label: "Campagnes", icon: <Target className="w-5 h-5" /> },
-  { href: "/dashboard/tastings", label: "Dégustations", icon: <UtensilsCrossed className="w-5 h-5" /> },
-  { href: "/dashboard/sales", label: "Ventes", icon: <ShoppingCart className="w-5 h-5" /> },
-  { href: "/dashboard/stats", label: "Statistiques", icon: <BarChart3 className="w-5 h-5" /> },
+  { href: "/dashboard/campaigns", label: "Campagnes", icon: <Target className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
+  { href: "/dashboard/tastings", label: "Dégustations", icon: <UtensilsCrossed className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
+  { href: "/dashboard/sales", label: "Ventes", icon: <ShoppingCart className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
+  { href: "/dashboard/stats", label: "Statistiques", icon: <BarChart3 className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/wheel", label: "Roue à cadeaux", icon: <Gift className="w-5 h-5" />, roles: ["Hotesse", "Superviseur"] },
   { href: "/dashboard/goodies", label: "Goodies", icon: <Gift className="w-5 h-5" />, roles: ["Administrateur"] },
 ];
@@ -64,11 +66,24 @@ export function DashboardSidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [entrepriseCampaigns, setEntrepriseCampaigns] = useState<CampagneList[]>([]);
 
   const userRole = user?.role || "Non defini";
+  const isEntreprise = userRole === "Entreprise";
   const filteredAdminItems = adminNavItems.filter(
     (item) => !item.roles || item.roles.includes(userRole)
   );
+
+  const fetchEntrepriseCampaigns = useCallback(async () => {
+    try {
+      const { data } = await api.get<CampagneList[]>("/campagnes/");
+      setEntrepriseCampaigns(Array.isArray(data) ? data : (data as { results?: CampagneList[] }).results ?? []);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (isEntreprise) fetchEntrepriseCampaigns();
+  }, [isEntreprise, fetchEntrepriseCampaigns]);
 
   const getInitials = (name: string) => {
     return name
@@ -110,6 +125,42 @@ export function DashboardSidebar() {
           </Link>
         ))}
       </div>
+
+      {isEntreprise && entrepriseCampaigns.length > 0 && (
+        <div className="space-y-1 mt-6">
+          <p className="px-3 text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider mb-2">
+            Mes Campagnes
+          </p>
+          {entrepriseCampaigns.map((camp) => {
+            const campHref = `/dashboard/company/campaigns/${camp.id}`;
+            const isActive = pathname === campHref;
+            return (
+              <Link
+                key={camp.id}
+                href={campHref}
+                onClick={() => setMobileMenuOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                  isActive
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md shadow-sidebar-primary/30"
+                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <span className={cn(
+                  "transition-transform duration-200",
+                  isActive ? "" : "group-hover:scale-110"
+                )}>
+                  <Target className="w-5 h-5" />
+                </span>
+                <span className="truncate">{camp.nom}</span>
+                {isActive && (
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70" />
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       {filteredAdminItems.length > 0 && (
         <div className="space-y-1 mt-6">

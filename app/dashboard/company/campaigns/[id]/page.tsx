@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type {
-  CampagneList,
   CampagneDetail,
   CampagneRapportSites,
+  CampagneSiteRapport,
+  SiteDetail,
   Degustation,
   Vente,
+  GainPromotion,
 } from "@/lib/types/backend";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +25,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Target,
   UtensilsCrossed,
   ShoppingCart,
   TrendingUp,
@@ -31,10 +32,11 @@ import {
   Tag,
   Calendar,
   Download,
-  ArrowLeft,
   BarChart3,
   MapPin,
-  ChevronRight,
+  Users,
+  ArrowUp,
+  Package,
 } from "lucide-react";
 import {
   AreaChart,
@@ -50,8 +52,6 @@ import {
 } from "recharts";
 import { format, parseISO, subDays } from "date-fns";
 import { fr } from "date-fns/locale";
-import Link from "next/link";
-import { cn } from "@/lib/utils";
 
 const COLORS = {
   primary: "#DC2626",
@@ -89,6 +89,27 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   );
 }
 
+function GaugeBar({ label, current, total, color, gradient }: {
+  label: string; current: number; total: number; color: string; gradient: string;
+}) {
+  const pct = total > 0 ? Math.min(Math.round((current / total) * 100), 100) : 0;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="text-sm font-bold" style={{ color }}>{fmt(current)} <span className="text-muted-foreground font-normal text-xs">/ {fmt(total)}</span></span>
+      </div>
+      <div className="h-4 bg-slate-100 rounded-full overflow-hidden relative">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ease-out bg-gradient-to-r ${gradient}`}
+          style={{ width: `${pct}%` }}
+        />
+        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-700">{pct}%</span>
+      </div>
+    </div>
+  );
+}
+
 interface DailyData {
   date: string;
   dateFull: string;
@@ -106,34 +127,41 @@ export default function CompanyCampaignDetailPage() {
   const campaignId = params?.id as string;
 
   const [loading, setLoading] = useState(true);
-  const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [campaign, setCampaign] = useState<CampagneDetail | null>(null);
   const [rapport, setRapport] = useState<CampagneRapportSites | null>(null);
   const [tastings, setTastings] = useState<Degustation[]>([]);
   const [ventes, setVentes] = useState<Vente[]>([]);
+  const [siteDetails, setSiteDetails] = useState<SiteDetail[]>([]);
+  const [gainsPromotions, setGainsPromotions] = useState<GainPromotion[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
-
-  const fetchCampaigns = useCallback(async () => {
-    try {
-      const { data } = await api.get<CampagneList[]>("/campagnes/");
-      setCampaigns(Array.isArray(data) ? data : (data as { results?: CampagneList[] }).results ?? []);
-    } catch {}
-  }, []);
+  const promoChartRef = useRef<HTMLDivElement>(null);
 
   const fetchCampaignData = useCallback(async () => {
     if (!campaignId) return;
     setLoading(true);
     try {
-      const [campRes, rapportRes, tastRes, ventesRes] = await Promise.all([
+      const [campRes, rapportRes, tastRes, ventesRes, gainsRes] = await Promise.all([
         api.get<CampagneDetail>(`/campagnes/${campaignId}/`),
         api.get<CampagneRapportSites>(`/campagnes/${campaignId}/rapport-sites/`).catch(() => ({ data: null })),
         api.get<Degustation[]>(`/degustations/?campagne=${campaignId}`),
         api.get<Vente[]>(`/ventes/?campagne=${campaignId}`),
+        api.get<GainPromotion[]>(`/gains-promotions/?campagne=${campaignId}`).catch(() => ({ data: [] })),
       ]);
       setCampaign(campRes.data);
       setRapport(rapportRes.data as CampagneRapportSites | null);
       setTastings(Array.isArray(tastRes.data) ? tastRes.data : (tastRes.data as { results?: Degustation[] }).results ?? []);
       setVentes(Array.isArray(ventesRes.data) ? ventesRes.data : (ventesRes.data as { results?: Vente[] }).results ?? []);
+      const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data as { results?: GainPromotion[] }).results ?? [];
+      setGainsPromotions(gainsData);
+
+      // Fetch site details with team info
+      if (rapportRes.data && (rapportRes.data as CampagneRapportSites).sites?.length) {
+        const sitePromises = (rapportRes.data as CampagneRapportSites).sites.map(s =>
+          api.get<SiteDetail>(`/sites/${s.id}/`).catch(() => null)
+        );
+        const results = await Promise.all(sitePromises);
+        setSiteDetails(results.filter(r => r?.data).map(r => r!.data) as SiteDetail[]);
+      }
     } catch {}
     setLoading(false);
   }, [campaignId]);
@@ -142,10 +170,9 @@ export default function CompanyCampaignDetailPage() {
     if (!authLoading) {
       if (!user) { router.push("/auth/login"); return; }
       if (user.role !== "Entreprise") { router.push("/dashboard"); return; }
-      fetchCampaigns();
       if (campaignId) fetchCampaignData();
     }
-  }, [user, authLoading, router, campaignId, fetchCampaigns, fetchCampaignData]);
+  }, [user, authLoading, router, campaignId, fetchCampaignData]);
 
   const showMetrics = useMemo(() => {
     if (!campaign) return { showTasting: true, showVente: true, showGoodies: false, showPromotions: false };
@@ -168,8 +195,10 @@ export default function CompanyCampaignDetailPage() {
       ? Math.round((tastings.reduce((s, t) => s + t.note_gout, 0) / totalTastings) * 10) / 10
       : 0;
     const goodiesDistribues = rapport?.totaux?.goodies_distribues ?? 0;
+    const totalGoodiesAlloues = rapport?.sites?.reduce((sum, site) =>
+      sum + (site.goodies ?? []).reduce((s, g) => s + g.quantite_initiale, 0), 0) ?? 0;
     const gainsPromotions = (rapport?.totaux as { gains_promotions?: number })?.gains_promotions ?? 0;
-    return { totalTastings, totalVentes, totalRevenue, conversionRate, avgRating, goodiesDistribues, gainsPromotions };
+    return { totalTastings, totalVentes, totalRevenue, conversionRate, avgRating, goodiesDistribues, totalGoodiesAlloues, gainsPromotions };
   }, [tastings, ventes, rapport]);
 
   const dailyData: DailyData[] = useMemo(() => {
@@ -196,6 +225,88 @@ export default function CompanyCampaignDetailPage() {
     return Array.from(dates).sort().reverse();
   }, [tastings, ventes]);
 
+  // Per-site daily performance (today)
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const siteDailyPerf = useMemo(() => {
+    if (!rapport) return [];
+    return rapport.sites.map(site => ({
+      nom: site.nom,
+      degustations_today: tastings.filter(t => t.site_nom === site.nom && t.created_at.slice(0, 10) === todayStr).length,
+      ventes_today: ventes.filter(v => v.site_nom === site.nom && v.created_at.slice(0, 10) === todayStr).length,
+    }));
+  }, [rapport, tastings, ventes, todayStr]);
+
+  const promoChartData = useMemo(() => {
+    if (!gainsPromotions.length) return [];
+    const map: Record<string, Record<string, number>> = {};
+    const promoLabels = new Set<string>();
+    gainsPromotions.forEach(g => {
+      const d = g.created_at.slice(0, 10);
+      const label = g.promotion_description;
+      promoLabels.add(label);
+      if (!map[d]) map[d] = {};
+      map[d][label] = (map[d][label] || 0) + 1;
+    });
+    const labels = Array.from(promoLabels);
+    return Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, counts]) => {
+        const row: Record<string, string | number> = {
+          date: format(parseISO(date), "dd MMM", { locale: fr }),
+        };
+        labels.forEach(l => { row[l] = counts[l] || 0; });
+        return row;
+      });
+  }, [gainsPromotions]);
+
+  const promoLabels = useMemo(() => {
+    const labels = new Set<string>();
+    gainsPromotions.forEach(g => labels.add(g.promotion_description));
+    return Array.from(labels);
+  }, [gainsPromotions]);
+
+  const handleExportPromoPdf = useCallback(() => {
+    const el = promoChartRef.current;
+    if (!el) return;
+    const svgElement = el.querySelector("svg");
+    if (!svgElement) return;
+
+    const svgData = new XMLSerializer().serializeToString(svgElement);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const img = new Image();
+
+    const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+
+    img.onload = () => {
+      canvas.width = img.width * 2;
+      canvas.height = img.height * 2;
+      ctx!.fillStyle = "#ffffff";
+      ctx!.fillRect(0, 0, canvas.width, canvas.height);
+      ctx!.scale(2, 2);
+      ctx!.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+
+      const imgData = canvas.toDataURL("image/png");
+      const printWindow = window.open("", "_blank");
+      if (printWindow) {
+        printWindow.document.write(`
+          <html><head><title>Écoulements promotionnels - ${campaign?.nom ?? ""}</title>
+          <style>body{margin:20px;font-family:sans-serif;text-align:center;}h2{margin-bottom:20px;}img{max-width:100%;}</style>
+          </head><body>
+          <h2>Écoulements des offres promotionnelles</h2>
+          <p style="color:#666;margin-bottom:16px;">${campaign?.nom ?? ""} — Exporté le ${format(new Date(), "dd/MM/yyyy à HH:mm", { locale: fr })}</p>
+          <img src="${imgData}" />
+          <script>setTimeout(()=>{window.print();window.close();},500)</script>
+          </body></html>
+        `);
+        printWindow.document.close();
+      }
+    };
+    img.src = url;
+  }, [campaign]);
+
   const handleExport = useCallback(() => {
     if (!selectedDate || !campaign) return;
     const dayTastings = tastings.filter(t => t.created_at.slice(0, 10) === selectedDate);
@@ -219,79 +330,36 @@ export default function CompanyCampaignDetailPage() {
   const p2 = campaign.couleur_secondaire || "#00899b";
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-6rem)]">
-      {/* Sidebar */}
-      <div className="w-72 flex-shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-          <Link href="/dashboard/company" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
-            <ArrowLeft className="w-4 h-4" /> Retour
-          </Link>
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Target className="w-4 h-4" style={{ color: p1 }} />
-            Mes Campagnes
-          </h2>
-          <p className="text-xs text-muted-foreground mt-1">{campaigns.length} campagne{campaigns.length > 1 ? "s" : ""}</p>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {campaigns.map((c) => {
-            const isActive = c.id === campaignId;
-            return (
-              <Link key={c.id} href={`/dashboard/company/campaigns/${c.id}`}
-                className={cn("block p-3 rounded-xl transition-all", isActive ? "bg-gradient-to-r shadow-sm" : "hover:bg-slate-50")}
-                style={isActive ? { background: hex(p1, 0.1) } : {}}>
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${c.couleur_primaire || p1} 0%, ${c.couleur_secondaire || p2} 100%)` }}>
-                    {c.nom.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={cn("font-medium text-sm truncate", isActive ? "text-foreground" : "text-foreground/80")}>{c.nom}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{c.type_campagne_display}</Badge>
-                      {c.type_recompense !== "AUCUNE" && (
-                        <Badge className="text-[10px] px-1.5 py-0 h-4 bg-amber-100 text-amber-700 border-0">
-                          {c.type_recompense === "GOODIES" ? "🎁" : "🏷️"}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  {isActive && <ChevronRight className="w-4 h-4 shrink-0" style={{ color: p1 }} />}
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-y-auto space-y-6 pr-2">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
+    <div className="space-y-6">
+      {/* ── Hero Header ── */}
+      <div
+        className="relative overflow-hidden rounded-2xl p-6 md:p-8 text-white shadow-2xl"
+        style={{ background: `linear-gradient(135deg, ${p1} 0%, ${p2} 100%)`, boxShadow: `0 20px 40px -12px ${hex(p1, 0.35)}` }}
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
+        <div className="absolute -right-8 -top-8 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <Badge className="text-xs" style={{ background: hex(p1, 0.15), color: p1, borderColor: hex(p1, 0.3) }}>
+              <Badge className="bg-white/25 text-white border-white/40 text-xs backdrop-blur-sm">
                 {campaign.type_campagne_display}
               </Badge>
               {campaign.type_recompense !== "AUCUNE" && (
-                <Badge className="text-xs"
-                  style={{
-                    background: campaign.type_recompense === "GOODIES" ? hex("#10B981", 0.15) : hex("#3B82F6", 0.15),
-                    color: campaign.type_recompense === "GOODIES" ? "#10B981" : "#3B82F6",
-                  }}>
-                  {campaign.type_recompense === "GOODIES" ? <><Gift className="w-3 h-3 mr-1" /> Goodies</> : <><Tag className="w-3 h-3 mr-1" /> Promos</>}
+                <Badge className="bg-white/25 text-white border-white/40 text-xs backdrop-blur-sm">
+                  {campaign.type_recompense === "GOODIES" ? "🎁 Goodies" : "🏷️ Promotions"}
                 </Badge>
               )}
             </div>
-            <h1 className="text-2xl font-bold">{campaign.nom}</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Du {format(parseISO(campaign.date_debut), "dd MMMM yyyy", { locale: fr })} au {format(parseISO(campaign.date_fin), "dd MMMM yyyy", { locale: fr })}
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight">{campaign.nom}</h1>
+            <p className="text-white/80 text-sm mt-1">
+              Du {format(parseISO(campaign.date_debut), "dd MMM yyyy", { locale: fr })} au {format(parseISO(campaign.date_fin), "dd MMM yyyy", { locale: fr })}
             </p>
           </div>
-          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 p-2 shadow-sm">
-            <Calendar className="w-4 h-4 text-muted-foreground ml-2" />
+          <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-xl p-2">
+            <Calendar className="w-4 h-4 text-white/70 ml-2" />
             <Select value={selectedDate} onValueChange={setSelectedDate}>
-              <SelectTrigger className="w-44 border-0 bg-transparent focus:ring-0">
-                <SelectValue placeholder="Choisir un jour..." />
+              <SelectTrigger className="w-44 border-0 bg-transparent text-white focus:ring-0 [&>span]:text-white/90">
+                <SelectValue placeholder="Exporter un jour..." />
               </SelectTrigger>
               <SelectContent>
                 {availableDates.map((date) => (
@@ -301,174 +369,436 @@ export default function CompanyCampaignDetailPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button size="sm" onClick={handleExport} disabled={!selectedDate} className="gap-1" style={{ background: p1 }}>
-              <Download className="w-4 h-4" /> Exporter
+            <Button size="sm" onClick={handleExport} disabled={!selectedDate} className="gap-1 bg-white/25 hover:bg-white/35 text-white border-0">
+              <Download className="w-4 h-4" /> CSV
             </Button>
           </div>
         </div>
+      </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {showTasting && (
-            <Card className="border-0 shadow-md rounded-2xl"><CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div><p className="text-xs text-muted-foreground uppercase tracking-wide">Dégustations</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.primary }}>{fmt(stats.totalTastings)}</p>
+      {/* ── Colored Stat Cards ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {showTasting && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-600 via-red-500 to-orange-400 p-5 text-white shadow-xl shadow-red-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+            <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 bg-white/25 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  <UtensilsCrossed className="w-5 h-5" />
                 </div>
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: hex(COLORS.primary, 0.1) }}>
-                  <UtensilsCrossed className="w-6 h-6" style={{ color: COLORS.primary }} />
-                </div>
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-white/20">
+                  <ArrowUp className="w-3 h-3 inline" /> {stats.avgRating}/5
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">Note moyenne: {stats.avgRating}/5</p>
-            </CardContent></Card>
+              <div className="text-2xl font-bold">{fmt(stats.totalTastings)}</div>
+              <p className="text-white/80 text-xs mt-1">Dégustations</p>
+            </div>
+          </div>
+        )}
+        {showVente && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-400 p-5 text-white shadow-xl shadow-amber-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+            <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 bg-white/25 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  <ShoppingCart className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-white/20">
+                  {fmt(stats.totalRevenue)} F
+                </span>
+              </div>
+              <div className="text-2xl font-bold">{fmt(stats.totalVentes)}</div>
+              <p className="text-white/80 text-xs mt-1">Ventes / Distributions</p>
+            </div>
+          </div>
+        )}
+        {showGoodies && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-600 via-green-500 to-teal-400 p-5 text-white shadow-xl shadow-emerald-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+            <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 bg-white/25 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  <Gift className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-white/20 animate-pulse">
+                  temps réel
+                </span>
+              </div>
+              <div className="text-2xl font-bold">{fmt(stats.goodiesDistribues)} / {fmt(stats.totalGoodiesAlloues)}</div>
+              <p className="text-white/80 text-xs mt-1">Goodies distribués / total alloué</p>
+            </div>
+          </div>
+        )}
+        {showPromotions && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-400 p-5 text-white shadow-xl shadow-blue-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+            <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 bg-white/25 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-white/20">
+                  promos
+                </span>
+              </div>
+              <div className="text-2xl font-bold">{fmt(stats.gainsPromotions)}</div>
+              <p className="text-white/80 text-xs mt-1">Canettes offertes</p>
+            </div>
+          </div>
+        )}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 via-purple-500 to-fuchsia-400 p-5 text-white shadow-xl shadow-violet-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+          <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 bg-white/25 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-white/20">
+                conversion
+              </span>
+            </div>
+            <div className="text-2xl font-bold">{stats.conversionRate}%</div>
+            <p className="text-white/80 text-xs mt-1">Taux de conversion</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Jauges des objectifs ── */}
+      <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+        <CardHeader className="pb-2 bg-gradient-to-r from-slate-50 to-white">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" style={{ color: p1 }} /> Objectifs de la campagne
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-5 space-y-5">
+          {showVente && campaign.objectif_ventes && (
+            <GaugeBar
+              label="Ventes / Distributions"
+              current={stats.totalVentes}
+              total={campaign.objectif_ventes}
+              color={COLORS.secondary}
+              gradient="from-amber-500 to-yellow-400"
+            />
           )}
-          {showVente && (
-            <Card className="border-0 shadow-md rounded-2xl"><CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div><p className="text-xs text-muted-foreground uppercase tracking-wide">Ventes</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.secondary }}>{fmt(stats.totalVentes)}</p>
-                </div>
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: hex(COLORS.secondary, 0.1) }}>
-                  <ShoppingCart className="w-6 h-6" style={{ color: COLORS.secondary }} />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">CA: {fmt(stats.totalRevenue)} FCFA</p>
-            </CardContent></Card>
+          {showTasting && campaign.objectif_degustations && (
+            <GaugeBar
+              label="Dégustations"
+              current={stats.totalTastings}
+              total={campaign.objectif_degustations}
+              color={COLORS.primary}
+              gradient="from-red-500 to-orange-400"
+            />
           )}
-          {showGoodies && (
-            <Card className="border-0 shadow-md rounded-2xl"><CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div><p className="text-xs text-muted-foreground uppercase tracking-wide">Goodies</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.success }}>{fmt(stats.goodiesDistribues)}</p>
-                </div>
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: hex(COLORS.success, 0.1) }}>
-                  <Gift className="w-6 h-6" style={{ color: COLORS.success }} />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">Distribués aux clients</p>
-            </CardContent></Card>
+          {showGoodies && stats.totalGoodiesAlloues > 0 && (
+            <GaugeBar
+              label="Goodies distribués"
+              current={stats.goodiesDistribues}
+              total={stats.totalGoodiesAlloues}
+              color={COLORS.success}
+              gradient="from-emerald-500 to-teal-400"
+            />
           )}
           {showPromotions && (
-            <Card className="border-0 shadow-md rounded-2xl"><CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <div><p className="text-xs text-muted-foreground uppercase tracking-wide">Gains Promo</p>
-                  <p className="text-2xl font-bold mt-1" style={{ color: COLORS.info }}>{fmt(stats.gainsPromotions)}</p>
-                </div>
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: hex(COLORS.info, 0.1) }}>
-                  <Tag className="w-6 h-6" style={{ color: COLORS.info }} />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">Promotions activées</p>
-            </CardContent></Card>
+            <GaugeBar
+              label="Canettes offertes (Promotions)"
+              current={stats.gainsPromotions}
+              total={campaign.objectif_ventes ?? 50}
+              color={COLORS.info}
+              gradient="from-blue-500 to-cyan-400"
+            />
           )}
-          <Card className="border-0 shadow-md rounded-2xl"><CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div><p className="text-xs text-muted-foreground uppercase tracking-wide">Conversion</p>
-                <p className="text-2xl font-bold mt-1" style={{ color: COLORS.purple }}>{stats.conversionRate}%</p>
-              </div>
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: hex(COLORS.purple, 0.1) }}>
-                <TrendingUp className="w-6 h-6" style={{ color: COLORS.purple }} />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">Taux de conversion</p>
-          </CardContent></Card>
-        </div>
+        </CardContent>
+      </Card>
 
-        {/* Promotions */}
-        {showPromotions && campaign.promotions && campaign.promotions.length > 0 && (
-          <Card className="border-0 shadow-md rounded-2xl overflow-hidden">
-            <CardHeader className="pb-3" style={{ background: hex(COLORS.info, 0.05) }}>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Tag className="w-4 h-4" style={{ color: COLORS.info }} /> Offres promotionnelles
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {campaign.promotions.filter((p) => p.is_active).map((promo) => (
-                  <div key={promo.id} className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-2">
-                    <Badge className="text-[10px]"
-                      style={{
-                        background: promo.type_promotion === "OFFERT" ? hex("#10B981", 0.2) : hex("#F59E0B", 0.2),
-                        color: promo.type_promotion === "OFFERT" ? "#10B981" : "#F59E0B",
-                      }}>
-                      {promo.type_promotion === "OFFERT" ? "🎁 Offert" : "🏆 À gagner"}
-                    </Badge>
-                    <p className="font-medium text-sm">Acheter <span className="text-blue-700 font-bold">{promo.quantite_requise}</span> produit{promo.quantite_requise > 1 ? "s" : ""}</p>
-                    <p className="text-sm text-muted-foreground">→ {promo.recompense_description}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Charts */}
-        <Card className="border-0 shadow-md rounded-2xl overflow-hidden">
-          <CardHeader className="pb-3">
+      {/* ── Promotions ── */}
+      {showPromotions && campaign.promotions && campaign.promotions.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3" style={{ background: hex(COLORS.info, 0.05) }}>
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-red-500" /> Évolution sur 14 jours
+              <Tag className="w-4 h-4" style={{ color: COLORS.info }} /> Offres promotionnelles
             </CardTitle>
           </CardHeader>
-          <CardContent><div className="h-80">
+          <CardContent className="p-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {campaign.promotions.filter((p) => p.is_active).map((promo) => (
+                <div key={promo.id} className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-2">
+                  <Badge className="text-[10px]"
+                    style={{
+                      background: promo.type_promotion === "OFFERT" ? hex("#10B981", 0.2) : hex("#F59E0B", 0.2),
+                      color: promo.type_promotion === "OFFERT" ? "#10B981" : "#F59E0B",
+                    }}>
+                    {promo.type_promotion === "OFFERT" ? "🎁 Offert" : "🏆 À gagner"}
+                  </Badge>
+                  <p className="font-medium text-sm">Acheter <span className="text-blue-700 font-bold">{promo.quantite_requise}</span> produit{promo.quantite_requise > 1 ? "s" : ""}</p>
+                  <p className="text-sm text-muted-foreground">→ {promo.recompense_description}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {/* ── Charts ── */}
+      <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-red-500" /> Évolution sur 14 jours
+          </CardTitle>
+        </CardHeader>
+        <CardContent><div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={dailyData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
+              <defs>
+                {showTasting && <linearGradient id="gradTastings" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.primary} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.primary} stopOpacity={0}/></linearGradient>}
+                {showVente && <linearGradient id="gradVentes" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.secondary} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.secondary} stopOpacity={0}/></linearGradient>}
+                {showGoodies && <linearGradient id="gradGoodies" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.success} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.success} stopOpacity={0}/></linearGradient>}
+                {showPromotions && <linearGradient id="gradPromos" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.info} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.info} stopOpacity={0}/></linearGradient>}
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(0,0,0,0.06)", strokeWidth: 2 }} />
+              {showTasting && <Area type="monotone" dataKey="degustations" stroke={COLORS.primary} strokeWidth={2} fill="url(#gradTastings)" name="Dégustations" dot={false} activeDot={{ r: 5 }} />}
+              {showVente && <Area type="monotone" dataKey="ventes" stroke={COLORS.secondary} strokeWidth={2} fill="url(#gradVentes)" name="Ventes" dot={false} activeDot={{ r: 5 }} />}
+              {showGoodies && <Area type="monotone" dataKey="goodiesDistribues" stroke={COLORS.success} strokeWidth={2} fill="url(#gradGoodies)" name="Goodies" dot={false} activeDot={{ r: 5 }} />}
+              {showPromotions && <Area type="monotone" dataKey="gainsPromotions" stroke={COLORS.info} strokeWidth={2} fill="url(#gradPromos)" name="Canettes offertes" dot={false} activeDot={{ r: 5 }} />}
+              <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "16px" }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div></CardContent>
+      </Card>
+
+      {/* ── Performance par site (chart) ── */}
+      {rapport && rapport.sites.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-red-500" /> Performance par site
+            </CardTitle>
+          </CardHeader>
+          <CardContent><div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dailyData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
-                <defs>
-                  {showTasting && <linearGradient id="gradTastings" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.primary} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.primary} stopOpacity={0}/></linearGradient>}
-                  {showVente && <linearGradient id="gradVentes" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.secondary} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.secondary} stopOpacity={0}/></linearGradient>}
-                  {showGoodies && <linearGradient id="gradGoodies" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.success} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.success} stopOpacity={0}/></linearGradient>}
-                  {showPromotions && <linearGradient id="gradPromos" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.info} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.info} stopOpacity={0}/></linearGradient>}
-                </defs>
+              <BarChart data={rapport.sites} margin={{ top: 5, right: 10, bottom: 30, left: -20 }} barSize={24}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" interval={0} />
                 <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(0,0,0,0.06)", strokeWidth: 2 }} />
-                {showTasting && <Area type="monotone" dataKey="degustations" stroke={COLORS.primary} strokeWidth={2} fill="url(#gradTastings)" name="Dégustations" dot={false} activeDot={{ r: 5 }} />}
-                {showVente && <Area type="monotone" dataKey="ventes" stroke={COLORS.secondary} strokeWidth={2} fill="url(#gradVentes)" name="Ventes" dot={false} activeDot={{ r: 5 }} />}
-                {showGoodies && <Area type="monotone" dataKey="goodiesDistribues" stroke={COLORS.success} strokeWidth={2} fill="url(#gradGoodies)" name="Goodies" dot={false} activeDot={{ r: 5 }} />}
-                {showPromotions && <Area type="monotone" dataKey="gainsPromotions" stroke={COLORS.info} strokeWidth={2} fill="url(#gradPromos)" name="Gains Promo" dot={false} activeDot={{ r: 5 }} />}
-                <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "16px" }} />
-              </AreaChart>
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
+                {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={COLORS.primary} radius={[4, 4, 0, 0]} />}
+                {showVente && <Bar dataKey="ventes" name="Ventes" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />}
+                <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+              </BarChart>
             </ResponsiveContainer>
           </div></CardContent>
         </Card>
+      )}
 
-        {/* Site Breakdown */}
-        {rapport && rapport.sites.length > 0 && (
-          <Card className="border-0 shadow-md rounded-2xl overflow-hidden">
-            <CardHeader className="pb-3">
+      {/* ── Écoulements des offres promotionnelles par jour ── */}
+      {showPromotions && promoChartData.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-red-500" /> Performance par site
+                <Tag className="w-4 h-4 text-blue-500" /> Écoulements des offres promotionnelles par jour
               </CardTitle>
-            </CardHeader>
-            <CardContent><div className="h-64">
+              <Button size="sm" variant="outline" onClick={handleExportPromoPdf} className="gap-1.5 text-xs">
+                <Download className="w-3.5 h-3.5" /> PDF
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div ref={promoChartRef} className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={rapport.sites} margin={{ top: 5, right: 10, bottom: 30, left: -20 }} barSize={24}>
+                <BarChart data={promoChartData} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barSize={20}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                  <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" interval={0} />
-                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-                  {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={COLORS.primary} radius={[4, 4, 0, 0]} />}
-                  {showVente && <Bar dataKey="ventes" name="Ventes" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />}
+                  {promoLabels.map((label, idx) => {
+                    const colors = ["#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6"];
+                    return (
+                      <Bar
+                        key={label}
+                        dataKey={label}
+                        name={label}
+                        fill={colors[idx % colors.length]}
+                        radius={[4, 4, 0, 0]}
+                        stackId="promos"
+                      />
+                    );
+                  })}
                   <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
                 </BarChart>
               </ResponsiveContainer>
-            </div></CardContent>
-          </Card>
-        )}
-      </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Détails des sites (équipe + perf journalière + goodies) ── */}
+      {rapport && rapport.sites.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3 bg-gradient-to-r from-slate-50 to-white">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Users className="w-4 h-4" style={{ color: p1 }} /> Détails des sites
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4">
+            <div className="space-y-4">
+              {rapport.sites.map((site: CampagneSiteRapport) => {
+                const detail = siteDetails.find(d => d.id === site.id);
+                const perf = siteDailyPerf.find(p => p.nom === site.nom);
+                return (
+                  <div key={site.id} className="rounded-xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                    {/* Site Header */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ background: `linear-gradient(135deg, ${p1}, ${p2})` }}>
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm">{site.nom}</p>
+                            <p className="text-xs text-muted-foreground">{site.ville}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Badge className="bg-green-100 text-green-700 border-0 text-[10px]">
+                          {site.taux_conversion}% conv.
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Team */}
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Hôtesses ({detail?.hotesses?.length ?? site.nb_hotesses})</p>
+                        {detail?.hotesses?.length ? (
+                          <div className="space-y-1">
+                            {detail.hotesses.map(h => (
+                              <div key={h.id} className="flex items-center gap-2">
+                                <div className="w-5 h-5 rounded-full bg-red-100 flex items-center justify-center">
+                                  <span className="text-[9px] font-bold text-red-600">{h.name.slice(0, 1)}</span>
+                                </div>
+                                <span className="text-xs text-foreground">{h.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">{site.nb_hotesses} affectée{site.nb_hotesses > 1 ? "s" : ""}</p>
+                        )}
+                      </div>
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Superviseurs ({detail?.superviseurs?.length ?? site.nb_superviseurs})</p>
+                        {detail?.superviseurs?.length ? (
+                          <div className="space-y-1">
+                            {detail.superviseurs.map(s => (
+                              <div key={s.id} className="flex items-center gap-2">
+                                <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center">
+                                  <span className="text-[9px] font-bold text-blue-600">{s.name.slice(0, 1)}</span>
+                                </div>
+                                <span className="text-xs text-foreground">{s.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">{site.nb_superviseurs} affecté{site.nb_superviseurs > 1 ? "s" : ""}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Daily Performance */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="rounded-lg bg-red-50 border border-red-100 p-2 text-center">
+                        <p className="text-[10px] text-muted-foreground">Dégust. aujourd&apos;hui</p>
+                        <p className="text-sm font-bold text-red-600">{fmt(perf?.degustations_today ?? 0)}</p>
+                      </div>
+                      <div className="rounded-lg bg-amber-50 border border-amber-100 p-2 text-center">
+                        <p className="text-[10px] text-muted-foreground">Ventes aujourd&apos;hui</p>
+                        <p className="text-sm font-bold text-amber-600">{fmt(perf?.ventes_today ?? 0)}</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 border border-slate-100 p-2 text-center">
+                        <p className="text-[10px] text-muted-foreground">Total dégust.</p>
+                        <p className="text-sm font-bold text-foreground">{fmt(site.degustations)}</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 border border-slate-100 p-2 text-center">
+                        <p className="text-[10px] text-muted-foreground">Total ventes</p>
+                        <p className="text-sm font-bold text-foreground">{fmt(site.ventes)}</p>
+                      </div>
+                    </div>
+
+                    {/* Goodies par site */}
+                    {showGoodies && (site.goodies ?? []).length > 0 && (
+                      <div className="rounded-lg bg-emerald-50/60 border border-emerald-100 p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Gift className="w-4 h-4 text-emerald-600" />
+                          <p className="text-xs font-semibold text-emerald-800">Goodies sur ce site</p>
+                          <Badge className="ml-auto bg-emerald-100 text-emerald-700 border-0 text-[10px] animate-pulse">
+                            temps réel
+                          </Badge>
+                        </div>
+                        <div className="space-y-2">
+                          {(site.goodies ?? []).map(g => {
+                            const pct = g.quantite_initiale > 0 ? Math.round((g.quantite_distribuee / g.quantite_initiale) * 100) : 0;
+                            return (
+                              <div key={g.goodie_id} className="space-y-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-medium text-foreground">{g.goodie_nom}</span>
+                                  <span className="text-emerald-700 font-semibold">{fmt(g.quantite_distribuee)} <span className="text-muted-foreground font-normal">/ {fmt(g.quantite_initiale)}</span></span>
+                                </div>
+                                <div className="h-2 bg-emerald-100 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-700" style={{ width: `${pct}%` }} />
+                                </div>
+                                <div className="flex justify-between text-[10px] text-muted-foreground">
+                                  <span>{pct}% distribués</span>
+                                  <span>{fmt(g.quantite_restante)} restant{g.quantite_restante > 1 ? "s" : ""}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-emerald-100 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">Total distribués sur ce site</span>
+                          <span className="text-sm font-bold text-emerald-700">{fmt(site.goodies_distribues_total ?? 0)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Promotions stats par site */}
+                    {showPromotions && site.promotions_stats && site.promotions_stats.length > 0 && (
+                      <div className="rounded-lg bg-blue-50/60 border border-blue-100 p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Package className="w-4 h-4 text-blue-600" />
+                          <p className="text-xs font-semibold text-blue-800">Canettes offertes sur ce site</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          {site.promotions_stats.map((ps, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-2 border border-blue-50">
+                              <span className="text-foreground">{ps.recompense_description}</span>
+                              <Badge className="bg-blue-100 text-blue-700 border-0 text-[10px]">{fmt(ps.gains_count)} gagné{ps.gains_count > 1 ? "s" : ""}</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
 function CompanyCampaignSkeleton() {
   return (
-    <div className="flex gap-6 h-[calc(100vh-6rem)]">
-      <div className="w-72 flex-shrink-0"><Skeleton className="h-full rounded-2xl" /></div>
-      <div className="flex-1 space-y-6">
-        <Skeleton className="h-24 rounded-2xl" />
-        <div className="grid grid-cols-4 gap-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-2xl" />)}</div>
-        <Skeleton className="h-80 rounded-2xl" />
-      </div>
+    <div className="space-y-6">
+      <Skeleton className="h-36 rounded-2xl" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-2xl" />)}</div>
+      <Skeleton className="h-40 rounded-2xl" />
+      <Skeleton className="h-80 rounded-2xl" />
+      <Skeleton className="h-64 rounded-2xl" />
     </div>
   );
 }

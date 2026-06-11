@@ -139,6 +139,10 @@ export default function CampaignDetailPage() {
   const wheelRotationRef = useRef(0);
   const [activeWheelPromoId, setActiveWheelPromoId] = useState<string | null>(null);
 
+  // Statistiques de l'entreprise
+  const [entrepriseStats, setEntrepriseStats] = useState<any>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -175,6 +179,20 @@ export default function CampaignDetailPage() {
 
       if (user?.role === "Entreprise" && results[4]) {
         setSiteRapport((results[4] as { data: CampagneRapportSites }).data);
+        
+        // Charger les stats de l'entreprise si disponible
+        const userWithEntrepriseId = user as any;
+        if (userWithEntrepriseId.entreprise_id) {
+          try {
+            setLoadingStats(true);
+            const statsRes = await api.get<any>(`/entreprises/${userWithEntrepriseId.entreprise_id}/statistiques/`);
+            setEntrepriseStats(statsRes.data);
+          } catch {
+            setEntrepriseStats(null);
+          } finally {
+            setLoadingStats(false);
+          }
+        }
       } else {
         setSiteRapport(null);
       }
@@ -184,7 +202,7 @@ export default function CampaignDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id, router, user?.role]);
+  }, [id, router, user?.role, user]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -353,6 +371,7 @@ export default function CampaignDetailPage() {
     try {
       await api.post(`/promotions/${promoId}/enregistrer-gain/`, {
         site_id: siteId,
+        produit_id: degForm.produit || undefined,
         nom_client: gainClientName.trim() || undefined,
         tranche_age: gainClientAge || undefined,
       });
@@ -406,6 +425,7 @@ export default function CampaignDetailPage() {
           try {
             await api.post(`/promotions/${selectedPromo.id}/enregistrer-gain/`, {
               site_id: degForm.site,
+              produit_id: degForm.produit,
               nom_client: degForm.nom_client.trim() || undefined,
             });
             toast.success("Gain promotionnel enregistré ! 🎉");
@@ -776,25 +796,200 @@ export default function CampaignDetailPage() {
       {/* ── Entreprise Section ── */}
       {isEntreprise && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: "Sites", value: siteRapport?.totaux.sites ?? campaignSites.length, Icon: MapPin },
-              showTasting ? { label: "Dégustations", value: siteRapport?.totaux.degustations ?? tastings.length, Icon: UtensilsCrossed } : null,
-              showVente ? { label: "Ventes", value: (siteRapport?.totaux as {ventes?:number})?.ventes ?? ventes.length, Icon: ShoppingCart } : null,
-              showWheel ? { label: "Goodies distribués", value: siteRapport?.totaux.goodies_distribues ?? 0, Icon: Gift } : null,
-              showPromos ? { label: "Gains promo", value: (siteRapport?.totaux as {gains_promotions?:number})?.gains_promotions ?? 0, Icon: Tag } : null,
-              showPromos ? { label: "Produits concernés", value: (siteRapport?.totaux as {produits_concernes?:number})?.produits_concernes ?? 0, Icon: Package } : null,
-              showTasting ? { label: "Conversion", value: `${convRate}%`, Icon: TrendingUp } : null,
-            ].filter((item): item is NonNullable<typeof item> => item !== null).map((k, i) => (
-              <div key={i} className="rounded-2xl border p-4 text-center" style={{ background: hex(i % 2 === 0 ? p1 : p2, 0.08), borderColor: hex(i % 2 === 0 ? p1 : p2, 0.2) }}>
-                <k.Icon className="w-4 h-4 mx-auto mb-2" style={{ color: i % 2 === 0 ? p1 : p2 }} />
-                <p className="text-xl font-black" style={{ color: i % 2 === 0 ? p1 : p2 }}>{k.value}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{k.label}</p>
+          {/* Cartes KPI avec jauges colorées */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Carte Objectif Ventes/Distributions */}
+            {showVente && campaign?.objectif_ventes && (
+              <div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow" style={{ background: hex(p1, 0.02) }}>
+                <div className="p-5 border-b border-slate-100" style={{ background: hex(p1, 0.08) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: hex(p1, 0.15) }}><ShoppingCart className="w-4 h-4" style={{ color: p1 }} /></div>
+                      <span className="font-semibold text-sm text-foreground">Distributions</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-2xl font-black" style={{ color: p1 }}>{(siteRapport?.totaux as {ventes?:number})?.ventes ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">sur {campaign.objectif_ventes} objectif</p>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(((siteRapport?.totaux as {ventes?:number})?.ventes ?? 0) / campaign.objectif_ventes * 100, 100)}%`, background: `linear-gradient(90deg, ${p1}, ${p2})` }} />
+                  </div>
+                  <p className="text-xs font-semibold text-foreground text-center">{Math.round(((siteRapport?.totaux as {ventes?:number})?.ventes ?? 0) / campaign.objectif_ventes * 100)}%</p>
+                </div>
               </div>
-            ))}
+            )}
+
+            {/* Carte Goodies Gagnés */}
+            {goodies.length > 0 && (
+              <div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow" style={{ background: hex(p2, 0.02) }}>
+                <div className="p-5 border-b border-slate-100" style={{ background: hex(p2, 0.08) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: hex(p2, 0.15) }}><Gift className="w-4 h-4" style={{ color: p2 }} /></div>
+                      <span className="font-semibold text-sm text-foreground">Goodies Gagnés</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-2xl font-black" style={{ color: p2 }}>
+                      {siteRapport?.totaux?.goodies_distribues
+                        ?? goodies.reduce((sum, g) => sum + (g.quantite_distribuee ?? 0), 0)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">goodies en temps réel</p>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <div className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold" style={{ background: hex(p2, 0.1), color: p2 }}>🎁 Distribué en direct</div>
+                </div>
+              </div>
+            )}
+
+            {/* Carte Canettes Offertes */}
+            {goodies.length > 0  && (
+              <div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow" style={{ background: hex("#ec4899", 0.02) }}>
+                <div className="p-5 border-b border-slate-100" style={{ background: hex("#ec4899", 0.08) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: hex("#ec4899", 0.15) }}><Sparkles className="w-4 h-4" style={{ color: "#ec4899" }} /></div>
+                      <span className="font-semibold text-sm text-foreground">Canettes Offertes</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-2xl font-black" style={{ color: "#ec4899" }}>{ventes.filter(v => v.type_vente === "GRATUIT").length}</p>
+                    <p className="text-xs text-muted-foreground">offertes avec goodies</p>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <div className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold" style={{ background: hex("#ec4899", 0.1), color: "#ec4899" }}>📦 Produits offerts</div>
+                </div>
+              </div>
+            )}
+
+            {/* Carte Conversion */}
+            {showTasting && (
+              <div className="rounded-2xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow" style={{ background: hex("#14b8a6", 0.02) }}>
+                <div className="p-5 border-b border-slate-100" style={{ background: hex("#14b8a6", 0.08) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: hex("#14b8a6", 0.15) }}><TrendingUp className="w-4 h-4" style={{ color: "#14b8a6" }} /></div>
+                      <span className="font-semibold text-sm text-foreground">Conversion</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-2xl font-black" style={{ color: "#14b8a6" }}>{convRate}%</p>
+                    <p className="text-xs text-muted-foreground">{purchasedCount} acheteurs</p>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${convRate}%`, background: "#14b8a6" }} />
+                  </div>
+                  <p className="text-xs font-semibold text-foreground text-center">{purchasedCount}/{tastings.length}</p>
+                </div>
+              </div>
+            )}
           </div>
 
-          {(siteRapport?.sites.length ?? 0) > 0 && (
+          {/* Section: Statistiques Globales de l'Entreprise */}
+          {entrepriseStats && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex("#8b5cf6", 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: "#8b5cf6" }} /></div>
+                Statistiques Globales de l'Entreprise
+              </h3>
+
+              {/* Grille de stats globales */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Produits */}
+                <div className="rounded-xl border border-slate-100 p-4" style={{ background: hex("#0ea5e9", 0.03) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">📦 Produits</span>
+                    <span className="text-lg font-black" style={{ color: "#0ea5e9" }}>{entrepriseStats.produits.total}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>• Ventes normales: <span className="font-semibold text-foreground">{entrepriseStats.ventes.total_normales}</span></p>
+                    <p>• Ventes offertes: <span className="font-semibold text-foreground">{entrepriseStats.ventes.total_offertes}</span></p>
+                    <p>• Total: <span className="font-semibold text-foreground">{entrepriseStats.ventes.total_unite}</span></p>
+                  </div>
+                </div>
+
+                {/* Goodies */}
+                <div className="rounded-xl border border-slate-100 p-4" style={{ background: hex("#ec4899", 0.03) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">🎁 Goodies</span>
+                    <span className="text-lg font-black" style={{ color: "#ec4899" }}>{entrepriseStats.goodies.total_types}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>• Initial: <span className="font-semibold text-foreground">{entrepriseStats.goodies.total_initial}</span></p>
+                    <p>• Distribués: <span className="font-semibold text-foreground">{entrepriseStats.goodies.total_distribue}</span></p>
+                    <p>• Distribution: <span className="font-semibold text-foreground">{entrepriseStats.goodies.taux_distribution}%</span></p>
+                  </div>
+                </div>
+
+                {/* Dégustations */}
+                <div className="rounded-xl border border-slate-100 p-4" style={{ background: hex("#10b981", 0.03) }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">🍽️ Dégustations</span>
+                    <span className="text-lg font-black" style={{ color: "#10b981" }}>{entrepriseStats.degustations.total}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>• Converties: <span className="font-semibold text-foreground">{entrepriseStats.degustations.converties}</span></p>
+                    <p>• Taux: <span className="font-semibold text-foreground">{entrepriseStats.degustations.taux_conversion}%</span></p>
+                    <p>• CA: <span className="font-semibold text-foreground">{Number(entrepriseStats.ventes.chiffre_affaires).toLocaleString('fr-FR')} F</span></p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tableau détail des produits */}
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Détail des Produits</h4>
+                <div className="space-y-2">
+                  {entrepriseStats.produits.detail.map((prod: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{prod.nom}</p>
+                        <p className="text-xs text-muted-foreground">{prod.type_conditionnement}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-foreground">{prod.total_vendu}</p>
+                        <p className="text-xs text-muted-foreground">{prod.ventes_normales} + {prod.ventes_offertes}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Distribution des goodies par site */}
+              {entrepriseStats.goodies.par_site.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Distribution Goodies par Site</h4>
+                  <div className="space-y-2">
+                    {entrepriseStats.goodies.par_site.map((site: any, idx: number) => (
+                      <div key={idx} className="rounded-lg border border-slate-100 p-3" style={{ background: hex("#ec4899", 0.02) }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-medium text-sm text-foreground">{site.site_nom}</p>
+                          <p className="text-sm font-semibold" style={{ color: "#ec4899" }}>{site.total_distribue}/{site.total_initial}</p>
+                        </div>
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${site.total_initial > 0 ? (site.total_distribue / site.total_initial) * 100 : 0}%`, background: "#ec4899" }} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          {site.goodies.map((goodie: any, gidx: number) => (
+                            <div key={gidx} className="text-xs p-1.5 rounded bg-white border border-slate-100">
+                              <p className="font-medium truncate">{goodie.goodie_nom}</p>
+                              <p className="text-muted-foreground">{goodie.quantite_distribuee}/{goodie.quantite_initiale}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
               <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
                 <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: p1 }} /></div>
@@ -812,6 +1007,219 @@ export default function CampaignDetailPage() {
                     <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+
+          {/* Affiche le graphique des dégustations/ventes par jour par quantité */}
+          {(tastings.length > 0 || ventes.length > 0) && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p2, 0.12) }}><TrendingUp className="w-3.5 h-3.5" style={{ color: p2 }} /></div>
+                Activité par jour
+              </h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={(() => {
+                      const map: Record<string, { date: string; degustations: number; ventes: number }> = {};
+                      if (showTasting) {
+                        tastings.forEach(t => {
+                          const d = new Date(t.created_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+                          if (!map[d]) map[d] = { date: d, degustations: 0, ventes: 0 };
+                          map[d].degustations += 1;
+                        });
+                      }
+                      if (showVente) {
+                        ventes.forEach(v => {
+                          const d = new Date(v.created_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+                          if (!map[d]) map[d] = { date: d, degustations: 0, ventes: 0 };
+                          map[d].ventes += v.quantite;
+                        });
+                      }
+                      return Object.values(map).sort((a, b) => {
+                        const [dA, mA] = a.date.split("/").map(Number);
+                        const [dB, mB] = b.date.split("/").map(Number);
+                        return mA !== mB ? mA - mB : dA - dB;
+                      });
+                    })()}
+                    margin={{ top: 5, right: 10, bottom: 30, left: -10 }}
+                    barSize={18}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip cursor={{ fill: "rgba(0,0,0,0.03)" }} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                    {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />}
+                    {showVente && <Bar dataKey="ventes" name="Ventes (qté)" fill={p2} radius={[4, 4, 0, 0]} />}
+                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Section: Détails des Sites avec Hôtesses et Superviseurs */}
+          {(siteRapport?.sites.length ?? 0) > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.12) }}><Users className="w-3.5 h-3.5" style={{ color: p1 }} /></div>
+                Équipes affectées par site
+              </h3>
+              <div className="grid gap-3">
+                {siteRapport!.sites.map(site => (
+                  <div key={site.id} className="rounded-xl border border-slate-100 p-4" style={{ background: hex(p1, 0.03) }}>
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <p className="font-bold text-foreground">{site.nom}</p>
+                        <p className="text-xs text-muted-foreground">{site.ville}{site.emplacement_precis ? ` • ${site.emplacement_precis}` : ""}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold" style={{ color: p1 }}>{site.degustations} dég.</p>
+                        <p className="text-xs text-muted-foreground">{site.ventes} ventes</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Hôtesses */}
+                      <div className="rounded-lg bg-white border border-slate-100 p-3">
+                        <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: hex(p1, 0.1) }}>👩‍💼</div>
+                          Hôtesses ({site.nb_hotesses})
+                        </p>
+                        <div className="space-y-1.5">
+                          {(site as any).hotesses_noms && (site as any).hotesses_noms.length > 0 ? (
+                            (site as any).hotesses_noms.map((name: string, idx: number) => (
+                              <div key={idx} className="flex items-center gap-2 text-xs">
+                                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-semibold" style={{ background: p1 }}>
+                                  {initials(name)}
+                                </div>
+                                <span className="text-foreground truncate">{name}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">Aucune hôtesse affectée</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Superviseurs */}
+                      <div className="rounded-lg bg-white border border-slate-100 p-3">
+                        <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: hex(p2, 0.1) }}>👨‍💼</div>
+                          Superviseurs ({site.nb_superviseurs})
+                        </p>
+                        <div className="space-y-1.5">
+                          {(site as any).superviseurs_noms && (site as any).superviseurs_noms.length > 0 ? (
+                            (site as any).superviseurs_noms.map((name: string, idx: number) => (
+                              <div key={idx} className="flex items-center gap-2 text-xs">
+                                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-semibold" style={{ background: p2 }}>
+                                  {initials(name)}
+                                </div>
+                                <span className="text-foreground truncate">{name}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">Aucun superviseur affecté</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Section: Goodies en Temps Réel par Site */}
+          {goodies.length > 0 && (siteRapport?.sites.length ?? 0) > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex("#ec4899", 0.12) }}><Gift className="w-3.5 h-3.5" style={{ color: "#ec4899" }} /></div>
+                Goodies en temps réel par site
+              </h3>
+              <div className="grid gap-4">
+                {siteRapport!.sites.map(site => {
+                  const siteGoodies = (site as any).goodies ?? [];
+                  const totalDistributed = siteGoodies.reduce((sum: number, g: any) => sum + g.quantite_distribuee, 0);
+                  const totalInitial = siteGoodies.reduce((sum: number, g: any) => sum + g.quantite_initiale, 0);
+                  
+                  return (
+                    <div key={site.id} className="rounded-xl border border-slate-100 overflow-hidden" style={{ background: hex("#ec4899", 0.02) }}>
+                      <div className="p-4 border-b border-slate-100 bg-white">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-semibold text-sm text-foreground">{site.nom}</p>
+                          <p className="text-sm font-bold" style={{ color: "#ec4899" }}>{totalDistributed}/{totalInitial}</p>
+                        </div>
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${totalInitial > 0 ? Math.round((totalDistributed / totalInitial) * 100) : 0}%`, background: "#ec4899" }} />
+                        </div>
+                      </div>
+                      <div className="p-4 space-y-2.5">
+                        {siteGoodies.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic">Aucun goodie configuré pour ce site</p>
+                        ) : (
+                          siteGoodies.map((g: any, idx: number) => {
+                            const percentage = g.quantite_initiale > 0 ? Math.round((g.quantite_distribuee / g.quantite_initiale) * 100) : 0;
+                            return (
+                              <div key={idx} className="rounded-lg bg-white border border-slate-100 p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="text-xs font-medium text-foreground truncate">{g.goodie_nom}</p>
+                                  <span className="text-xs font-bold tabular-nums" style={{ color: "#ec4899" }}>{g.quantite_distribuee}/{g.quantite_initiale}</span>
+                                </div>
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full transition-all" style={{ width: `${percentage}%`, background: "#ec4899" }} />
+                                </div>
+                                <p className="text-xs text-muted-foreground text-center mt-1.5">{percentage}% distribué</p>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Section: Dernières Activités */}
+          {(tastings.length > 0 || ventes.length > 0) && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex("#3b82f6", 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: "#3b82f6" }} /></div>
+                Dernières activités sur les sites
+              </h3>
+              <div className="space-y-2">
+                {[
+                  ...tastings.map(t => ({
+                    type: "dégustation",
+                    text: `${t.produit_nom} dégusté${t.nom_client ? ` par ${t.nom_client}` : ""} à ${t.site_nom}`,
+                    timestamp: new Date(t.created_at).getTime(),
+                    time: new Date(t.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+                    color: p1,
+                    icon: UtensilsCrossed,
+                  })),
+                  ...ventes.map(v => ({
+                    type: "vente",
+                    text: `${v.produit_nom} vendu${v.nom_client ? ` à ${v.nom_client}` : ""} à ${v.site_nom}`,
+                    timestamp: new Date(v.created_at).getTime(),
+                    time: new Date(v.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+                    color: p2,
+                    icon: ShoppingCart,
+                  })),
+                ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 6).map((activity, idx) => {
+                  const ActivityIcon = activity.icon;
+                  return (
+                    <div key={idx} className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 transition-colors">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: hex(activity.color, 0.1) }}>
+                        <ActivityIcon className="w-4 h-4" style={{ color: activity.color }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground">{activity.text}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{activity.time}</p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

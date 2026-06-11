@@ -4,14 +4,14 @@ import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, Degustation, Vente, VenteStats, SiteList, Entreprise } from "@/lib/types/backend";
+import type { CampagneList, CampagneRapportSites, Degustation, Vente, VenteStats, SiteList, Entreprise } from "@/lib/types/backend";
 import { getMyEntreprise } from "@/lib/services/entrepriseService";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Target, Trophy, ShoppingCart, TrendingUp, Users,
-  CalendarDays, MapPin, ArrowUp, Beer,
+  CalendarDays, MapPin, ArrowUp, Beer, Gift,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -69,6 +69,8 @@ export default function CompanyDashboardPage() {
   const [venteStats, setVenteStats] = useState<VenteStats | null>(null);
   const [sites, setSites] = useState<SiteList[]>([]);
   const [entreprise, setEntreprise] = useState<Entreprise | null>(null);
+  const [goodiesTotal, setGoodiesTotal] = useState(0);
+  const [goodiesDistribues, setGoodiesDistribues] = useState(0);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -81,12 +83,34 @@ export default function CompanyDashboardPage() {
         api.get<SiteList[]>("/sites/"),
         getMyEntreprise(),
       ]);
-      setCampaigns(Array.isArray(campRes.data) ? campRes.data : ((campRes.data as { results?: CampagneList[] }).results ?? []));
+      const campList = Array.isArray(campRes.data) ? campRes.data : ((campRes.data as { results?: CampagneList[] }).results ?? []);
+      setCampaigns(campList);
       setTastings(Array.isArray(tastRes.data) ? tastRes.data : ((tastRes.data as { results?: Degustation[] }).results ?? []));
       setVentes(Array.isArray(ventesRes.data) ? ventesRes.data : ((ventesRes.data as { results?: Vente[] }).results ?? []));
       setVenteStats(statsRes.data as VenteStats | null);
       setSites(Array.isArray(siteRes.data) ? siteRes.data : ((siteRes.data as { results?: SiteList[] }).results ?? []));
       setEntreprise(ent);
+
+      // Fetch goodies stats for campaigns with goodies
+      const goodiesCamps = campList.filter(c => c.type_recompense === "GOODIES");
+      if (goodiesCamps.length > 0) {
+        const rapports = await Promise.all(
+          goodiesCamps.map(c =>
+            api.get<CampagneRapportSites>(`/campagnes/${c.id}/rapport-sites/`).catch(() => null)
+          )
+        );
+        let totalAlloue = 0;
+        let totalDistribue = 0;
+        rapports.forEach(r => {
+          if (!r?.data) return;
+          totalDistribue += r.data.totaux?.goodies_distribues ?? 0;
+          r.data.sites?.forEach(site => {
+            (site.goodies ?? []).forEach(g => { totalAlloue += g.quantite_initiale; });
+          });
+        });
+        setGoodiesTotal(totalAlloue);
+        setGoodiesDistribues(totalDistribue);
+      }
     } catch {
       /* silent */
     } finally {
@@ -177,6 +201,14 @@ export default function CompanyDashboardPage() {
       gradient: "from-violet-600 via-purple-500 to-fuchsia-400",
       shadow: "shadow-violet-300/50",
     },
+    ...(goodiesTotal > 0 ? [{
+      label: "Goodies distribués",
+      value: `${fmt(goodiesDistribues)} / ${fmt(goodiesTotal)}`,
+      icon: <Gift className="w-6 h-6" />,
+      trend: `${goodiesTotal > 0 ? Math.round((goodiesDistribues / goodiesTotal) * 100) : 0}% écoulés`,
+      gradient: "from-teal-600 via-emerald-500 to-green-400",
+      shadow: "shadow-teal-300/50",
+    }] : []),
   ];
 
   if (authLoading || loading) return <CompanySkeleton />;

@@ -187,8 +187,8 @@ export interface CampagneSiteRapport {
   taux_conversion: number;
   chiffre_affaires: string;
   produits: CampagneSiteProduitStat[];
-  goodies: CampagneSiteGoodieStat[];
-  goodies_distribues_total: number;
+  goodies?: CampagneSiteGoodieStat[];
+  goodies_distribues_total?: number;
  promotions_stats?: {
     promotion_id: string;
     recompense_description: string;
@@ -204,8 +204,11 @@ export interface CampagneRapportSites {
   sites: CampagneSiteRapport[];
   totaux: {
     sites: number;
-    degustations: number;
-    goodies_distribues: number;
+    degustations?: number;
+    ventes?: number;
+    goodies_distribues?: number;
+    gains_promotions?: number;
+    produits_concernes?: number;
   };
 }
 
@@ -343,6 +346,8 @@ export interface Vente {
   conditionnement_display: string;
   quantite: number;
   prix_total: string | null;
+  type_vente: 'NORMAL' | 'GRATUIT' | 'PROMOTION';
+  nom_client: string | null;
   created_at: string;
 }
 
@@ -398,6 +403,24 @@ export interface UpdateGoodiePayload {
 export interface AllouerGoodiePayload {
   site_id: string;
   quantite: number;
+}
+
+// ---------------------------------------------------------------------------
+// GainPromotion
+// ---------------------------------------------------------------------------
+
+export interface GainPromotion {
+  id: string;
+  promotion: string;
+  promotion_description: string;
+  type_promotion: TypePromotion;
+  quantite_requise: number;
+  hotesse_nom: string;
+  site_nom: string;
+  campagne: string;
+  quantite_produits_concernes: number;
+  nom_client: string | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------
