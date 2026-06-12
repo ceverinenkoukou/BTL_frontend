@@ -20,12 +20,12 @@ import {
 import * as XLSX from "xlsx";
 
 interface VenteEnrichie extends Vente {
-  produits_offerts?: number;
-  goodies_offerts?: number;
-  goodies_details?: string;
-  entreprise_logo?: string;
-  entreprise_couleur_primaire?: string;
-  entreprise_couleur_secondaire?: string;
+  produitsOfferts?: number;
+  goodiesOfferts?: number;
+  goodiesDetails?: string;
+  entrepriseLogo?: string | null;
+  entrepriseCouleurPrimaire?: string;
+  entrepriseCouleurSecondaire?: string;
 }
 
 const fmt = (n: number) =>
@@ -66,11 +66,15 @@ export default function SalesPage() {
     selectedCampaign === "all" || s.campagne_nom === campaigns.find(c => c.id === selectedCampaign)?.nom
   );
 
-  const stats = {
-    total: filtered.length,
-    revenue: filtered.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0),
-    unites: filtered.reduce((sum, s) => sum + s.quantite, 0),
-  };
+  // Stats globales de la page (Filtre les lignes de promotions gratuites pour ne pas fausser le CA et les vraies ventes)
+  const stats = useMemo(() => {
+    const ventesNormales = filtered.filter(s => s.type_vente !== "PROMOTION");
+    return {
+      total: ventesNormales.length,
+      revenue: ventesNormales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0),
+      unites: ventesNormales.reduce((sum, s) => sum + s.quantite, 0),
+    };
+  }, [filtered]);
 
   const handleExport = () => {
     const data = filtered.map(s => ({
@@ -81,6 +85,7 @@ export default function SalesPage() {
       Site: s.site_nom,
       Produit: s.produit_nom,
       Hôtesse: s.hotesse_nom,
+      Type: s.type_vente,
       Conditionnement: s.conditionnement_display,
       Quantité: s.quantite,
       Total: s.prix_total ?? 0,
@@ -100,30 +105,31 @@ export default function SalesPage() {
       if (!cg.campMap.has(s.campagne_nom)) cg.campMap.set(s.campagne_nom, { name: s.campagne_nom, sales: [] });
       cg.campMap.get(s.campagne_nom)!.sales.push(s);
     });
-    return [...map.values()].map(cg => ({
-      name: cg.name,
-      campaigns: [...cg.campMap.values()],
-      totalRevenue: [...cg.campMap.values()].flatMap(c => c.sales).reduce((s, v) => s + Number(v.prix_total ?? 0), 0),
-      totalSales: [...cg.campMap.values()].flatMap(c => c.sales).length,
-    }));
+    return [...map.values()].map(cg => {
+      const toutesLesLignes = [...cg.campMap.values()].flatMap(c => c.sales);
+      const lignesNormales = toutesLesLignes.filter(l => l.type_vente !== "PROMOTION");
+      return {
+        name: cg.name,
+        campaigns: [...cg.campMap.values()],
+        totalRevenue: lignesNormales.reduce((s, v) => s + Number(v.prix_total ?? 0), 0),
+        totalSales: lignesNormales.length,
+      };
+    });
   }, [filtered]);
 
   const exportCompanyPDF = (entrepriseNom: string) => {
     const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
-    const totalRevenue = companySales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
     
     const firstSale = companySales[0];
     const logoUrl = firstSale?.entreprise_logo || "";
     const colorPrimary   = firstSale?.entreprise_couleur_primaire   || "#065f46";
     const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
 
-    // Calcul des teintes dérivées en JS pour éviter color-mix() (non supporté en impression/html2pdf)
     const hexToRgb = (hex: string) => {
       const h = hex.replace("#", "");
       const full = h.length === 3 ? h.split("").map(c => c + c).join("") : h;
       return { r: parseInt(full.slice(0,2),16), g: parseInt(full.slice(2,4),16), b: parseInt(full.slice(4,6),16) };
     };
-    const mix = (hex: string, alpha: number) => { const {r,g,b} = hexToRgb(hex); return `rgba(${r},${g},${b},${alpha})`; };
     const mixOnWhite = (hex: string, alpha: number) => {
       const {r,g,b} = hexToRgb(hex);
       const R = Math.round(r * alpha + 255 * (1 - alpha));
@@ -162,6 +168,7 @@ export default function SalesPage() {
 
     const goodiesSiteMap = new Map<string, Map<string, number>>();
 
+    // Ventilation correcte basée sur le type de vente Django
     companySales.forEach(s => {
       if (!siteMap.has(s.site_nom)) {
         siteMap.set(s.site_nom, {
@@ -175,38 +182,47 @@ export default function SalesPage() {
         });
       }
       const src = siteMap.get(s.site_nom)!;
-      src.ventesCount += 1;
-      src.unitesVendues += s.quantite;
-      src.produitsOfferts += Number(s.produits_offerts ?? 0); 
-      src.goodiesCount += Number(s.goodies_offerts ?? 0);
-      src.chiffreAffaires += Number(s.prix_total ?? 0);
       if (s.hotesse_nom) src.hotesses.add(s.hotesse_nom);
 
-      if (s.goodies_details && Number(s.goodies_offerts ?? 0) > 0) {
+      if (s.type_vente === "PROMOTION") {
+        // C'est un produit offert (créé automatiquement via la règle promo)
+        src.produitsOfferts += s.quantite;
+      } else {
+        // C'est un achat réel (quantité requise)
+        src.ventesCount += 1;
+        src.unitesVendues += s.quantite;
+        src.chiffreAffaires += Number(s.prix_total ?? 0);
+      }
+
+      // Traitement des goodies s'ils sont enregistrés sur la ligne
+      src.goodiesCount += Number(s.goodiesOfferts ?? 0);
+      if (s.goodiesDetails && Number(s.goodiesOfferts ?? 0) > 0) {
         if (!goodiesSiteMap.has(s.site_nom)) {
           goodiesSiteMap.set(s.site_nom, new Map<string, number>());
         }
         const currentSiteGoodies = goodiesSiteMap.get(s.site_nom)!;
-        const currentQty = currentSiteGoodies.get(s.goodies_details) || 0;
-        currentSiteGoodies.set(s.goodies_details, currentQty + Number(s.goodies_offerts));
+        const currentQty = currentSiteGoodies.get(s.goodiesDetails) || 0;
+        currentSiteGoodies.set(s.goodiesDetails, currentQty + Number(s.goodiesOfferts));
       }
     });
 
-    const globalTotalUnites = companySales.reduce((sum, s) => sum + s.quantite, 0);
-    const globalTotalOfferts = companySales.reduce((sum, s) => sum + Number(s.produits_offerts ?? 0), 0);
-    const globalTotalGoodies = companySales.reduce((sum, s) => sum + Number(s.goodies_offerts ?? 0), 0);
+    // Cumuls généraux pour les boîtes KPI supérieures du PDF
+    const globalTotalActesVentes = companySales.filter(s => s.type_vente !== "PROMOTION").length;
+    const globalTotalUnites = companySales.filter(s => s.type_vente !== "PROMOTION").reduce((sum, s) => sum + s.quantite, 0);
+    const globalTotalOfferts = companySales.filter(s => s.type_vente === "PROMOTION").reduce((sum, s) => sum + s.quantite, 0);
+    const globalTotalGoodies = companySales.reduce((sum, s) => sum + Number(s.goodiesOfferts ?? 0), 0);
 
     const siteRowsHtml = [...siteMap.values()].map(site => `
       <tr>
-        <td class="b site-name">📍 ${site.nom}</td>
+        <td class="b site-name"> ${site.nom}</td>
         <td>
           <div class="tag-container">
-            ${[...site.hotesses].map(h => `<span class="tag hotesse-tag">💃 ${h}</span>`).join("")}
+            ${[...site.hotesses].map(h => `<span class="tag hotesse-tag"> ${h}</span>`).join("")}
           </div>
         </td>
         <td class="r b">${site.ventesCount}</td>
         <td class="r">${site.unitesVendues} u.</td>
-        <td class="r text-gift">${site.produitsOfferts}</td>
+        <td class="r text-gift">${site.produitsOfferts} u.</td>
         <td class="r b text-star">${site.goodiesCount}</td>
       </tr>
     `).join("");
@@ -319,7 +335,6 @@ export default function SalesPage() {
       </div>
       <div class="report-wrapper">
 
-
       <div id="capture-zone" class="report-wrapper">
         <div class="hdr-container">
           <div class="hdr-logo-area">
@@ -333,7 +348,7 @@ export default function SalesPage() {
               </div>
             </div>
             <div class="hdr-text">
-            <h2 text-align="center">RAPPORT JOURNALIER</h2>
+            <h2 text-align="center">RAPPORT JOURNALIER PERFORMANCES</h2>
               <h4>${entrepriseNom}</h4>
             </div>
           </div>
@@ -345,7 +360,7 @@ export default function SalesPage() {
 
         <div class="kpis">
           <div class="kpi"><div class="l">Produits Vendus</div><div class="v">${globalTotalUnites} u.</div></div>
-          <div class="kpi"><div class="l">Produits Offerts</div><div class="v text-gift">${globalTotalOfferts}</div></div>
+          <div class="kpi"><div class="l">Produits Offerts</div><div class="v text-gift">${globalTotalOfferts} u.</div></div>
           <div class="kpi"><div class="l">Goodies Distribués</div><div class="v text-star">${globalTotalGoodies}</div></div>
         </div>
 
@@ -365,9 +380,9 @@ export default function SalesPage() {
             ${siteRowsHtml}
             <tr class="tot-row">
               <td colspan="2" class="b">TOTAL GÉNÉRAL</td>
-              <td class="r">${companySales.length}</td>
+              <td class="r">${globalTotalActesVentes}</td>
               <td class="r">${globalTotalUnites} u.</td>
-              <td class="r text-gift">${globalTotalOfferts}</td>
+              <td class="r text-gift">${globalTotalOfferts} u.</td>
               <td class="r text-star">${globalTotalGoodies}</td>
             </tr>
           </tbody>
@@ -386,8 +401,6 @@ export default function SalesPage() {
             ${goodiesRowsHtml}
           </tbody>
         </table>
-
-        
       </div>
 
       <script>
@@ -400,8 +413,6 @@ export default function SalesPage() {
             html2canvas:  { scale: 2, useCORS: true, logging: false },
             jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
           };
-          
-          // Lancement du téléchargement direct sans ouvrir la boîte de dialogue d'impression
           html2pdf().set(opt).from(element).save();
         }
       </script>
@@ -421,7 +432,6 @@ export default function SalesPage() {
 
   return (
     <div className="space-y-6">
-
       {isAdmin ? (
         <>
           {/* ── Admin hero banner ── */}
@@ -448,8 +458,8 @@ export default function SalesPage() {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
-                  { icon: "🛒", label: "Total ventes",    value: apiStats?.total_ventes ?? stats.total,         sub: "enregistrées" },
-                  { icon: "📦", label: "Unités vendues",  value: apiStats?.total_unites_vendues ?? stats.unites, sub: "produits"     },
+                  { icon: "🛒", label: "Actes de ventes",  value: stats.total, sub: "facturés" },
+                  { icon: "📦", label: "Unités vendues",   value: stats.unites, sub: "produits" },
                 ].map((s, i) => (
                   <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
                     <div className="text-base mb-1">{s.icon}</div>
@@ -505,7 +515,7 @@ export default function SalesPage() {
                       <div className="min-w-0">
                         <h2 className="font-bold text-foreground truncate">{compName}</h2>
                         <p className="text-xs text-muted-foreground">
-                          {compCamps.length} campagne{compCamps.length > 1 ? "s" : ""} · {totalSales} vente{totalSales > 1 ? "s" : ""}
+                          {compCamps.length} campagne{compCamps.length > 1 ? "s" : ""} · {totalSales} acte{totalSales > 1 ? "s" : ""} de vente
                         </p>
                       </div>
                     </div>
@@ -521,7 +531,8 @@ export default function SalesPage() {
                   </div>
                   <div className="divide-y divide-slate-50">
                     {compCamps.map(({ name: campName, sales: campSales }) => {
-                      const campRevenue = campSales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
+                      const lignesNormales = campSales.filter(l => l.type_vente !== "PROMOTION");
+                      const campRevenue = lignesNormales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
                       return (
                         <div key={campName} className="p-4">
                           <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
@@ -532,7 +543,7 @@ export default function SalesPage() {
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-black text-emerald-700">{fmt(campRevenue)}</span>
                               <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full font-medium">
-                                {campSales.length} vente{campSales.length > 1 ? "s" : ""}
+                                {lignesNormales.length} vente{lignesNormales.length > 1 ? "s" : ""}
                               </span>
                             </div>
                           </div>
@@ -540,7 +551,7 @@ export default function SalesPage() {
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="bg-slate-50 border-b border-slate-100">
-                                  {["Produit", "Site", "Hôtesse", "Qté", "Total"].map((h, i) => (
+                                  {["Produit", "Site", "Type", "Qté", "Total"].map((h, i) => (
                                     <th key={h} className={cn("px-3 py-2 text-xs font-semibold text-muted-foreground",
                                       i < 3 ? "text-left" : "text-right")}>{h}</th>
                                   ))}
@@ -565,10 +576,15 @@ export default function SalesPage() {
                                         <MapPin className="w-3 h-3" />{sale.site_nom}
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{sale.hotesse_nom}</td>
+                                    <td className="px-3 py-2.5 text-xs">
+                                      <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold", 
+                                        sale.type_vente === "PROMOTION" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700")}>
+                                        {sale.type_vente === "PROMOTION" ? "🎁 OFFERT" : "💰 VENTE"}
+                                      </span>
+                                    </td>
                                     <td className="px-3 py-2.5 text-right font-medium">{sale.quantite}</td>
                                     <td className="px-3 py-2.5 text-right font-bold text-emerald-700 text-xs">
-                                      {fmt(Number(sale.prix_total ?? 0))}
+                                      {sale.type_vente === "PROMOTION" ? "Gratuit" : fmt(Number(sale.prix_total ?? 0))}
                                     </td>
                                   </tr>
                                 ))}
@@ -602,8 +618,8 @@ export default function SalesPage() {
 
           <div className="grid grid-cols-2 gap-4">
             {[
-              { value: stats.total,    label: "Ventes",          color: "text-emerald-600" },
-              { value: stats.unites,   label: "Unités vendues",  color: "text-blue-600"    },
+              { value: stats.total,    label: "Transactions Ventes", color: "text-emerald-600" },
+              { value: stats.unites,   label: "Unités vendues",      color: "text-blue-600"    },
             ].map((s, i) => (
               <Card key={i}>
                 <CardContent className="p-4 text-center">
@@ -635,7 +651,7 @@ export default function SalesPage() {
                 {isHostess ? "Mes ventes" : "Toutes les ventes"}
               </h3>
               <span className="text-xs text-muted-foreground bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
-                {filtered.length} résultat{filtered.length !== 1 ? "s" : ""}
+                {filtered.length} ligne{filtered.length !== 1 ? "s" : ""} au total
               </span>
             </div>
 
@@ -663,13 +679,16 @@ export default function SalesPage() {
                           <p className="text-xs text-muted-foreground truncate">{sale.campagne_nom}</p>
                         </div>
                       </div>
-                      <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold shrink-0">
-                        {sale.conditionnement_display}
+                      <span className={cn("text-xs border px-2 py-0.5 rounded-full font-semibold shrink-0", 
+                        sale.type_vente === "PROMOTION" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
+                        {sale.type_vente === "PROMOTION" ? "Offert" : sale.conditionnement_display}
                       </span>
                     </div>
                     <div className="flex items-end justify-between">
                       <div>
-                        <p className="text-xl font-bold text-foreground">{fmt(Number(sale.prix_total ?? 0))}</p>
+                        <p className="text-xl font-bold text-foreground">
+                          {sale.type_vente === "PROMOTION" ? "Gratuit" : fmt(Number(sale.prix_total ?? 0))}
+                        </p>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           <MapPin className="w-3 h-3" />{sale.site_nom}
                         </p>
