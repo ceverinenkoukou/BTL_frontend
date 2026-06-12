@@ -340,6 +340,9 @@ export interface Vente {
   site_nom: string;
   campagne_nom: string;
   entreprise_nom: string;
+  entreprise_logo: string | null;
+  entreprise_couleur_primaire: string;
+  entreprise_couleur_secondaire: string;
   produit: string;
   produit_nom: string;
   conditionnement: TypeConditionnement;
