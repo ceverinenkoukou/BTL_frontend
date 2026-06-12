@@ -112,10 +112,43 @@ export default function SalesPage() {
     const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
     const totalRevenue = companySales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
     
-    const firstSale = companySales[0]; 
-    const logoUrl = firstSale?.entreprise_logo || ""; 
-    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46"; 
-    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488"; 
+    const firstSale = companySales[0];
+    const logoUrl = firstSale?.entreprise_logo || "";
+    const colorPrimary   = firstSale?.entreprise_couleur_primaire   || "#065f46";
+    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
+
+    // Calcul des teintes dérivées en JS pour éviter color-mix() (non supporté en impression/html2pdf)
+    const hexToRgb = (hex: string) => {
+      const h = hex.replace("#", "");
+      const full = h.length === 3 ? h.split("").map(c => c + c).join("") : h;
+      return { r: parseInt(full.slice(0,2),16), g: parseInt(full.slice(2,4),16), b: parseInt(full.slice(4,6),16) };
+    };
+    const mix = (hex: string, alpha: number) => { const {r,g,b} = hexToRgb(hex); return `rgba(${r},${g},${b},${alpha})`; };
+    const mixOnWhite = (hex: string, alpha: number) => {
+      const {r,g,b} = hexToRgb(hex);
+      const R = Math.round(r * alpha + 255 * (1 - alpha));
+      const G = Math.round(g * alpha + 255 * (1 - alpha));
+      const B = Math.round(b * alpha + 255 * (1 - alpha));
+      return `rgb(${R},${G},${B})`;
+    };
+
+    const c = {
+      primary:        colorPrimary,
+      secondary:      colorSecondary,
+      primaryBg:      mixOnWhite(colorPrimary, 0.08),
+      primaryBgMed:   mixOnWhite(colorPrimary, 0.15),
+      primaryBorder:  mixOnWhite(colorPrimary, 0.30),
+      primaryText:    colorPrimary,
+      secondaryBg:    mixOnWhite(colorSecondary, 0.12),
+      secondaryBorder:mixOnWhite(colorSecondary, 0.30),
+      secondaryText:  colorSecondary,
+      kpiCaBg:        mixOnWhite(colorPrimary, 0.06),
+      kpiCaBorder:    mixOnWhite(colorPrimary, 0.25),
+      hotesseBg:      mixOnWhite(colorPrimary, 0.08),
+      hotesseBorder:  mixOnWhite(colorPrimary, 0.22),
+      logoGrad:       `linear-gradient(135deg, ${colorPrimary}, ${colorSecondary})`,
+      brandGrad:      `linear-gradient(135deg, ${colorPrimary} 0%, ${colorSecondary} 100%)`,
+    };
 
     const siteMap = new Map<string, {
       nom: string;
@@ -211,127 +244,69 @@ export default function SalesPage() {
       <title>Rapport de Performance - ${entrepriseNom}</title>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
       <style>
-        :root {
-          --brand-primary: ${colorPrimary};
-          --brand-secondary: ${colorSecondary};
-        }
         *{box-sizing:border-box;margin:0;padding:0}
+        @page{size:auto;margin:0mm}
+        html,body{background-color:#f8fafc !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+        body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#334155;padding:20mm 15mm;padding-top:85px}
         
-        @page { 
-          size: auto; 
-          margin: 0mm; 
-        }
-
-        html, body {
-          background-color: #f8fafc !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
+        .action-bar{position:fixed;top:0;left:0;right:0;height:60px;background:#ffffff !important;box-shadow:0 4px 20px rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:flex-end;padding:0 40px;gap:12px;z-index:99999;border-bottom:1px solid #e2e8f0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+        .btn{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:none}
+        .btn-download{background:${c.primary} !important;color:#fff !important;}
+        .btn-download:hover{opacity:0.9}
+        .btn-print{background:#f1f5f9 !important;color:#334155 !important;border:1px solid #cbd5e1 !important;}
         
-        body {
-          font-family:'Segoe UI',Helvetica,Arial,sans-serif;
-          font-size:12px;
-          color:#334155;
-          padding: 20mm 15mm; 
-          padding-top: 85px;
-        }
+        .report-wrapper{background:#ffffff !important;max-width:1024px;margin:0 auto;padding:40px;border-radius:16px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.02);-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
         
-        .action-bar {
-          position: fixed;
-          top: 0; left: 0; right: 0;
-          height: 60px;
-          background: #ffffff !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          padding: 0 40px;
-          gap: 12px;
-          z-index: 99999;
-          border-bottom: 1px solid #e2e8f0;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        .btn {
-          padding: 8px 16px;
-          border-radius: 8px;
-          font-size: 12px;
-          font-weight: 700;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.2s ease;
-          border: none;
-        }
-        .btn-download { background: var(--brand-primary) !important; color: white !important; }
-        .btn-download:hover { opacity: 0.9; }
-        .btn-print { background: #f1f5f9 !important; color: #334155 !important; border: 1px solid #cbd5e1 !important; }
-        .btn-print:hover { background: #e2e8f0 !important; }
-
-        .report-wrapper {
-          background: #ffffff !important;
-          max-width: 1024px;
-          margin: 0 auto;
-          padding: 40px;
-          border-radius: 16px;
-          border: 1px solid #e2e8f0;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-
-        .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid var(--brand-primary);padding-bottom:20px;margin-bottom:30px}
+        .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ${c.primary};padding-bottom:20px;margin-bottom:30px}
         .hdr-logo-area{display:flex;align-items:center;gap:18px}
-        
         .corporate-logo-wrapper{width:65px;height:65px;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f8fafc !important;border:1px solid #e2e8f0}
         .corporate-logo-img{width:100%;height:100%;object-fit:contain}
-        .corporate-logo-fallback{width:100%;height:100%;background:linear-gradient(135deg, var(--brand-primary), var(--brand-secondary)) !important;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:900}
-        
-        .hdr-text h1{font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px}
-        .hdr-text p{color:#64748b;font-size:12px;margin-top:2px}
+        .corporate-logo-fallback{width:100%;height:100%;background:${c.logoGrad} !important;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:900;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+        .hdr-text h2{font-size:18px;font-weight:800;color:${c.primary};letter-spacing:-0.5px}
+        .hdr-text h4{font-size:13px;color:#64748b;margin-top:3px}
         .meta-date{text-align:right;color:#64748b;font-size:11px}
         .meta-date .date-box{background:#f8fafc !important;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;margin-top:5px;display:inline-block;font-weight:600;color:#334155}
 
         .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:35px}
-        .kpi{background:#f8fafc !important;border:1px solid #e2e8f0;border-radius:12px;padding:15px}
-        .kpi.primary{background:#faf5ff !important;border-color:#e9d5ff}
+        .kpi{background:#f8fafc !important;border:1px solid #e2e8f0;border-radius:12px;padding:15px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+        .kpi.primary{background:${c.kpiCaBg} !important;border-color:${c.kpiCaBorder} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
         .kpi .l{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px}
         .kpi .v{font-size:20px;font-weight:800;color:#0f172a}
+        .kpi.primary .v{color:${c.primary} !important}
 
-        h2.section-title{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.3px;display:flex;align-items:center;gap:6px}
+        h2.section-title{font-size:13px;font-weight:700;color:${c.primary};margin-bottom:12px;text-transform:uppercase;letter-spacing:0.3px;display:flex;align-items:center;gap:6px}
         table{width:100%;border-collapse:collapse;margin-bottom:35px;background:#fff !important;}
-        th{background:var(--brand-primary) !important;color:#fff !important;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+        th{background:${c.primary} !important;color:#fff !important;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
         th:first-child{border-top-left-radius:8px}
         th:last-child{border-top-right-radius:8px}
         td{padding:12px 14px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
         
         .r{text-align:right}.b{font-weight:700}.text-center{text-align:center}
-        .site-name{color:var(--brand-primary) !important;width:25%}
-        .text-gift{color:#b45309 !important;font-weight:600}
-        .text-star{color:#6d28d9 !important;font-weight:600}
+        .site-name{color:${c.primary} !important;width:25%;font-weight:700}
+        .text-gift{color:${c.primary} !important;font-weight:600}
+        .text-star{color:${c.secondary} !important;font-weight:600}
         
         .tag-container{display:flex;flex-wrap:wrap;gap:4px}
         .tag{padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;display:inline-block}
-        .hotesse-tag{background:#f1f5f9 !important;border:1px solid #cbd5e1;color:#475569}
+        .hotesse-tag{background:${c.hotesseBg} !important;border:1px solid ${c.hotesseBorder} !important;color:${c.primary} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
         
         .goodies-grid-cell{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
-        .goodie-detail-item{background:#f3e8ff !important;border:1px solid #e9d5ff;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center}
-        .goodie-label{color:#581c87 !important;font-weight:600;font-size:11px}
-        .goodie-qty{background:#7e22ce !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+        .goodie-detail-item{background:${c.secondaryBg} !important;border:1px solid ${c.secondaryBorder} !important;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+        .goodie-label{color:${c.secondary} !important;font-weight:600;font-size:11px}
+        .goodie-qty{background:${c.secondary} !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
         
-        .tot-row td{background:var(--brand-primary) !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px}
-        .tot-row td.text-gift{color:#fef3c7 !important}
-        .tot-row td.text-star{color:#f3e8ff !important}
+        .tot-row td{background:${c.primary} !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
+        .tot-row td.text-gift{color:rgba(255,255,255,0.9) !important}
+        .tot-row td.text-star{color:rgba(255,255,255,0.9) !important}
         
         .foot{margin-top:20px;text-align:center;color:#94a3b8;font-size:10px;border-top:1px dashed #e2e8f0;padding-top:15px}
         
         @media print{
-          html, body{padding:0 !important; background:white !important; margin: 0mm !important;}
-          body { padding: 20mm 15mm !important; } 
+          html,body{padding:0 !important;background:white !important;margin:0mm !important;}
+          body{padding:20mm 15mm !important;}
           .action-bar{display:none !important;}
-          .report-wrapper{border:none !important; box-shadow:none !important; padding:0 !important; max-width:100% !important;}
-          table{page-break-inside:auto} 
+          .report-wrapper{border:none !important;box-shadow:none !important;padding:0 !important;max-width:100% !important;}
+          table{page-break-inside:auto}
           tr{page-break-inside:avoid;page-break-after:auto}
         }
       </style>
@@ -370,8 +345,8 @@ export default function SalesPage() {
 
         <div class="kpis">
           <div class="kpi"><div class="l">Produits Vendus</div><div class="v">${globalTotalUnites} u.</div></div>
-          <div class="kpi"><div class="l">Produits Offerts</div><div class="v" style="color: #b45309;">${globalTotalOfferts}</div></div>
-          <div class="kpi"><div class="l">Goodies Distribués</div><div class="v" style="color: #6d28d9;">${globalTotalGoodies}</div></div>
+          <div class="kpi"><div class="l">Produits Offerts</div><div class="v text-gift">${globalTotalOfferts}</div></div>
+          <div class="kpi"><div class="l">Goodies Distribués</div><div class="v text-star">${globalTotalGoodies}</div></div>
         </div>
 
         <h2 class="section-title"> 1. Performances globales et Cumuls par site</h2>
@@ -379,7 +354,7 @@ export default function SalesPage() {
           <thead>
             <tr>
               <th>Site</th>
-              <th>Hôtesses Actives</th>
+              <th>Hôtesses</th>
               <th class="r">Actes de Vente</th>
               <th class="r">Vendus / Consommés</th>
               <th class="r">Offerts</th>

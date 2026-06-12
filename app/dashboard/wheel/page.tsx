@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, Goodie } from "@/lib/types/backend";
+import type { CampagneList, Goodie, SiteList } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Gift, Trophy, Sparkles, RotateCcw } from "lucide-react";
+import { Gift, Trophy, Sparkles, RotateCcw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const WHEEL_COLORS = [
@@ -53,9 +53,12 @@ export default function WheelPage() {
 
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<string>("");
+  const [sites, setSites] = useState<SiteList[]>([]);
+  const [selectedSite, setSelectedSite] = useState<string>("");
   const [prizes, setPrizes] = useState<WheelPrize[]>([]);
-  const [goodies, setGoodies] = useState<Goodie[]>([]);  // Goodies de la campagne
+  const [goodies, setGoodies] = useState<Goodie[]>([]);
   const [spinning, setSpinning] = useState(false);
+  const [savingGain, setSavingGain] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [wonPrize, setWonPrize] = useState<WheelPrize | null>(null);
   const [showWinDialog, setShowWinDialog] = useState(false);
@@ -144,6 +147,13 @@ export default function WheelPage() {
   useEffect(() => {
     if (isMounted && selectedCampaign) {
       fetchPrizes();
+      // Charger les sites de la campagne
+      api.get<SiteList[]>("/sites/").then(({ data }) => {
+        const all = Array.isArray(data) ? data : (data as any).results ?? [];
+        const campSites = all.filter((s: SiteList) => s.campagne === selectedCampaign);
+        setSites(campSites);
+        setSelectedSite(campSites.length === 1 ? campSites[0].id : "");
+      }).catch(() => setSites([]));
     }
   }, [selectedCampaign, fetchPrizes, isMounted]);
 
@@ -275,16 +285,29 @@ export default function WheelPage() {
   };
 
   const handleSaveSpin = async () => {
-    if (!wonPrize) return;
-
+    if (!wonPrize || !wonPrize.isGoodie) return;
+    if (!selectedSite) {
+      toast.error("Veuillez sélectionner un site avant de confirmer.");
+      return;
+    }
+    setSavingGain(true);
     try {
-      toast.success("Gain enregistré !");
+      await api.post("/gains-goodies/enregistrer/", {
+        goodie_id: wonPrize.id,
+        site_id: selectedSite,
+        nom_client: customerName.trim() || undefined,
+      });
+      toast.success(`🎁 Gain enregistré${customerName ? ` pour ${customerName}` : ""} !`);
       setShowWinDialog(false);
       setCustomerName("");
       setCustomerPhone("");
-    } catch (error) {
-      console.error("Error saving spin:", error);
-      toast.error("Erreur lors de l'enregistrement");
+      // Rafraîchir les goodies pour mettre à jour les stocks
+      fetchPrizes();
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || "Erreur lors de l'enregistrement du gain.";
+      toast.error(msg);
+    } finally {
+      setSavingGain(false);
     }
   };
 
@@ -302,18 +325,32 @@ export default function WheelPage() {
             Faites tourner la roue pour gagner des goodies !
           </p>
         </div>
-        <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-          <SelectTrigger className="w-64">
-            <SelectValue placeholder="Sélectionner une campagne" />
-          </SelectTrigger>
-          <SelectContent>
-            {campaigns.map((campaign) => (
-              <SelectItem key={campaign.id} value={campaign.id}>
-                {campaign.nom}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+            <SelectTrigger className="w-64">
+              <SelectValue placeholder="Sélectionner une campagne" />
+            </SelectTrigger>
+            <SelectContent>
+              {campaigns.map((campaign) => (
+                <SelectItem key={campaign.id} value={campaign.id}>
+                  {campaign.nom}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {sites.length > 1 && (
+            <Select value={selectedSite} onValueChange={setSelectedSite}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Sélectionner un site" />
+              </SelectTrigger>
+              <SelectContent>
+                {sites.map(s => (
+                  <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -439,8 +476,11 @@ export default function WheelPage() {
                 >
                   Annuler
                 </Button>
-                <Button className="flex-1" onClick={handleSaveSpin}>
-                  Enregistrer le gain
+                <Button className="flex-1" onClick={handleSaveSpin} disabled={savingGain}>
+                  {savingGain
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</>
+                    : "Enregistrer le gain"
+                  }
                 </Button>
               </div>
             </div>
