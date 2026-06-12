@@ -19,12 +19,21 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
+interface VenteEnrichie extends Vente {
+  produits_offerts?: number;
+  goodies_offerts?: number;
+  goodies_details?: string;
+  entreprise_logo?: string;
+  entreprise_couleur_primaire?: string;
+  entreprise_couleur_secondaire?: string;
+}
+
 const fmt = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
 
 export default function SalesPage() {
   const { user } = useAuth();
-  const [sales, setSales] = useState<Vente[]>([]);
+  const [sales, setSales] = useState<VenteEnrichie[]>([]);
   const [apiStats, setApiStats] = useState<VenteStats | null>(null);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,11 +46,11 @@ export default function SalesPage() {
     setLoading(true);
     try {
       const [ventesRes, statsRes, campRes] = await Promise.all([
-        api.get<Vente[]>("/ventes/"),
+        api.get<VenteEnrichie[]>("/ventes/"),
         api.get<VenteStats>("/ventes/stats/"),
         api.get<CampagneList[]>("/campagnes/"),
       ]);
-      setSales(Array.isArray(ventesRes.data) ? ventesRes.data : ((ventesRes.data as { results?: Vente[] }).results ?? []));
+      setSales(Array.isArray(ventesRes.data) ? ventesRes.data : ((ventesRes.data as { results?: VenteEnrichie[] }).results ?? []));
       setApiStats(statsRes.data);
       setCampaigns(Array.isArray(campRes.data) ? campRes.data : ((campRes.data as { results?: CampagneList[] }).results ?? []));
     } catch {
@@ -83,9 +92,8 @@ export default function SalesPage() {
     toast.success("Export téléchargé");
   };
 
-  // Group by entreprise → campagne for admin
   const companyGroups = useMemo(() => {
-    const map = new Map<string, { name: string; campMap: Map<string, { name: string; sales: Vente[] }> }>();
+    const map = new Map<string, { name: string; campMap: Map<string, { name: string; sales: VenteEnrichie[] }> }>();
     filtered.forEach(s => {
       if (!map.has(s.entreprise_nom)) map.set(s.entreprise_nom, { name: s.entreprise_nom, campMap: new Map() });
       const cg = map.get(s.entreprise_nom)!;
@@ -102,59 +110,338 @@ export default function SalesPage() {
 
   const exportCompanyPDF = (entrepriseNom: string) => {
     const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
-    const campMap = new Map<string, { name: string; sales: Vente[] }>();
-    companySales.forEach(s => {
-      if (!campMap.has(s.campagne_nom)) campMap.set(s.campagne_nom, { name: s.campagne_nom, sales: [] });
-      campMap.get(s.campagne_nom)!.sales.push(s);
-    });
     const totalRevenue = companySales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
-    const campaignRows = [...campMap.values()].map(camp => {
-      const campRev = camp.sales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
-      return `
-        <tr class="camp-row"><td colspan="5" class="camp-name">📍 ${camp.name}</td></tr>
-        ${camp.sales.map(s => `<tr>
-          <td>${new Date(s.created_at).toLocaleDateString("fr-FR")}</td>
-          <td>${s.produit_nom}</td>
-          <td class="r">${s.quantite} × ${s.conditionnement_display}</td>
-          <td class="r">${s.site_nom}</td>
-          <td class="r b">${Number(s.prix_total ?? 0).toLocaleString("fr-FR")} F</td>
-        </tr>`).join("")}
-        <tr class="sub"><td colspan="4" class="r">Sous-total ${camp.name}</td><td class="r b">${campRev.toLocaleString("fr-FR")} F</td></tr>
-      `;
-    }).join("");
-    const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Rapport Ventes – ${entrepriseNom}</title><style>
-      *{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:12px;color:#1e293b;padding:28px}
-      .hdr{background:linear-gradient(135deg,#065f46,#0d9488);color:#fff;padding:20px 24px;border-radius:10px;margin-bottom:20px}
-      .hdr h1{font-size:20px;font-weight:800}.hdr p{opacity:.7;margin-top:3px;font-size:11px}
-      .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
-      .kpi{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;text-align:center}
-      .kpi .v{font-size:17px;font-weight:800;color:#065f46}.kpi .l{font-size:10px;color:#6b7280;margin-top:2px}
-      table{width:100%;border-collapse:collapse}
-      th{background:#065f46;color:#fff;padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
-      td{padding:6px 10px;border-bottom:1px solid #f1f5f9}
-      .camp-row td{background:#f0fdf4;font-weight:700;color:#065f46;padding:8px 10px}
-      .sub td{background:#dcfce7;font-size:11px}
-      .r{text-align:right}.b{font-weight:700}
-      .tot td{background:#065f46;color:#fff;font-weight:800;padding:9px 10px}
-      .foot{margin-top:20px;text-align:center;color:#94a3b8;font-size:10px}
-      @media print{body{padding:12px}}
-    </style></head><body>
-      <div class="hdr"><h1>${entrepriseNom}</h1><p>Rapport de ventes · Exporté le ${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</p></div>
-      <div class="kpis">
-        <div class="kpi"><div class="v">${companySales.length}</div><div class="l">Total ventes</div></div>
-        <div class="kpi"><div class="v">${companySales.reduce((s, v) => s + v.quantite, 0)}</div><div class="l">Unités vendues</div></div>
-        <div class="kpi"><div class="v">${totalRevenue.toLocaleString("fr-FR")} F</div><div class="l">Chiffre d'affaires</div></div>
+    
+    const firstSale = companySales[0]; 
+    const logoUrl = firstSale?.entreprise_logo || ""; 
+    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46"; 
+    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488"; 
+
+    const siteMap = new Map<string, {
+      nom: string;
+      ventesCount: number;
+      unitesVendues: number;
+      produitsOfferts: number;
+      goodiesCount: number;
+      chiffreAffaires: number;
+      hotesses: Set<string>;
+    }>();
+
+    const goodiesSiteMap = new Map<string, Map<string, number>>();
+
+    companySales.forEach(s => {
+      if (!siteMap.has(s.site_nom)) {
+        siteMap.set(s.site_nom, {
+          nom: s.site_nom,
+          ventesCount: 0,
+          unitesVendues: 0,
+          produitsOfferts: 0, 
+          goodiesCount: 0,
+          chiffreAffaires: 0,
+          hotesses: new Set<string>(),
+        });
+      }
+      const src = siteMap.get(s.site_nom)!;
+      src.ventesCount += 1;
+      src.unitesVendues += s.quantite;
+      src.produitsOfferts += Number(s.produits_offerts ?? 0); 
+      src.goodiesCount += Number(s.goodies_offerts ?? 0);
+      src.chiffreAffaires += Number(s.prix_total ?? 0);
+      if (s.hotesse_nom) src.hotesses.add(s.hotesse_nom);
+
+      if (s.goodies_details && Number(s.goodies_offerts ?? 0) > 0) {
+        if (!goodiesSiteMap.has(s.site_nom)) {
+          goodiesSiteMap.set(s.site_nom, new Map<string, number>());
+        }
+        const currentSiteGoodies = goodiesSiteMap.get(s.site_nom)!;
+        const currentQty = currentSiteGoodies.get(s.goodies_details) || 0;
+        currentSiteGoodies.set(s.goodies_details, currentQty + Number(s.goodies_offerts));
+      }
+    });
+
+    const globalTotalUnites = companySales.reduce((sum, s) => sum + s.quantite, 0);
+    const globalTotalOfferts = companySales.reduce((sum, s) => sum + Number(s.produits_offerts ?? 0), 0);
+    const globalTotalGoodies = companySales.reduce((sum, s) => sum + Number(s.goodies_offerts ?? 0), 0);
+
+    const siteRowsHtml = [...siteMap.values()].map(site => `
+      <tr>
+        <td class="b site-name">📍 ${site.nom}</td>
+        <td>
+          <div class="tag-container">
+            ${[...site.hotesses].map(h => `<span class="tag hotesse-tag">💃 ${h}</span>`).join("")}
+          </div>
+        </td>
+        <td class="r b">${site.ventesCount}</td>
+        <td class="r">${site.unitesVendues} u.</td>
+        <td class="r text-gift">${site.produitsOfferts}</td>
+        <td class="r b text-star">${site.goodiesCount}</td>
+      </tr>
+    `).join("");
+
+    let goodiesRowsHtml = "";
+    if (goodiesSiteMap.size === 0) {
+      goodiesRowsHtml = `<tr><td colspan="3" class="text-center" style="color:#94a3b8; padding:20px;">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
+    } else {
+      goodiesRowsHtml = [...goodiesSiteMap.entries()].map(([siteNom, goodiesDistribution]) => {
+        const itemsHtml = [...goodiesDistribution.entries()].map(([goodieNom, quantiteTotale]) => `
+          <div class="goodie-detail-item">
+            <span class="goodie-label">🎁 ${goodieNom}</span>
+            <span class="goodie-qty">x${quantiteTotale}</span>
+          </div>
+        `).join("");
+
+        const totalSiteGoodies = [...goodiesDistribution.values()].reduce((a, b) => a + b, 0);
+
+        return `
+          <tr>
+            <td class="b site-name">📍 ${siteNom}</td>
+            <td>
+              <div class="goodies-grid-cell">${itemsHtml}</div>
+            </td>
+            <td class="r b text-star" style="font-size:13px;">${totalSiteGoodies} lot(s)</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    const html = `<!DOCTYPE html>
+    <html lang="fr">
+    <head>
+      <meta charset="UTF-8">
+      <title>Rapport de Performance - ${entrepriseNom}</title>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+      <style>
+        :root {
+          --brand-primary: ${colorPrimary};
+          --brand-secondary: ${colorSecondary};
+        }
+        *{box-sizing:border-box;margin:0;padding:0}
+        
+        @page { 
+          size: auto; 
+          margin: 0mm; 
+        }
+
+        html, body {
+          background-color: #f8fafc !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        
+        body {
+          font-family:'Segoe UI',Helvetica,Arial,sans-serif;
+          font-size:12px;
+          color:#334155;
+          padding: 20mm 15mm; 
+          padding-top: 85px;
+        }
+        
+        .action-bar {
+          position: fixed;
+          top: 0; left: 0; right: 0;
+          height: 60px;
+          background: #ffffff !important;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          padding: 0 40px;
+          gap: 12px;
+          z-index: 99999;
+          border-bottom: 1px solid #e2e8f0;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .btn {
+          padding: 8px 16px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.2s ease;
+          border: none;
+        }
+        .btn-download { background: var(--brand-primary) !important; color: white !important; }
+        .btn-download:hover { opacity: 0.9; }
+        .btn-print { background: #f1f5f9 !important; color: #334155 !important; border: 1px solid #cbd5e1 !important; }
+        .btn-print:hover { background: #e2e8f0 !important; }
+
+        .report-wrapper {
+          background: #ffffff !important;
+          max-width: 1024px;
+          margin: 0 auto;
+          padding: 40px;
+          border-radius: 16px;
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+
+        .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid var(--brand-primary);padding-bottom:20px;margin-bottom:30px}
+        .hdr-logo-area{display:flex;align-items:center;gap:18px}
+        
+        .corporate-logo-wrapper{width:65px;height:65px;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f8fafc !important;border:1px solid #e2e8f0}
+        .corporate-logo-img{width:100%;height:100%;object-fit:contain}
+        .corporate-logo-fallback{width:100%;height:100%;background:linear-gradient(135deg, var(--brand-primary), var(--brand-secondary)) !important;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:900}
+        
+        .hdr-text h1{font-size:24px;font-weight:800;color:#0f172a;letter-spacing:-0.5px}
+        .hdr-text p{color:#64748b;font-size:12px;margin-top:2px}
+        .meta-date{text-align:right;color:#64748b;font-size:11px}
+        .meta-date .date-box{background:#f8fafc !important;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;margin-top:5px;display:inline-block;font-weight:600;color:#334155}
+
+        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:35px}
+        .kpi{background:#f8fafc !important;border:1px solid #e2e8f0;border-radius:12px;padding:15px}
+        .kpi.primary{background:#faf5ff !important;border-color:#e9d5ff}
+        .kpi .l{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px}
+        .kpi .v{font-size:20px;font-weight:800;color:#0f172a}
+
+        h2.section-title{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.3px;display:flex;align-items:center;gap:6px}
+        table{width:100%;border-collapse:collapse;margin-bottom:35px;background:#fff !important;}
+        th{background:var(--brand-primary) !important;color:#fff !important;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+        th:first-child{border-top-left-radius:8px}
+        th:last-child{border-top-right-radius:8px}
+        td{padding:12px 14px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
+        
+        .r{text-align:right}.b{font-weight:700}.text-center{text-align:center}
+        .site-name{color:var(--brand-primary) !important;width:25%}
+        .text-gift{color:#b45309 !important;font-weight:600}
+        .text-star{color:#6d28d9 !important;font-weight:600}
+        
+        .tag-container{display:flex;flex-wrap:wrap;gap:4px}
+        .tag{padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;display:inline-block}
+        .hotesse-tag{background:#f1f5f9 !important;border:1px solid #cbd5e1;color:#475569}
+        
+        .goodies-grid-cell{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
+        .goodie-detail-item{background:#f3e8ff !important;border:1px solid #e9d5ff;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center}
+        .goodie-label{color:#581c87 !important;font-weight:600;font-size:11px}
+        .goodie-qty{background:#7e22ce !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+        
+        .tot-row td{background:var(--brand-primary) !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px}
+        .tot-row td.text-gift{color:#fef3c7 !important}
+        .tot-row td.text-star{color:#f3e8ff !important}
+        
+        .foot{margin-top:20px;text-align:center;color:#94a3b8;font-size:10px;border-top:1px dashed #e2e8f0;padding-top:15px}
+        
+        @media print{
+          html, body{padding:0 !important; background:white !important; margin: 0mm !important;}
+          body { padding: 20mm 15mm !important; } 
+          .action-bar{display:none !important;}
+          .report-wrapper{border:none !important; box-shadow:none !important; padding:0 !important; max-width:100% !important;}
+          table{page-break-inside:auto} 
+          tr{page-break-inside:avoid;page-break-after:auto}
+        }
+      </style>
+    </head>
+    <body>
+
+      <div class="action-bar">
+        <button class="btn btn-download" onclick="generateDirectPDF()"> PDF</button>
+        <button class="btn btn-print" onclick="window.print()">🖨️ Imprimer</button>
       </div>
-      <table><thead><tr><th>Date</th><th>Produit</th><th class="r">Qté / Cond.</th><th>Site</th><th class="r">Total</th></tr></thead>
-      <tbody>${campaignRows}<tr class="tot"><td colspan="4" class="r">TOTAL GÉNÉRAL</td><td class="r">${totalRevenue.toLocaleString("fr-FR")} F</td></tr></tbody></table>
-      <div class="foot">Document généré automatiquement · ${entrepriseNom}</div>
-    </body></html>`;
+      <div class="report-wrapper">
+
+
+      <div id="capture-zone" class="report-wrapper">
+        <div class="hdr-container">
+          <div class="hdr-logo-area">
+            <div class="corporate-logo-wrapper">
+              ${logoUrl 
+                ? `<img src="${logoUrl}" alt="Logo" class="corporate-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />` 
+                : ""
+              }
+              <div class="corporate-logo-fallback" style="${logoUrl ? "display:none;" : "display:flex;"}">
+                ${entrepriseNom.charAt(0)}
+              </div>
+            </div>
+            <div class="hdr-text">
+            <h2 text-align="center">RAPPORT JOURNALIER</h2>
+              <h4>${entrepriseNom}</h4>
+            </div>
+          </div>
+          <div class="meta-date">
+            Rapport généré le<br/>
+            <div class="date-box">${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
+          </div>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi"><div class="l">Produits Vendus</div><div class="v">${globalTotalUnites} u.</div></div>
+          <div class="kpi"><div class="l">Produits Offerts</div><div class="v" style="color: #b45309;">${globalTotalOfferts}</div></div>
+          <div class="kpi"><div class="l">Goodies Distribués</div><div class="v" style="color: #6d28d9;">${globalTotalGoodies}</div></div>
+        </div>
+
+        <h2 class="section-title"> 1. Performances globales et Cumuls par site</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th>Hôtesses Actives</th>
+              <th class="r">Actes de Vente</th>
+              <th class="r">Vendus / Consommés</th>
+              <th class="r">Offerts</th>
+              <th class="r">Goodies (Total)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${siteRowsHtml}
+            <tr class="tot-row">
+              <td colspan="2" class="b">TOTAL GÉNÉRAL</td>
+              <td class="r">${companySales.length}</td>
+              <td class="r">${globalTotalUnites} u.</td>
+              <td class="r text-gift">${globalTotalOfferts}</td>
+              <td class="r text-star">${globalTotalGoodies}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2 class="section-title"> 2. Répartition détaillée des goodies gagnés par site</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Site d'activité</th>
+              <th>Détail des Dotations / Lots distribués</th>
+              <th class="r">Volume total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${goodiesRowsHtml}
+          </tbody>
+        </table>
+
+        
+      </div>
+
+      <script>
+        function generateDirectPDF() {
+          const element = document.getElementById('capture-zone');
+          const opt = {
+            margin:       10,
+            filename:     "Rapport_Performance_${entrepriseNom.replace(/\s+/g, '_')}.pdf",
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2, useCORS: true, logging: false },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+          };
+          
+          // Lancement du téléchargement direct sans ouvrir la boîte de dialogue d'impression
+          html2pdf().set(opt).from(element).save();
+        }
+      </script>
+    </body>
+    </html>`;
+
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, "_blank");
-    if (win) win.onload = () => setTimeout(() => win.print(), 300);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    toast.success(`Rapport PDF de ${entrepriseNom} prêt à imprimer`);
+    
+    if (win) {
+      win.document.title = `Rapport de Performance - ${entrepriseNom}`;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast.success(`Aperçu du rapport de ${entrepriseNom} disponible`);
   };
 
   return (
@@ -188,7 +475,6 @@ export default function SalesPage() {
                 {[
                   { icon: "🛒", label: "Total ventes",    value: apiStats?.total_ventes ?? stats.total,         sub: "enregistrées" },
                   { icon: "📦", label: "Unités vendues",  value: apiStats?.total_unites_vendues ?? stats.unites, sub: "produits"     },
-                  { icon: "💰", label: "Chiffre d'aff.",  value: fmt(stats.revenue),                             sub: ""             },
                 ].map((s, i) => (
                   <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
                     <div className="text-base mb-1">{s.icon}</div>
@@ -254,7 +540,7 @@ export default function SalesPage() {
                       </div>
                       <button onClick={() => exportCompanyPDF(compName)}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-700 text-xs font-semibold transition-colors shadow-sm">
-                        <FileText className="w-3.5 h-3.5" />PDF
+                        <FileText className="w-3.5 h-3.5" />PDF / Impression
                       </button>
                     </div>
                   </div>
@@ -339,11 +625,10 @@ export default function SalesPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             {[
               { value: stats.total,    label: "Ventes",          color: "text-emerald-600" },
               { value: stats.unites,   label: "Unités vendues",  color: "text-blue-600"    },
-              { value: fmt(stats.revenue), label: "Chiffre d'aff.", color: "text-violet-600" },
             ].map((s, i) => (
               <Card key={i}>
                 <CardContent className="p-4 text-center">
