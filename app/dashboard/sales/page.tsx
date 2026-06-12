@@ -405,27 +405,6 @@ export default function SalesPage() {
         </table>
       </div>
 
-      <div class="page-break-before"></div>
-
-        <h2 class="section-title">3. Journal des Transactions et Détails par Client</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Heure</th>
-              <th>Hôtesse</th>
-              <th>Site</th>
-              <th>Client</th>
-              <th>Produit Ciblé</th>
-              <th class="r">Vol. Vendu</th>
-              <th class="r">Vol. Offert</th>
-              <th class="r">Goodie / Lot gagné</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${clientsRowsHtml}
-          </tbody>
-        </table>
-      </div>
 
       <script>
         function generateDirectPDF() {
