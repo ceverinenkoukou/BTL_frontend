@@ -28,6 +28,7 @@ interface VenteEnrichie extends Vente {
   entrepriseCouleurSecondaire?: string;
 }
 
+
 const fmt = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
 
@@ -41,6 +42,7 @@ export default function SalesPage() {
 
   const isHostess = user?.role === "Hotesse";
   const isAdmin = user?.role === "Administrateur";
+  
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
