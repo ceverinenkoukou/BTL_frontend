@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { Vente, VenteStats, CampagneList } from "@/lib/types/backend";
-import { Card, CardContent } from "@/components/ui/card";
+import type {
+  Degustation, CreateDegustationPayload, SiteList, MonSiteInfo,
+  TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion,
+} from "@/lib/types/backend";
+import { enregistrerGainPromotion } from "@/lib/services/promotionService";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -12,51 +18,100 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import {
-  ShoppingCart, Download, Package, FileText, Building2, MapPin,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
+import {
+  Plus, UtensilsCrossed, Loader2, CheckCircle2,
+  Frown, Meh, Smile, Laugh, Heart,
+  Download, Search, Calendar, UserRound, Package, TrendingUp, X, MapPin,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import { cn } from "@/lib/utils";
 
-interface VenteEnrichie extends Vente {
-  produitsOfferts?: number;
-  goodiesOfferts?: number;
-  goodiesDetails?: string;
-  entrepriseLogo?: string | null;
-  entrepriseCouleurPrimaire?: string;
-  entrepriseCouleurSecondaire?: string;
-}
+const AGE_OPTIONS: { value: TrancheAge; label: string }[] = [
+  { value: "MOINS_18", label: "Moins de 18 ans" },
+  { value: "18_25",    label: "18 – 25 ans" },
+  { value: "26_35",    label: "26 – 35 ans" },
+  { value: "36_50",    label: "36 – 50 ans" },
+  { value: "PLUS_50",  label: "Plus de 50 ans" },
+];
 
+const INTENT_OPTIONS: { value: IntentionAchat; label: string; color: string }[] = [
+  { value: "FAIBLE",  label: "Faible",  color: "bg-red-100 text-red-700 border-red-200" },
+  { value: "MOYENNE", label: "Moyenne", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+  { value: "ELEVEE",  label: "Élevée",  color: "bg-green-100 text-green-700 border-green-200" },
+];
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
+const RATING_ICONS: { rating: number; icon: React.ReactNode; label: string }[] = [
+  { rating: 1, icon: <Frown className="w-8 h-8" />,  label: "Mauvais"  },
+  { rating: 2, icon: <Meh className="w-8 h-8" />,    label: "Bof"      },
+  { rating: 3, icon: <Smile className="w-8 h-8" />,  label: "Correct"  },
+  { rating: 4, icon: <Laugh className="w-8 h-8" />,  label: "Bon"      },
+  { rating: 5, icon: <Heart className="w-8 h-8" />,  label: "Excellent" },
+];
 
-export default function SalesPage() {
+const EMPTY_FORM = {
+  site: "",
+  produit: "",
+  tranche_age: "" as TrancheAge | "",
+  note_gout: 0,
+  intention_achat: "" as IntentionAchat | "",
+  a_achete: false,
+  conditionnement: "UNITE" as TypeConditionnement,
+  quantite: 1,
+  nom_client: "",
+  promotion_selectionnee: "" as string | "",
+};
+
+const PROMO_TYPE_STYLES: Record<TypePromotion, { bg: string; border: string; text: string; icon: string; label: string }> = {
+  OFFERT: {
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-700",
+    icon: "🎁",
+    label: "Produit offert",
+  },
+  GAGNE: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+    icon: "🎲",
+    label: "À gagner",
+  },
+};
+
+export default function TastingsPage() {
   const { user } = useAuth();
-  const [sales, setSales] = useState<VenteEnrichie[]>([]);
-  const [apiStats, setApiStats] = useState<VenteStats | null>(null);
-  const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
+  const [tastings, setTastings] = useState<Degustation[]>([]);
+  const [sites, setSites] = useState<SiteList[]>([]);
+  const [siteInfo, setSiteInfo] = useState<MonSiteInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingSite, setLoadingSite] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTasting, setSelectedTasting] = useState<Degustation | null>(null);
+  const [form, setForm] = useState({ ...EMPTY_FORM });
 
   const isHostess = user?.role === "Hotesse";
   const isAdmin = user?.role === "Administrateur";
-  
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [ventesRes, statsRes, campRes] = await Promise.all([
-        api.get<VenteEnrichie[]>("/ventes/"),
-        api.get<VenteStats>("/ventes/stats/"),
-        api.get<CampagneList[]>("/campagnes/"),
+      const [tastRes, siteRes] = await Promise.all([
+        api.get<Degustation[]>("/degustations/"),
+        api.get<SiteList[]>("/sites/"),
       ]);
-      setSales(Array.isArray(ventesRes.data) ? ventesRes.data : ((ventesRes.data as { results?: VenteEnrichie[] }).results ?? []));
-      setApiStats(statsRes.data);
-      setCampaigns(Array.isArray(campRes.data) ? campRes.data : ((campRes.data as { results?: CampagneList[] }).results ?? []));
+      setTastings(Array.isArray(tastRes.data) ? tastRes.data : ((tastRes.data as { results?: Degustation[] }).results ?? []));
+      setSites(Array.isArray(siteRes.data) ? siteRes.data : ((siteRes.data as { results?: SiteList[] }).results ?? []));
     } catch {
-      toast.error("Erreur lors du chargement des ventes.");
+      toast.error("Erreur lors du chargement des données.");
     } finally {
       setLoading(false);
     }
@@ -64,652 +119,688 @@ export default function SalesPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const filtered = sales.filter(s =>
-    selectedCampaign === "all" || s.campagne_nom === campaigns.find(c => c.id === selectedCampaign)?.nom
-  );
-
-  // Stats globales de la page (Filtre les lignes de promotions gratuites pour ne pas fausser le CA et les vraies ventes)
-  const stats = useMemo(() => {
-    const ventesNormales = filtered.filter(s => s.type_vente !== "PROMOTION");
-    return {
-      total: ventesNormales.length,
-      revenue: ventesNormales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0),
-      unites: ventesNormales.reduce((sum, s) => sum + s.quantite, 0),
-    };
-  }, [filtered]);
-
-  const handleExport = () => {
-    const data = filtered.map(s => ({
-      Date: new Date(s.created_at).toLocaleDateString("fr-FR"),
-      Heure: new Date(s.created_at).toLocaleTimeString("fr-FR"),
-      Entreprise: s.entreprise_nom,
-      Campagne: s.campagne_nom,
-      Site: s.site_nom,
-      Produit: s.produit_nom,
-      Hôtesse: s.hotesse_nom,
-      Type: s.type_vente,
-      Conditionnement: s.conditionnement_display,
-      Quantité: s.quantite,
-      Total: s.prix_total ?? 0,
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Ventes");
-    XLSX.writeFile(wb, `ventes_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success("Export téléchargé");
+  const handleSiteChange = async (siteId: string) => {
+    setForm(f => ({ ...f, site: siteId, produit: "" }));
+    setSiteInfo(null);
+    if (!siteId) return;
+    setLoadingSite(true);
+    try {
+      const { data } = await api.get<MonSiteInfo>(`/degustations/mon-site/?site_id=${siteId}`);
+      setSiteInfo(data);
+      if (data.auto_select_produit && data.produits.length === 1) {
+        setForm(f => ({ ...f, produit: data.produits[0].id }));
+      }
+    } catch {
+      toast.error("Impossible de charger les informations du site.");
+    } finally {
+      setLoadingSite(false);
+    }
   };
 
-  const companyGroups = useMemo(() => {
-    const map = new Map<string, { name: string; campMap: Map<string, { name: string; sales: VenteEnrichie[] }> }>();
-    filtered.forEach(s => {
-      if (!map.has(s.entreprise_nom)) map.set(s.entreprise_nom, { name: s.entreprise_nom, campMap: new Map() });
-      const cg = map.get(s.entreprise_nom)!;
-      if (!cg.campMap.has(s.campagne_nom)) cg.campMap.set(s.campagne_nom, { name: s.campagne_nom, sales: [] });
-      cg.campMap.get(s.campagne_nom)!.sales.push(s);
-    });
-    return [...map.values()].map(cg => {
-      const toutesLesLignes = [...cg.campMap.values()].flatMap(c => c.sales);
-      const lignesNormales = toutesLesLignes.filter(l => l.type_vente !== "PROMOTION");
-      return {
-        name: cg.name,
-        campaigns: [...cg.campMap.values()],
-        totalRevenue: lignesNormales.reduce((s, v) => s + Number(v.prix_total ?? 0), 0),
-        totalSales: lignesNormales.length,
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.site || !form.produit || !form.tranche_age || !form.note_gout || !form.intention_achat) {
+      toast.error("Veuillez remplir tous les champs obligatoires.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: CreateDegustationPayload = {
+        site: form.site,
+        produit: form.produit,
+        tranche_age: form.tranche_age as TrancheAge,
+        note_gout: form.note_gout,
+        intention_achat: form.intention_achat as IntentionAchat,
+        a_achete: form.a_achete,
+        nom_client: form.nom_client.trim() || undefined,
+        ...(form.a_achete && {
+          conditionnement: form.conditionnement,
+          quantite: form.quantite,
+        }),
       };
-    });
-  }, [filtered]);
+      const { data: created } = await api.post<Degustation>("/degustations/", payload);
 
-  const exportCompanyPDF = (entrepriseNom: string) => {
-    const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
-    
-    const firstSale = companySales[0];
-    const logoUrl = firstSale?.entreprise_logo || "";
-    const colorPrimary   = firstSale?.entreprise_couleur_primaire   || "#065f46";
-    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
-
-    const hexToRgb = (hex: string) => {
-      const h = hex.replace("#", "");
-      const full = h.length === 3 ? h.split("").map(c => c + c).join("") : h;
-      return { r: parseInt(full.slice(0,2),16), g: parseInt(full.slice(2,4),16), b: parseInt(full.slice(4,6),16) };
-    };
-    const mixOnWhite = (hex: string, alpha: number) => {
-      const {r,g,b} = hexToRgb(hex);
-      const R = Math.round(r * alpha + 255 * (1 - alpha));
-      const G = Math.round(g * alpha + 255 * (1 - alpha));
-      const B = Math.round(b * alpha + 255 * (1 - alpha));
-      return `rgb(${R},${G},${B})`;
-    };
-
-    const c = {
-      primary:        colorPrimary,
-      secondary:      colorSecondary,
-      primaryBg:      mixOnWhite(colorPrimary, 0.08),
-      primaryBgMed:   mixOnWhite(colorPrimary, 0.15),
-      primaryBorder:  mixOnWhite(colorPrimary, 0.30),
-      primaryText:    colorPrimary,
-      secondaryBg:    mixOnWhite(colorSecondary, 0.12),
-      secondaryBorder:mixOnWhite(colorSecondary, 0.30),
-      secondaryText:  colorSecondary,
-      kpiCaBg:        mixOnWhite(colorPrimary, 0.06),
-      kpiCaBorder:    mixOnWhite(colorPrimary, 0.25),
-      hotesseBg:      mixOnWhite(colorPrimary, 0.08),
-      hotesseBorder:  mixOnWhite(colorPrimary, 0.22),
-      logoGrad:       `linear-gradient(135deg, ${colorPrimary}, ${colorSecondary})`,
-      brandGrad:      `linear-gradient(135deg, ${colorPrimary} 0%, ${colorSecondary} 100%)`,
-    };
-
-    const siteMap = new Map<string, {
-      nom: string;
-      ventesCount: number;
-      unitesVendues: number;
-      produitsOfferts: number;
-      goodiesCount: number;
-      chiffreAffaires: number;
-      hotesses: Set<string>;
-    }>();
-
-    const goodiesSiteMap = new Map<string, Map<string, number>>();
-
-    // Ventilation correcte basée sur le type de vente Django
-    companySales.forEach(s => {
-      if (!siteMap.has(s.site_nom)) {
-        siteMap.set(s.site_nom, {
-          nom: s.site_nom,
-          ventesCount: 0,
-          unitesVendues: 0,
-          produitsOfferts: 0, 
-          goodiesCount: 0,
-          chiffreAffaires: 0,
-          hotesses: new Set<string>(),
-        });
-      }
-      const src = siteMap.get(s.site_nom)!;
-      if (s.hotesse_nom) src.hotesses.add(s.hotesse_nom);
-
-      if (s.type_vente === "PROMOTION") {
-        // C'est un produit offert (créé automatiquement via la règle promo)
-        src.produitsOfferts += s.quantite;
-      } else {
-        // C'est un achat réel (quantité requise)
-        src.ventesCount += 1;
-        src.unitesVendues += s.quantite;
-        src.chiffreAffaires += Number(s.prix_total ?? 0);
-      }
-
-      // Traitement des goodies s'ils sont enregistrés sur la ligne
-      src.goodiesCount += Number(s.goodiesOfferts ?? 0);
-      if (s.goodiesDetails && Number(s.goodiesOfferts ?? 0) > 0) {
-        if (!goodiesSiteMap.has(s.site_nom)) {
-          goodiesSiteMap.set(s.site_nom, new Map<string, number>());
+      if (form.a_achete && form.promotion_selectionnee && siteInfo) {
+        try {
+          const gainResult = await enregistrerGainPromotion(form.promotion_selectionnee, {
+            site_id: form.site,
+            nom_client: form.nom_client.trim() || undefined,
+          });
+          toast.success(`🎉 ${gainResult.recompense || "Avantage"} enregistré !`);
+        } catch (promoErr: unknown) {
+          const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.warning(promoMsg ?? "Erreur lors de l'enregistrement de la promotion.");
         }
-        const currentSiteGoodies = goodiesSiteMap.get(s.site_nom)!;
-        const currentQty = currentSiteGoodies.get(s.goodiesDetails) || 0;
-        currentSiteGoodies.set(s.goodiesDetails, currentQty + Number(s.goodiesOfferts));
       }
-    });
 
-    // Cumuls généraux pour les boîtes KPI supérieures du PDF
-    const globalTotalActesVentes = companySales.filter(s => s.type_vente !== "PROMOTION").length;
-    const globalTotalUnites = companySales.filter(s => s.type_vente !== "PROMOTION").reduce((sum, s) => sum + s.quantite, 0);
-    const globalTotalOfferts = companySales.filter(s => s.type_vente === "PROMOTION").reduce((sum, s) => sum + s.quantite, 0);
-    const globalTotalGoodies = companySales.reduce((sum, s) => sum + Number(s.goodiesOfferts ?? 0), 0);
-
-    const siteRowsHtml = [...siteMap.values()].map(site => `
-      <tr>
-        <td class="b site-name"> ${site.nom}</td>
-        <td>
-          <div class="tag-container">
-            ${[...site.hotesses].map(h => `<span class="tag hotesse-tag"> ${h}</span>`).join("")}
-          </div>
-        </td>
-        <td class="r b">${site.ventesCount}</td>
-        <td class="r">${site.unitesVendues} u.</td>
-        <td class="r text-gift">${site.produitsOfferts} u.</td>
-        <td class="r b text-star">${site.goodiesCount}</td>
-      </tr>
-    `).join("");
-
-    let goodiesRowsHtml = "";
-    if (goodiesSiteMap.size === 0) {
-      goodiesRowsHtml = `<tr><td colspan="3" class="text-center" style="color:#94a3b8; padding:20px;">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
-    } else {
-      goodiesRowsHtml = [...goodiesSiteMap.entries()].map(([siteNom, goodiesDistribution]) => {
-        const itemsHtml = [...goodiesDistribution.entries()].map(([goodieNom, quantiteTotale]) => `
-          <div class="goodie-detail-item">
-            <span class="goodie-label">🎁 ${goodieNom}</span>
-            <span class="goodie-qty">x${quantiteTotale}</span>
-          </div>
-        `).join("");
-
-        const totalSiteGoodies = [...goodiesDistribution.values()].reduce((a, b) => a + b, 0);
-
-        return `
-          <tr>
-            <td class="b site-name">📍 ${siteNom}</td>
-            <td>
-              <div class="goodies-grid-cell">${itemsHtml}</div>
-            </td>
-            <td class="r b text-star" style="font-size:13px;">${totalSiteGoodies} lot(s)</td>
-          </tr>
-        `;
-      }).join("");
+      setTastings(prev => [created, ...prev]);
+      toast.success("Dégustation enregistrée !");
+      setDialogOpen(false);
+      setForm(f => ({ ...EMPTY_FORM, site: f.site }));
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg ?? "Erreur lors de l'enregistrement.");
+    } finally {
+      setSaving(false);
     }
+  };
 
-    const html = `<!DOCTYPE html>
-    <html lang="fr">
-    <head>
-      <meta charset="UTF-8">
-      <title>Rapport de Performance - ${entrepriseNom}</title>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-      <style>
-        *{box-sizing:border-box;margin:0;padding:0}
-        @page{size:auto;margin:0mm}
-        html,body{background-color:#f8fafc !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#334155;padding:20mm 15mm;padding-top:85px}
-        
-        .action-bar{position:fixed;top:0;left:0;right:0;height:60px;background:#ffffff !important;box-shadow:0 4px 20px rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:flex-end;padding:0 40px;gap:12px;z-index:99999;border-bottom:1px solid #e2e8f0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        .btn{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:none}
-        .btn-download{background:${c.primary} !important;color:#fff !important;}
-        .btn-download:hover{opacity:0.9}
-        .btn-print{background:#f1f5f9 !important;color:#334155 !important;border:1px solid #cbd5e1 !important;}
-        
-        .report-wrapper{background:#ffffff !important;max-width:1024px;margin:0 auto;padding:40px;border-radius:16px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.02);-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        
-        .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ${c.primary};padding-bottom:20px;margin-bottom:30px}
-        .hdr-logo-area{display:flex;align-items:center;gap:18px}
-        .corporate-logo-wrapper{width:65px;height:65px;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f8fafc !important;border:1px solid #e2e8f0}
-        .corporate-logo-img{width:100%;height:100%;object-fit:contain}
-        .corporate-logo-fallback{width:100%;height:100%;background:${c.logoGrad} !important;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:900;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        .hdr-text h2{font-size:18px;font-weight:800;color:${c.primary};letter-spacing:-0.5px}
-        .hdr-text h4{font-size:13px;color:#64748b;margin-top:3px}
-        .meta-date{text-align:right;color:#64748b;font-size:11px}
-        .meta-date .date-box{background:#f8fafc !important;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;margin-top:5px;display:inline-block;font-weight:600;color:#334155}
+  const filtered = tastings.filter(t => {
+    const q = searchQuery.toLowerCase();
+    return !q || t.produit_nom.toLowerCase().includes(q) || t.campagne_nom.toLowerCase().includes(q) || t.site_nom.toLowerCase().includes(q);
+  });
 
-        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:35px}
-        .kpi{background:#f8fafc !important;border:1px solid #e2e8f0;border-radius:12px;padding:15px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        .kpi.primary{background:${c.kpiCaBg} !important;border-color:${c.kpiCaBorder} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        .kpi .l{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px}
-        .kpi .v{font-size:20px;font-weight:800;color:#0f172a}
-        .kpi.primary .v{color:${c.primary} !important}
+  const stats = {
+    total: tastings.length,
+    purchased: tastings.filter(t => t.a_achete).length,
+    conversionRate: tastings.length > 0
+      ? Math.round((tastings.filter(t => t.a_achete).length / tastings.length) * 100)
+      : 0,
+    avgRating: tastings.length > 0
+      ? (tastings.reduce((s, t) => s + t.note_gout, 0) / tastings.length).toFixed(1)
+      : "—",
+  };
 
-        h2.section-title{font-size:13px;font-weight:700;color:${c.primary};margin-bottom:12px;text-transform:uppercase;letter-spacing:0.3px;display:flex;align-items:center;gap:6px}
-        table{width:100%;border-collapse:collapse;margin-bottom:35px;background:#fff !important;}
-        th{background:${c.primary} !important;color:#fff !important;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        th:first-child{border-top-left-radius:8px}
-        th:last-child{border-top-right-radius:8px}
-        td{padding:12px 14px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
-        
-        .r{text-align:right}.b{font-weight:700}.text-center{text-align:center}
-        .site-name{color:${c.primary} !important;width:25%;font-weight:700}
-        .text-gift{color:${c.primary} !important;font-weight:600}
-        .text-star{color:${c.secondary} !important;font-weight:600}
-        
-        .tag-container{display:flex;flex-wrap:wrap;gap:4px}
-        .tag{padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;display:inline-block}
-        .hotesse-tag{background:${c.hotesseBg} !important;border:1px solid ${c.hotesseBorder} !important;color:${c.primary} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        
-        .goodies-grid-cell{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
-        .goodie-detail-item{background:${c.secondaryBg} !important;border:1px solid ${c.secondaryBorder} !important;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        .goodie-label{color:${c.secondary} !important;font-weight:600;font-size:11px}
-        .goodie-qty{background:${c.secondary} !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        
-        .tot-row td{background:${c.primary} !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        .tot-row td.text-gift{color:rgba(255,255,255,0.9) !important}
-        .tot-row td.text-star{color:rgba(255,255,255,0.9) !important}
-        
-        .foot{margin-top:20px;text-align:center;color:#94a3b8;font-size:10px;border-top:1px dashed #e2e8f0;padding-top:15px}
-        
-        @media print{
-          html,body{padding:0 !important;background:white !important;margin:0mm !important;}
-          body{padding:20mm 15mm !important;}
-          .action-bar{display:none !important;}
-          .report-wrapper{border:none !important;box-shadow:none !important;padding:0 !important;max-width:100% !important;}
-          table{page-break-inside:auto}
-          tr{page-break-inside:avoid;page-break-after:auto}
-        }
-      </style>
-    </head>
-    <body>
-
-      <div class="action-bar">
-        <button class="btn btn-download" onclick="generateDirectPDF()"> PDF</button>
-        <button class="btn btn-print" onclick="window.print()">🖨️ Imprimer</button>
-      </div>
-      <div class="report-wrapper">
-
-      <div id="capture-zone" class="report-wrapper">
-        <div class="hdr-container">
-          <div class="hdr-logo-area">
-            <div class="corporate-logo-wrapper">
-              ${logoUrl 
-                ? `<img src="${logoUrl}" alt="Logo" class="corporate-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />` 
-                : ""
-              }
-              <div class="corporate-logo-fallback" style="${logoUrl ? "display:none;" : "display:flex;"}">
-                ${entrepriseNom.charAt(0)}
-              </div>
-            </div>
-            <div class="hdr-text">
-            <h2 text-align="center">RAPPORT JOURNALIER PERFORMANCES</h2>
-              <h4>${entrepriseNom}</h4>
-            </div>
-          </div>
-          <div class="meta-date">
-            Rapport généré le<br/>
-            <div class="date-box">${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
-          </div>
-        </div>
-
-        <div class="kpis">
-          <div class="kpi"><div class="l">Produits Vendus</div><div class="v">${globalTotalUnites} u.</div></div>
-          <div class="kpi"><div class="l">Produits Offerts</div><div class="v text-gift">${globalTotalOfferts} u.</div></div>
-          <div class="kpi"><div class="l">Goodies Distribués</div><div class="v text-star">${globalTotalGoodies}</div></div>
-        </div>
-
-        <h2 class="section-title"> 1. Performances globales et Cumuls par site</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Site</th>
-              <th>Hôtesses</th>
-              <th class="r">Actes de Vente</th>
-              <th class="r">Vendus / Consommés</th>
-              <th class="r">Offerts</th>
-              <th class="r">Goodies (Total)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${siteRowsHtml}
-            <tr class="tot-row">
-              <td colspan="2" class="b">TOTAL GÉNÉRAL</td>
-              <td class="r">${globalTotalActesVentes}</td>
-              <td class="r">${globalTotalUnites} u.</td>
-              <td class="r text-gift">${globalTotalOfferts} u.</td>
-              <td class="r text-star">${globalTotalGoodies}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h2 class="section-title"> 2. Répartition détaillée des goodies gagnés par site</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Site d'activité</th>
-              <th>Détail des Dotations / Lots distribués</th>
-              <th class="r">Volume total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${goodiesRowsHtml}
-          </tbody>
-        </table>
-      </div>
-
-
-      <script>
-        function generateDirectPDF() {
-          const element = document.getElementById('capture-zone');
-          const opt = {
-            margin:       10,
-            filename:     "Rapport_Performance_${entrepriseNom.replace(/\s+/g, '_')}.pdf",
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true, logging: false },
-            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-          };
-          html2pdf().set(opt).from(element).save();
-        }
-      </script>
-    </body>
-    </html>`;
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const downloadCSV = () => {
+    const headers = ["ID", "Campagne", "Site", "Produit", "Hôtesse", "Tranche d'âge", "Note goût", "Intention achat", "Achat réalisé", "Date"];
+    const rows = filtered.map(t => [
+      t.id, t.campagne_nom, t.site_nom, t.produit_nom, t.hotesse_nom,
+      t.tranche_age_display, t.note_gout,
+      t.intention_achat_display, t.a_achete ? "Oui" : "Non",
+      new Date(t.created_at).toLocaleDateString("fr-FR"),
+    ]);
+    const csv = [headers, ...rows]
+      .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    
-    if (win) {
-      win.document.title = `Rapport de Performance - ${entrepriseNom}`;
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    toast.success(`Aperçu du rapport de ${entrepriseNom} disponible`);
+    const a = document.createElement("a");
+    a.href = url; a.download = `degustations_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+    toast.success(`${filtered.length} dégustation(s) exportée(s)`);
   };
 
   return (
     <div className="space-y-6">
+      {/* ── Hero banner ── */}
       {isAdmin ? (
-        <>
-          {/* ── Admin hero banner ── */}
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-700 via-teal-600 to-cyan-500 text-white shadow-2xl shadow-emerald-200">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
-            <div className="absolute -right-12 -top-12 w-52 h-52 rounded-full bg-white/10 blur-3xl" />
-            <div className="absolute right-28 -bottom-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" />
-            <div className="relative z-10 p-6 md:p-8">
-              <div className="flex items-start justify-between gap-4 mb-6">
-                <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                      <ShoppingCart className="w-4 h-4" />
-                    </div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Ventes</h1>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 text-white shadow-2xl shadow-indigo-200">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
+          <div className="absolute -right-12 -top-12 w-52 h-52 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute right-28 -bottom-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" />
+          <div className="relative z-10 p-6 md:p-8">
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div>
+                <div className="flex items-center gap-3 mb-1">
+                  <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
+                    <UtensilsCrossed className="w-4.5 h-4.5" />
                   </div>
-                  <p className="text-white/65 text-sm ml-12">Organisées par entreprise et campagne</p>
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Dégustations</h1>
                 </div>
-                <button onClick={handleExport}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-emerald-700 hover:bg-white/90 text-sm font-bold transition-colors shadow-sm shrink-0">
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Exporter XLSX</span>
+                <p className="text-white/65 text-sm ml-12">Suivi en temps réel de toutes les dégustations</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={downloadCSV}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 text-sm font-semibold transition-colors backdrop-blur-sm">
+                  <Download className="w-4 h-4" /><span className="hidden sm:inline">Exporter CSV</span>
                 </button>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {[
-                  { icon: "🛒", label: "Actes de ventes",  value: stats.total, sub: "facturés" },
-                  { icon: "📦", label: "Unités vendues",   value: stats.unites, sub: "produits" },
-                ].map((s, i) => (
-                  <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
-                    <div className="text-base mb-1">{s.icon}</div>
-                    <div className="text-xl font-bold leading-none">
-                      {s.value}{s.sub && <span className="text-xs font-normal text-white/55 ml-1">{s.sub}</span>}
-                    </div>
-                    <div className="text-xs text-white/60 mt-1">{s.label}</div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: "Dégustations", value: stats.total,               sub: "enregistrées", icon: "🍷" },
+                { label: "Achats",       value: stats.purchased,           sub: "réalisés",     icon: "🛒" },
+                { label: "Conversion",   value: `${stats.conversionRate}%`,sub: "taux",         icon: "📈" },
+                { label: "Note moyenne", value: stats.avgRating,           sub: "/ 5",          icon: "⭐" },
+              ].map((s, i) => (
+                <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
+                  <div className="text-base mb-1">{s.icon}</div>
+                  <div className="text-xl font-bold leading-none">
+                    {s.value}<span className="text-xs font-normal text-white/55 ml-1">{s.sub}</span>
                   </div>
-                ))}
-              </div>
+                  <div className="text-xs text-white/60 mt-1">{s.label}</div>
+                </div>
+              ))}
             </div>
           </div>
-
-          {/* Filter + export */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-              <SelectTrigger className="w-56 rounded-xl border-slate-200">
-                <SelectValue placeholder="Toutes les campagnes" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Toutes les campagnes</SelectItem>
-                {campaigns.map(c => <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <button onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-semibold transition-colors">
-              <Download className="w-4 h-4" />Exporter tout (XLSX)
-            </button>
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Dégustations</h1>
+            <p className="text-muted-foreground mt-1">
+              {isHostess ? "Enregistrez vos dégustations" : "Suivi des dégustations de vos campagnes"}
+            </p>
           </div>
+          {isHostess && (
+            <Button size="lg" className="w-full sm:w-auto" onClick={() => setDialogOpen(true)}>
+              <Plus className="w-5 h-5 mr-2" />Nouvelle dégustation
+            </Button>
+          )}
+        </div>
+      )}
 
-          {/* Company sections */}
-          {loading ? (
-            <div className="space-y-4">
-              {[...Array(2)].map((_, i) => <div key={i} className="h-48 bg-slate-50 rounded-2xl animate-pulse" />)}
+      {/* Non-admin stats row */}
+      {!isAdmin && (
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { value: stats.total,               label: "Dégustations", color: "text-indigo-600" },
+            { value: stats.purchased,           label: "Achats",       color: "text-emerald-600" },
+            { value: `${stats.conversionRate}%`,label: "Conversion",   color: "text-violet-600" },
+          ].map((s, i) => (
+            <div key={i} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 text-center">
+              <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
+              <p className="text-sm text-muted-foreground mt-1">{s.label}</p>
             </div>
-          ) : companyGroups.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-100 p-14 text-center">
-              <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <ShoppingCart className="w-8 h-8 text-slate-300" />
-              </div>
-              <p className="text-sm font-medium text-foreground mb-1">Aucune vente</p>
-              <p className="text-xs text-muted-foreground">Aucune vente ne correspond aux filtres sélectionnés</p>
+          ))}
+        </div>
+      )}
+
+      {/* ── Filter bar ── */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Rechercher produit, site, campagne…" className="pl-9 rounded-xl border-slate-200"
+            value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+        </div>
+        {isHostess && (
+          <Button variant="outline" className="rounded-xl" onClick={() => setDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />Nouvelle
+          </Button>
+        )}
+        {isAdmin && (
+          <button onClick={downloadCSV}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-semibold transition-colors">
+            <Download className="w-4 h-4" />CSV ({filtered.length})
+          </button>
+        )}
+      </div>
+
+      {/* ── Tastings grid ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+              <UtensilsCrossed className="w-3.5 h-3.5 text-indigo-600" />
             </div>
-          ) : (
-            <div className="space-y-5">
-              {companyGroups.map(({ name: compName, campaigns: compCamps, totalRevenue, totalSales }) => (
-                <div key={compName} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                  <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 border-b border-emerald-100 px-5 py-4 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-11 h-11 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
-                        <Building2 className="w-5 h-5 text-emerald-700" />
+            {isHostess ? "Mes dégustations" : "Toutes les dégustations"}
+          </h3>
+          <span className="text-xs text-muted-foreground bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
+            {filtered.length} résultat{filtered.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => <div key={i} className="h-28 bg-slate-50 rounded-2xl animate-pulse" />)}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-14">
+            <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <UtensilsCrossed className="w-8 h-8 text-slate-300" />
+            </div>
+            <p className="text-sm font-medium text-foreground mb-1">Aucun résultat</p>
+            <p className="text-xs text-muted-foreground">
+              {isHostess ? "Commencez par enregistrer une dégustation" : "Aucune dégustation ne correspond à votre recherche"}
+            </p>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {filtered.map(t => {
+              const intent = INTENT_OPTIONS.find(i => i.value === t.intention_achat);
+              const rating = RATING_ICONS.find(r => r.rating === t.note_gout);
+              const stripColor = t.intention_achat === "ELEVEE" ? "bg-emerald-400"
+                : t.intention_achat === "MOYENNE" ? "bg-amber-400" : "bg-rose-400";
+              return (
+                <button key={t.id} type="button" onClick={() => setSelectedTasting(t)}
+                  className="relative text-left rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-indigo-200 transition-all group overflow-hidden">
+                  <div className={`absolute left-0 top-0 bottom-0 w-1 ${stripColor}`} />
+                  <div className="pl-4 p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-xl shrink-0 group-hover:bg-indigo-100 transition-colors">
+                          {rating?.icon}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-foreground text-sm truncate">{t.produit_nom}</p>
+                          <p className="text-xs text-muted-foreground truncate">{t.campagne_nom}</p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h2 className="font-bold text-foreground truncate">{compName}</h2>
-                        <p className="text-xs text-muted-foreground">
-                          {compCamps.length} campagne{compCamps.length > 1 ? "s" : ""} · {totalSales} acte{totalSales > 1 ? "s" : ""} de vente
-                        </p>
+                      {t.a_achete && (
+                        <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                          Achat ✓
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />{t.site_nom}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(t.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1 text-amber-400 text-xs">
+                        {"⭐".repeat(t.note_gout)}
+                        <span className="text-muted-foreground ml-1">{rating?.label}</span>
+                      </div>
+                      <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium border", intent?.color)}>
+                        {intent?.label}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── New tasting form dialog (hôtesse only) ── */}
+      {isHostess && (
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Enregistrer une dégustation</DialogTitle>
+              <DialogDescription>Saisissez les informations de la dégustation</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-5 mt-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Site *</Label>
+                  <Select value={form.site} onValueChange={handleSiteChange}>
+                    <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+                    <SelectContent>
+                      {sites.map(s => <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Produit *</Label>
+                  <Select value={form.produit}
+                    onValueChange={v => setForm(f => ({ ...f, produit: v }))}
+                    disabled={!form.site || loadingSite}>
+                    <SelectTrigger>
+                      {loadingSite ? <Loader2 className="w-4 h-4 animate-spin" /> : <SelectValue placeholder="Sélectionner" />}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(siteInfo?.produits ?? []).map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Tranche d&apos;âge *</Label>
+                <Select value={form.tranche_age} onValueChange={v => setForm(f => ({ ...f, tranche_age: v as TrancheAge }))}>
+                  <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+                  <SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Note du goût *</Label>
+                <div className="flex justify-between gap-2">
+                  {RATING_ICONS.map(r => (
+                    <button key={r.rating} type="button" onClick={() => setForm(f => ({ ...f, note_gout: r.rating }))}
+                      className={cn("flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all flex-1",
+                        form.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                      {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Intention d&apos;achat *</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {INTENT_OPTIONS.map(o => (
+                    <button key={o.value} type="button" onClick={() => setForm(f => ({ ...f, intention_achat: o.value }))}
+                      className={cn("py-3 px-4 rounded-lg border-2 font-medium transition-all text-sm",
+                        form.intention_achat === o.value ? o.color + " border-current" : "border-border hover:border-indigo-300")}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Le client a-t-il acheté ?</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button type="button" onClick={() => setForm(f => ({ ...f, a_achete: false }))}
+                    className={cn("py-4 rounded-xl border-2 font-medium transition-all",
+                      !form.a_achete ? "border-slate-400 bg-slate-50" : "border-border hover:border-slate-300")}>
+                    Non
+                  </button>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, a_achete: true }))}
+                    className={cn("py-4 rounded-xl border-2 font-medium transition-all flex items-center justify-center gap-2",
+                      form.a_achete ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-border hover:border-emerald-400")}>
+                    <CheckCircle2 className="w-5 h-5" />Oui, acheté !
+                  </button>
+                </div>
+              </div>
+
+              {form.a_achete && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Conditionnement *</Label>
+                      <Select value={form.conditionnement} onValueChange={v => setForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Quantité *</Label>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setForm(f => ({ ...f, quantite: Math.max(1, f.quantite - 1) }))}
+                          className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">−</button>
+                        <Input type="number" min="1" value={form.quantite}
+                          onChange={e => setForm(f => ({ ...f, quantite: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          className="w-16 text-center font-semibold h-9" />
+                        <button type="button" onClick={() => setForm(f => ({ ...f, quantite: f.quantite + 1 }))}
+                          className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">+</button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
-                        <p className="text-lg font-black text-emerald-700">{fmt(totalRevenue)}</p>
+                  </div>
+
+                  {siteInfo?.promotions && siteInfo.promotions.length > 0 && (
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-semibold text-blue-600">
+                          Offres promotionnelles de la campagne
+                        </Label>
+                        <span className="text-xs text-muted-foreground">
+                          ({siteInfo.promotions.length} règle{siteInfo.promotions.length > 1 ? "s" : ""})
+                        </span>
                       </div>
-                      <button onClick={() => exportCompanyPDF(compName)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-700 text-xs font-semibold transition-colors shadow-sm">
-                        <FileText className="w-3.5 h-3.5" />PDF / Impression
+                      <p className="text-xs text-muted-foreground">
+                        Sélectionnez l&apos;offre correspondant à l&apos;achat du client :
+                      </p>
+
+                      <div className="space-y-2">
+                        {siteInfo.promotions.map((promo) => {
+                          const styles = PROMO_TYPE_STYLES[promo.type_promotion];
+                          const isSelected = form.promotion_selectionnee === promo.id;
+
+                          return (
+                            <button
+                              key={promo.id}
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, promotion_selectionnee: promo.id }))}
+                              className={cn(
+                                "w-full text-left rounded-xl border-2 p-3 transition-all",
+                                isSelected
+                                  ? `${styles.bg} ${styles.border} ${styles.text}`
+                                  : "border-slate-200 hover:border-slate-300 bg-white"
+                              )}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className={cn(
+                                  "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                                  isSelected ? "bg-white/60" : "bg-slate-100"
+                                )}>
+                                  <span className="text-xl">{styles.icon}</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className={cn(
+                                      "text-xs font-bold px-2 py-0.5 rounded-full",
+                                      isSelected ? "bg-white/60" : "bg-slate-100 text-slate-600"
+                                    )}>
+                                      {promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}
+                                    </span>
+                                    <span className={cn(
+                                      "text-xs font-medium",
+                                      isSelected ? styles.text : "text-slate-500"
+                                    )}>
+                                      → {styles.label}
+                                    </span>
+                                  </div>
+                                  <p className={cn(
+                                    "font-semibold text-sm mt-1",
+                                    isSelected ? styles.text : "text-foreground"
+                                  )}>
+                                    {promo.recompense_description}
+                                  </p>
+                                </div>
+                                {isSelected && (
+                                  <div className={cn(
+                                    "w-6 h-6 rounded-full flex items-center justify-center shrink-0",
+                                    styles.text.replace("text-", "bg-").replace("700", "100")
+                                  )}>
+                                    <CheckCircle2 className={cn("w-4 h-4", styles.text)} />
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, promotion_selectionnee: "" }))}
+                        className={cn(
+                          "w-full text-left rounded-xl border-2 p-3 transition-all",
+                          form.promotion_selectionnee === ""
+                            ? "border-slate-400 bg-slate-50 text-slate-700"
+                            : "border-slate-200 hover:border-slate-300 bg-white"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                            form.promotion_selectionnee === "" ? "bg-slate-200" : "bg-slate-100"
+                          )}>
+                            <span className="text-xl">🚫</span>
+                          </div>
+                          <span className="font-medium text-sm">Aucune promotion applicable</span>
+                          {form.promotion_selectionnee === "" && (
+                            <CheckCircle2 className="w-5 h-5 text-slate-500 ml-auto" />
+                          )}
+                        </div>
                       </button>
                     </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Nom du client (optionnel)</Label>
+                <Input value={form.nom_client} onChange={e => setForm(f => ({ ...f, nom_client: e.target.value }))}
+                  placeholder="Prénom ou initiales…" />
+              </div>
+
+              <Button type="submit" className="w-full h-12 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700" disabled={saving}>
+                {saving ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Enenregistrement…</> : <><CheckCircle2 className="w-5 h-5 mr-2" />Enregistrer la dégustation</>}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Tasting detail dialog ── */}
+      {selectedTasting && (() => {
+        const campTastings = tastings.filter(t => t.campagne_nom === selectedTasting.campagne_nom);
+        const avgRating = campTastings.length > 0
+          ? (campTastings.reduce((s, t) => s + t.note_gout, 0) / campTastings.length).toFixed(1)
+          : "—";
+        const convRate = campTastings.length > 0
+          ? Math.round((campTastings.filter(t => t.a_achete).length / campTastings.length) * 100)
+          : 0;
+        const rating = RATING_ICONS.find(r => r.rating === selectedTasting.note_gout);
+        const intent = INTENT_OPTIONS.find(i => i.value === selectedTasting.intention_achat);
+        const intentSteps = [
+          { value: "FAIBLE",  label: "Faible",  dotColor: "bg-rose-400",    textColor: "text-rose-600"    },
+          { value: "MOYENNE", label: "Moyenne", dotColor: "bg-amber-400",   textColor: "text-amber-600"   },
+          { value: "ELEVEE",  label: "Élevée",  dotColor: "bg-emerald-400", textColor: "text-emerald-700" },
+        ];
+        const activeIntentIdx = intentSteps.findIndex(s => s.value === selectedTasting.intention_achat);
+
+        return (
+          <Dialog open={!!selectedTasting} onOpenChange={open => { if (!open) setSelectedTasting(null); }}>
+            <DialogContent className="max-w-lg p-0 overflow-hidden rounded-2xl gap-0">
+              <div className="relative overflow-hidden bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 text-white px-6 pt-6 pb-5">
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(255,255,255,0.12),transparent_60%)]" />
+                <div className="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-white/10 blur-2xl" />
+                <button onClick={() => setSelectedTasting(null)}
+                  className="absolute top-4 right-4 w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors z-10">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                <div className="relative z-10 flex items-start gap-4">
+                  <div className="w-16 h-16 bg-white/20 border border-white/30 rounded-2xl flex items-center justify-center text-4xl shrink-0 shadow-lg">
+                    {rating?.icon}
                   </div>
-                  <div className="divide-y divide-slate-50">
-                    {compCamps.map(({ name: campName, sales: campSales }) => {
-                      const lignesNormales = campSales.filter(l => l.type_vente !== "PROMOTION");
-                      const campRevenue = lignesNormales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-white/55 font-medium uppercase tracking-widest mb-0.5">Dégustation</p>
+                    <h2 className="text-lg font-bold leading-tight truncate">{selectedTasting.produit_nom}</h2>
+                    <p className="text-sm text-white/70 truncate">{selectedTasting.campagne_nom}</p>
+                    <div className="flex items-center gap-1.5 mt-1 text-white/55 text-xs">
+                      <MapPin className="w-3 h-3" />{selectedTasting.site_nom}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 text-white/55 text-xs">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {new Date(selectedTasting.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                      <span className="opacity-50">·</span>
+                      {new Date(selectedTasting.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                </div>
+                <div className="relative z-10 flex items-center gap-2 mt-4">
+                  <div className="flex items-center gap-1">
+                    {[1,2,3,4,5].map(i => (
+                      <div key={i} className={cn("w-7 h-7 rounded-full flex items-center justify-center text-sm transition-all",
+                        i <= selectedTasting.note_gout ? "bg-white text-amber-500 shadow-sm" : "bg-white/20 text-white/40")}>★</div>
+                    ))}
+                  </div>
+                  <span className="text-white/70 text-xs font-medium">{rating?.label} ({selectedTasting.note_gout}/5)</span>
+                </div>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2.5">
+                    <UserRound className="w-3.5 h-3.5 text-indigo-400" />
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Profil dégustateur</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-100 text-violet-700 text-sm font-medium">
+                      🎂 {selectedTasting.tranche_age_display}
+                    </span>
+                    {selectedTasting.nom_client && (
+                      <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-sm font-medium">
+                        👤 {selectedTasting.nom_client}
+                      </span>
+                    )}
+                    {!isHostess && (
+                      <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100 text-slate-700 text-sm font-medium">
+                        💃 {selectedTasting.hotesse_nom}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Intention d&apos;achat</p>
+                  </div>
+                  <div className="relative flex items-center gap-0">
+                    {intentSteps.map((step, idx) => {
+                      const isActive = idx === activeIntentIdx;
+                      const isPast = idx < activeIntentIdx;
                       return (
-                        <div key={campName} className="p-4">
-                          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 bg-emerald-400 rounded-full" />
-                              <span className="font-semibold text-sm text-foreground">{campName}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-black text-emerald-700">{fmt(campRevenue)}</span>
-                              <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full font-medium">
-                                {lignesNormales.length} vente{lignesNormales.length > 1 ? "s" : ""}
-                              </span>
-                            </div>
+                        <div key={step.value} className="flex-1 flex flex-col items-center relative">
+                          {idx < intentSteps.length - 1 && (
+                            <div className={cn("absolute top-[13px] left-1/2 w-full h-0.5 z-0",
+                              idx < activeIntentIdx ? "bg-emerald-300" : "bg-slate-200")} />
+                          )}
+                          <div className={cn("relative z-10 w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all",
+                            isActive ? `${step.dotColor} border-transparent text-white shadow-md scale-110`
+                              : isPast ? "bg-emerald-400 border-emerald-400 text-white"
+                              : "bg-white border-slate-200 text-slate-300")}>
+                            {isPast ? "✓" : isActive ? "●" : "○"}
                           </div>
-                          <div className="rounded-xl border border-slate-100 overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="bg-slate-50 border-b border-slate-100">
-                                  {["Produit", "Site", "Type", "Qté", "Total"].map((h, i) => (
-                                    <th key={h} className={cn("px-3 py-2 text-xs font-semibold text-muted-foreground",
-                                      i < 3 ? "text-left" : "text-right")}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-50">
-                                {campSales.map(sale => (
-                                  <tr key={sale.id} className="bg-white hover:bg-slate-50/50 transition-colors">
-                                    <td className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center shrink-0">
-                                          <Package className="w-3.5 h-3.5 text-emerald-600" />
-                                        </div>
-                                        <div>
-                                          <span className="font-medium text-foreground text-xs">{sale.produit_nom}</span>
-                                          <p className="text-xs text-muted-foreground">{sale.conditionnement_display}</p>
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                                      <div className="flex items-center gap-1">
-                                        <MapPin className="w-3 h-3" />{sale.site_nom}
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs">
-                                      <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold", 
-                                        sale.type_vente === "PROMOTION" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700")}>
-                                        {sale.type_vente === "PROMOTION" ? "🎁 OFFERT" : "💰 VENTE"}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-right font-medium">{sale.quantite}</td>
-                                    <td className="px-3 py-2.5 text-right font-bold text-emerald-700 text-xs">
-                                      {sale.type_vente === "PROMOTION" ? "Gratuit" : fmt(Number(sale.prix_total ?? 0))}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                          <p className={cn("text-xs mt-1.5 font-semibold",
+                            isActive ? step.textColor : isPast ? "text-emerald-600" : "text-slate-400")}>
+                            {step.label}
+                          </p>
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </>
-      ) : (
-        /* ── Non-admin (Hôtesse / Superviseur / Entreprise) ── */
-        <>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-foreground">Ventes</h1>
-              <p className="text-muted-foreground mt-1">
-                {isHostess ? "Mes ventes enregistrées" : "Ventes de vos campagnes"}
-              </p>
-            </div>
-            <button onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm font-medium transition-colors">
-              <Download className="w-4 h-4" />Exporter
-            </button>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { value: stats.total,    label: "Transactions Ventes", color: "text-emerald-600" },
-              { value: stats.unites,   label: "Unités vendues",      color: "text-blue-600"    },
-            ].map((s, i) => (
-              <Card key={i}>
-                <CardContent className="p-4 text-center">
-                  <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-                  <p className="text-sm text-muted-foreground mt-1">{s.label}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-4">
-            <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="Toutes les campagnes" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Toutes les campagnes</SelectItem>
-                {campaigns.map(c => <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
-                  <ShoppingCart className="w-3.5 h-3.5 text-emerald-600" />
-                </div>
-                {isHostess ? "Mes ventes" : "Toutes les ventes"}
-              </h3>
-              <span className="text-xs text-muted-foreground bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
-                {filtered.length} ligne{filtered.length !== 1 ? "s" : ""} au total
-              </span>
-            </div>
-
-            {loading ? (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {[...Array(5)].map((_, i) => <div key={i} className="h-32 bg-muted rounded-xl animate-pulse" />)}
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="text-center py-12">
-                <ShoppingCart className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">Aucune vente enregistrée</p>
-              </div>
-            ) : (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filtered.map(sale => (
-                  <div key={sale.id}
-                    className="p-4 rounded-xl border border-border bg-card hover:shadow-md transition-all space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center shrink-0">
-                          <Package className="w-5 h-5 text-emerald-600" />
+                {selectedTasting.a_achete ? (
+                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white p-4 shadow-md shadow-emerald-100">
+                    <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full bg-white/10 blur-xl" />
+                    <div className="relative z-10 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                          <Package className="w-5 h-5" />
                         </div>
-                        <div className="min-w-0">
-                          <p className="font-semibold text-foreground truncate">{sale.produit_nom}</p>
-                          <p className="text-xs text-muted-foreground truncate">{sale.campagne_nom}</p>
+                        <div>
+                          <p className="font-bold text-base">Achat réalisé ✓</p>
+                          {selectedTasting.vente && (
+                            <p className="text-emerald-100 text-xs">
+                              {selectedTasting.vente.quantite} × {selectedTasting.vente.conditionnement_display}
+                            </p>
+                          )}
                         </div>
                       </div>
-                      <span className={cn("text-xs border px-2 py-0.5 rounded-full font-semibold shrink-0", 
-                        sale.type_vente === "PROMOTION" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
-                        {sale.type_vente === "PROMOTION" ? "Offert" : sale.conditionnement_display}
-                      </span>
+                      {selectedTasting.vente?.prix_total && (
+                        <div className="text-right">
+                          <p className="text-2xl font-black">
+                            {new Intl.NumberFormat("fr-FR").format(Number(selectedTasting.vente.prix_total))} F
+                          </p>
+                          <p className="text-emerald-200 text-xs">total</p>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-end justify-between">
-                      <div>
-                        <p className="text-xl font-bold text-foreground">
-                          {sale.type_vente === "PROMOTION" ? "Gratuit" : fmt(Number(sale.prix_total ?? 0))}
-                        </p>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />{sale.site_nom}
-                        </p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(sale.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                      </p>
-                    </div>
-                    {!isHostess && (
-                      <p className="text-xs text-muted-foreground border-t pt-2">💃 {sale.hotesse_nom}</p>
-                    )}
                   </div>
-                ))}
+                ) : (
+                  <div className="rounded-2xl bg-slate-50 border border-dashed border-slate-200 p-4 flex items-center gap-3">
+                    <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center shrink-0">
+                      <Package className="w-4 h-4 text-slate-400" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-500 text-sm">Aucun achat</p>
+                      <p className="text-xs text-slate-400">Le client n&apos;a pas acheté lors de cette dégustation</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <UtensilsCrossed className="w-3.5 h-3.5 text-indigo-400" />
+                    Stats · {selectedTasting.campagne_nom}
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: campTastings.length, label: "Dégustations", icon: "🍷", color: "text-indigo-600",  bg: "bg-indigo-50",  border: "border-indigo-100" },
+                      { value: avgRating,            label: "Note moyenne",  icon: "⭐", color: "text-amber-600",   bg: "bg-amber-50",   border: "border-amber-100"  },
+                      { value: `${convRate}%`,       label: "Conversion",    icon: "📈", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100" },
+                    ].map((s, i) => (
+                      <div key={i} className={cn("rounded-xl border p-3 text-center", s.bg, s.border)}>
+                        <div className="text-xl mb-0.5">{s.icon}</div>
+                        <p className={`text-lg font-black ${s.color}`}>{s.value}</p>
+                        <p className="text-xs text-muted-foreground leading-tight">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
-        </>
-      )}
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }
