@@ -41,6 +41,7 @@ export default function SalesPage() {
 
   const isHostess = user?.role === "Hotesse";
   const isAdmin = user?.role === "Administrateur";
+  
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -503,6 +504,7 @@ export default function SalesPage() {
           </tbody>
         </table>
       </div>
+
 
       <script>
         // Liaison JavaScript entre l'Iframe isolée et la page parente Next.js
