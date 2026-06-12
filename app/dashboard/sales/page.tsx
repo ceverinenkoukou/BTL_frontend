@@ -291,7 +291,10 @@ export default function SalesPage() {
         <td class="r b">${item.ventesCount}</td>
         <td class="r">${item.unitesVendues} u.</td>
         <td class="r text-gift">${item.produitsOfferts} u.</td>
-        <td class="r b text-star">${item.goodiesCount}</td>
+        <td class="r b text-star">
+          <input type="number" min="0" class="editable-qty-input" value="${item.goodiesCount}" 
+            oninput="this.setAttribute('value', this.value); recalcTotalGoodies();" />
+        </td>
       </tr>
     `).join("");
 
@@ -303,7 +306,8 @@ export default function SalesPage() {
         const [hotesse, site] = uniqueKey.split(" | ");
         const itemsHtml = [...itemObj.distribution.entries()].map(([goodieNom, quantiteTotale]) => `
           <div class="goodie-detail-item">
-            <input type="text" class="editable-goodie-input" data-goodie-id="${itemObj.goodieId}" value="${goodieNom.replace(/"/g, '&quot;')}" oninput="this.setAttribute('value', this.value); window.handleGoodieInputLive(this);" />
+            <span class="print-editable-text" style="color:${c.secondary};font-weight:600;font-size:11px;">${goodieNom.replace(/</g, '&lt;')}</span>
+            <input type="text" class="print-editable-input editable-goodie-input" data-goodie-id="${itemObj.goodieId}" value="${goodieNom.replace(/"/g, '&quot;')}" />
             <span class="goodie-qty">x${quantiteTotale}</span>
           </div>
         `).join("");
@@ -313,7 +317,11 @@ export default function SalesPage() {
             <td class="b hotesse-name">${hotesse}</td>
             <td class="site-name">${site}</td>
             <td><div class="goodies-grid-cell">${itemsHtml}</div></td>
-            <td class="r b text-star" style="font-size:13px;">${totalSiteGoodies} lot(s)</td>
+            <td class="r b text-star" style="font-size:13px;">
+              <span class="print-editable-qty-text">${totalSiteGoodies}</span>
+              <input type="number" min="0" class="print-editable-qty-input editable-qty-input" value="${totalSiteGoodies}" style="display:none;" />
+              &nbsp;lot(s)
+            </td>
           </tr>
         `;
       }).join("");
@@ -345,12 +353,15 @@ export default function SalesPage() {
         *{box-sizing:border-box;margin:0;padding:0}
         @page{size:A4;margin:15mm 10mm 15mm 10mm;}
         html,body{background-color:#ffffff !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#334155;padding-top:20px;}
+        body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#334155;padding-top:0;}
         
-        .action-bar{position:fixed;top:0;left:0;right:0;height:60px;background:#ffffff !important;box-shadow:0 4px 20px rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:flex-end;padding:0 40px;gap:12px;z-index:99999;border-bottom:1px solid #e2e8f0;}
+        .action-bar{position:fixed;top:0;left:0;right:0;height:56px;background:#ffffff !important;box-shadow:0 4px 20px rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:flex-end;padding:0 40px;gap:12px;z-index:99999;border-bottom:1px solid #e2e8f0;}
         .btn{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:none}
         .btn-download{background:${c.primary} !important;color:#fff !important;}
         
+        /* Le wrapper scrollable pousse le contenu sous la barre fixe — jamais capturé par html2pdf */
+        .page-wrapper{padding-top:72px;padding-left:24px;padding-right:24px;padding-bottom:40px;}
+        /* capture-zone : zéro padding/margin parasite, html2pdf part de (0,0) */
         .report-container{background:#ffffff !important;width:100%;margin:0;padding:0;}
         
         .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ${c.primary};padding-bottom:20px;margin-bottom:30px}
@@ -386,13 +397,16 @@ export default function SalesPage() {
         .goodies-grid-cell{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
         .goodie-detail-item{background:${c.secondaryBg} !important;border:1px solid ${c.secondaryBorder} !important;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center;}
         
-        .editable-goodie-input{background:transparent; border:none; color:${c.secondary}; font-weight:600; font-size:11px; font-family:inherit; width:80%; outline:none; padding:2px 0;}
+        .editable-qty-input{background:transparent;border:none;color:${c.secondary};font-weight:700;font-size:12px;font-family:inherit;width:50px;outline:none;padding:2px 0;text-align:right;}
+        .editable-qty-input:focus{border-bottom:1px solid ${c.secondary};}
+        .editable-goodie-input{background:transparent;border:none;color:${c.secondary};font-weight:600;font-size:11px;font-family:inherit;width:calc(100% - 36px);outline:none;padding:2px 0;}
         .editable-goodie-input:focus{border-bottom:1px solid ${c.secondary};}
         
         .editable-client-goodie-input{background:transparent; border:none; color:#334155; font-size:11px; font-family:inherit; width:100%; outline:none; padding:2px 0;}
         .editable-client-goodie-input.text-star{color:${c.secondary} !important; font-weight:600;}
         .editable-client-goodie-input:focus{border-bottom:1px solid #cbd5e1;}
         
+        .goodie-qty-input{background:${c.secondary} !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 4px;border-radius:4px;border:none;width:36px;text-align:center;font-family:inherit;outline:none;}
         .goodie-qty{background:${c.secondary} !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;}
         .tot-row td{background:${c.primary} !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px;}
         .page-break-before { page-break-before: always !important; margin-top: 20px; }
@@ -400,10 +414,12 @@ export default function SalesPage() {
         @media print{
           html,body{padding:0 !important;background:white !important;margin:0mm !important;}
           body{padding-top:0px !important;} 
+          .page-wrapper{padding-top:0 !important;}
           .action-bar{display:none !important;}
           table{page-break-inside:auto}
           tr{page-break-inside:avoid;page-break-after:auto}
-          .editable-goodie-input, .editable-client-goodie-input{border:none !important;}
+          .editable-goodie-input,.editable-client-goodie-input,.editable-qty-input{border:none !important;}
+          .goodie-qty-input{border:none !important;}
         }
       </style>
     </head>
@@ -414,6 +430,7 @@ export default function SalesPage() {
         <button class="btn btn-print" onclick="window.print()">Imprimer</button>
       </div>
       
+      <div class="page-wrapper">
       <div id="capture-zone" class="report-container">
         <div class="hdr-container">
           <div class="hdr-logo-area">
@@ -462,12 +479,12 @@ export default function SalesPage() {
               <td class="r">${globalTotalActesVentes}</td>
               <td class="r">${globalTotalUnites} u.</td>
               <td class="r">${globalTotalOfferts} u.</td>
-              <td class="r">${globalTotalGoodies}</td>
+              <td class="r"><span id="total-goodies-display">${globalTotalGoodies}</span></td>
             </tr>
           </tbody>
         </table>
 
-        <h2 class="section-title">2. Répartition Globale des Goodies Distribués (Éditables à l&apos;écran)</h2>
+        <h2 class="section-title">2. Répartition Globale des Goodies Distribués</h2>
         <table>
           <thead>
             <tr>
@@ -484,7 +501,7 @@ export default function SalesPage() {
 
         <div class="page-break-before"></div>
 
-        <h2 class="section-title">3. Journal des Transactions et Détails par Client (Éditables)</h2>
+        <h2 class="section-title">3. Journal des Transactions</h2>
         <table>
           <thead>
             <tr>
@@ -503,8 +520,23 @@ export default function SalesPage() {
           </tbody>
         </table>
       </div>
+      </div>
 
       <script>
+        // Recalcule le total goodies dans la ligne de totalisation du tableau 1
+        function recalcTotalGoodies() {
+          const inputs = document.querySelectorAll('table tbody .editable-qty-input');
+          let total = 0;
+          inputs.forEach(function(inp) {
+            // Seuls les inputs du tableau 1 (pas ceux du tableau 2 qui ont " lot(s)" à côté)
+            if (!inp.parentElement.querySelector) return;
+            const val = parseInt(inp.value) || 0;
+            total += val;
+          });
+          const display = document.getElementById('total-goodies-display');
+          if (display) display.textContent = total;
+        }
+
         // Liaison JavaScript entre l'Iframe isolée et la page parente Next.js
         window.handleGoodieInputLive = function(inputEl) {
           const id = inputEl.getAttribute('data-goodie-id');
