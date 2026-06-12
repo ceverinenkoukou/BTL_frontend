@@ -23,9 +23,9 @@ interface VenteEnrichie extends Vente {
   produitsOfferts?: number;
   goodiesOfferts?: number;
   goodiesDetails?: string;
-  entrepriseLogo?: string | null;
-  entrepriseCouleurPrimaire?: string;
-  entrepriseCouleurSecondaire?: string;
+  entreprise_logo?: string | null;
+  entreprise_couleur_primaire?: string;
+  entreprise_couleur_secondaire?: string;
 }
 
 export default function SalesPage() {
@@ -110,15 +110,15 @@ export default function SalesPage() {
       };
     });
   }, [filtered]);
-  const stroke = "STROKE"
 
   const exportCompanyPDF = (entrepriseNom: string) => {
-    const companySales = sales.filter(s => s.entreprise_nom === stroke || s.entreprise_nom === entrepriseNom);
+    const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
     
+    // FIX : Récupération des propriétés au format snake_case tel qu'envoyé par l'API Django
     const firstSale = companySales[0];
-    const logoUrl = firstSale?.entrepriseLogo || "";
-    const colorPrimary   = firstSale?.entrepriseCouleurPrimaire   || "#065f46";
-    const colorSecondary = firstSale?.entrepriseCouleurSecondaire || "#0d9488";
+    const logoUrl = firstSale?.entreprise_logo || "";
+    const colorPrimary   = firstSale?.entreprise_couleur_primaire   || "#065f46";
+    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
 
     const hexToRgb = (hex: string) => {
       const h = hex.replace("#", "");
@@ -190,14 +190,14 @@ export default function SalesPage() {
         src.unitesVendues += s.quantite;
       }
 
-      src.goodiesCount += Number(s.goodiesOfferts ?? 0);
-      if (s.goodiesDetails && Number(s.goodiesOfferts ?? 0) > 0) {
+      src.goodiesCount += Number(s.goodies_offerts ?? 0);
+      if (s.goodies_details && Number(s.goodies_offerts ?? 0) > 0) {
         if (!goodiesPerformanceMap.has(uniqueKey)) {
           goodiesPerformanceMap.set(uniqueKey, new Map<string, number>());
         }
         const currentGoodies = goodiesPerformanceMap.get(uniqueKey)!;
-        const currentQty = currentGoodies.get(s.goodiesDetails) || 0;
-        currentGoodies.set(s.goodiesDetails, currentQty + Number(s.goodiesOfferts));
+        const currentQty = currentGoodies.get(s.goodies_details) || 0;
+        currentGoodies.set(s.goodies_details, currentQty + Number(s.goodies_offerts));
       }
 
       const minuteId = new Date(s.created_at).toISOString().slice(0, 16);
@@ -223,15 +223,15 @@ export default function SalesPage() {
         clientLog.volumeVendu += s.quantite;
       }
 
-      if (s.goodiesDetails && Number(s.goodiesOfferts ?? 0) > 0) {
-        clientLog.goodieRemporte = `${s.goodiesDetails} (x${s.goodiesOfferts})`;
+      if (s.goodies_details && Number(s.goodies_offerts ?? 0) > 0) {
+        clientLog.goodieRemporte = `${s.goodies_details} (x${s.goodies_offerts})`;
       }
     });
 
     const globalTotalActesVentes = companySales.filter(s => s.type_vente !== "PROMOTION").length;
     const globalTotalUnites = companySales.filter(s => s.type_vente !== "PROMOTION").reduce((sum, s) => sum + s.quantite, 0);
     const globalTotalOfferts = companySales.filter(s => s.type_vente === "PROMOTION").reduce((sum, s) => sum + s.quantite, 0);
-    const globalTotalGoodies = companySales.reduce((sum, s) => sum + Number(s.goodiesOfferts ?? 0), 0);
+    const globalTotalGoodies = companySales.reduce((sum, s) => sum + Number(s.goodies_offerts ?? 0), 0);
 
     const rowsHtml = [...performanceMap.values()].map(item => `
       <tr>
@@ -293,15 +293,12 @@ export default function SalesPage() {
         *{box-sizing:border-box;margin:0;padding:0}
         @page{size:A4;margin:15mm 10mm 15mm 10mm;}
         html,body{background-color:#ffffff !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}
-        
-        /* CORRECTION : padding géré uniquement à l'écran, pas sur le PDF */
         body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#334155;padding-top:75px;}
         
         .action-bar{position:fixed;top:0;left:0;right:0;height:60px;background:#ffffff !important;box-shadow:0 4px 20px rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:flex-end;padding:0 40px;gap:12px;z-index:99999;border-bottom:1px solid #e2e8f0;}
         .btn{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:none}
         .btn-download{background:${c.primary} !important;color:#fff !important;}
         
-        /* CORRECTION : Pas de padding ni de margin sur le conteneur pour démarrer pile en haut de la page */
         .report-container{background:#ffffff !important;width:100%;margin:0;padding:0;}
         
         .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ${c.primary};padding-bottom:20px;margin-bottom:30px}
@@ -345,8 +342,6 @@ export default function SalesPage() {
 
         @media print{
           html,body{padding:0 !important;background:white !important;margin:0mm !important;}
-          
-          /* CORRECTION : Force la suppression du décalage de 75px uniquement lors de l'impression PDF */
           body{padding-top:0px !important;} 
           .action-bar{display:none !important;}
           table{page-break-inside:auto}
@@ -455,7 +450,7 @@ export default function SalesPage() {
         function generateDirectPDF() {
           const element = document.getElementById('capture-zone');
           const opt = {
-            margin:       [15, 10, 15, 10], // CORRECTION : Marges pures et équilibrées pour html2pdf
+            margin:       [15, 10, 15, 10], 
             filename:     "Rapport_Performances_${entrepriseNom.replace(/\s+/g, '_')}.pdf",
             image:        { type: 'jpeg', quality: 0.98 },
             html2canvas:  { scale: 2, useCORS: true, logging: false },
