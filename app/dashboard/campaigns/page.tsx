@@ -38,6 +38,10 @@ function hex(color: string, alpha: number) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function initials(name: string) {
+  return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+}
+
 // Helpers pour déterminer l'affichage selon le type (cohérent avec [id]/page.tsx)
 const getShowTasting = (typeCampagne: TypeCampagne) => typeCampagne !== "VENTE";
 const getShowVente = (typeCampagne: TypeCampagne) => typeCampagne !== "DEGUSTATION";
@@ -647,14 +651,52 @@ export default function CampaignsPage() {
             ))}
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground">Campagnes</h1>
-            <p className="text-muted-foreground mt-1">Vos campagnes marketing terrain</p>
+      ) : (() => {
+        const brandCamp = campaigns[0];
+        const primary   = brandCamp?.couleur_primaire   ?? "#006776";
+        const secondary = brandCamp?.couleur_secondaire ?? "#00899b";
+        const logo      = brandCamp?.logo_url ?? null;
+        const entNom    = brandCamp?.entreprise_nom ?? "";
+        return (
+          <div
+            className="relative overflow-hidden rounded-2xl text-white shadow-xl"
+            style={{
+              background: `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)`,
+              boxShadow: `0 12px 40px -8px ${hex(primary, 0.4)}`,
+            }}
+          >
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.13),transparent_60%)]" />
+            <div className="absolute -right-10 -top-10 w-44 h-44 rounded-full bg-white/10 blur-3xl" />
+            <div className="relative z-10 p-6 md:p-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 backdrop-blur-sm overflow-hidden">
+                  {logo
+                    ? <img src={logo} alt={entNom} className="w-full h-full object-contain p-1" />
+                    : <span className="text-sm font-bold text-white">{initials(entNom || "??")}</span>
+                  }
+                </div>
+                <div>
+                  <p className="text-white/65 text-xs font-medium uppercase tracking-wider mb-0.5">{entNom}</p>
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Campagnes marketing</h1>
+                  <p className="text-white/70 mt-1 text-sm">Gérez et suivez vos campagnes terrain</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-1 sm:gap-2 shrink-0">
+                {[
+                  { label: "En cours",  value: statCounts.active },
+                  { label: "À venir",   value: statCounts.upcoming },
+                  { label: "Terminées", value: statCounts.done },
+                ].map((s, i) => (
+                  <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl px-3 py-2 border border-white/20 text-center sm:flex sm:items-center sm:gap-3 sm:text-left">
+                    <span className="text-xl font-bold sm:text-lg">{s.value}</span>
+                    <span className="text-xs text-white/65 block sm:inline">{s.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Search ── */}
       <div className="relative max-w-sm">

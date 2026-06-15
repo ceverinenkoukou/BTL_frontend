@@ -550,7 +550,13 @@ export default function CampaignDetailPage() {
 
       {/* ── Admin hero banner ── */}
       {isAdmin ? (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 text-white shadow-2xl shadow-indigo-200">
+        <div
+          className="relative overflow-hidden rounded-2xl text-white shadow-2xl"
+          style={{
+            background: `linear-gradient(135deg, ${campaign.couleur_primaire ?? "#4f46e5"} 0%, ${campaign.couleur_secondaire ?? "#7c3aed"} 100%)`,
+            boxShadow: `0 20px 60px -10px ${hex(campaign.couleur_primaire ?? "#4f46e5", 0.4)}`,
+          }}
+        >
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
           <div className="absolute -right-12 -top-12 w-52 h-52 rounded-full bg-white/10 blur-3xl" />
           <div className="absolute right-24 -bottom-10 w-28 h-28 rounded-full bg-white/10 blur-2xl" />
@@ -587,8 +593,11 @@ export default function CampaignDetailPage() {
               </div>
             </div>
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 backdrop-blur-sm">
-                <Sparkles className="w-6 h-6 text-yellow-200" />
+              <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 backdrop-blur-sm overflow-hidden">
+                {campaign.logo_url
+                  ? <img src={campaign.logo_url} alt={campaign.entreprise_nom} className="w-full h-full object-contain p-1" />
+                  : <span className="text-sm font-bold text-white">{initials(campaign.entreprise_nom ?? "??")}</span>
+                }
               </div>
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight leading-tight">{campaign.nom}</h1>
@@ -618,17 +627,40 @@ export default function CampaignDetailPage() {
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/dashboard/campaigns"><ArrowLeft className="w-5 h-5" /></Link>
-          </Button>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold text-foreground">{campaign.nom}</h1>
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">{campaign.type_campagne_display}</span>
-              {campaign.type_recompense !== "AUCUNE" && <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-100 text-violet-700 border border-violet-200">{campaign.type_recompense_display}</span>}
+        <div
+          className="relative overflow-hidden rounded-2xl text-white shadow-xl"
+          style={{
+            background: `linear-gradient(135deg, ${campaign.couleur_primaire ?? "#4f46e5"} 0%, ${campaign.couleur_secondaire ?? "#7c3aed"} 100%)`,
+            boxShadow: `0 12px 40px -8px ${hex(campaign.couleur_primaire ?? "#4f46e5", 0.4)}`,
+          }}
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.12),transparent_60%)]" />
+          <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/10 blur-3xl" />
+          <div className="relative z-10 p-5 md:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Link href="/dashboard/campaigns" className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors">
+                <ArrowLeft className="w-4 h-4" />
+              </Link>
+              <span className="text-white/50 text-xs hidden sm:block">Campagnes / {campaign.nom}</span>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/20 border border-white/30">{campaign.type_campagne_display}</span>
+                {campaign.type_recompense !== "AUCUNE" && (
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/20 border border-white/30">{campaign.type_recompense_display}</span>
+                )}
+              </div>
             </div>
-            <p className="text-muted-foreground text-sm mt-0.5">{campaign.entreprise_nom}</p>
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0 backdrop-blur-sm overflow-hidden">
+                {campaign.logo_url
+                  ? <img src={campaign.logo_url} alt={campaign.entreprise_nom} className="w-full h-full object-contain p-1" />
+                  : <span className="text-sm font-bold text-white">{initials(campaign.entreprise_nom ?? "??")}</span>
+                }
+              </div>
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight leading-tight">{campaign.nom}</h1>
+                <p className="text-white/70 text-sm mt-0.5 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" />{campaign.entreprise_nom}</p>
+              </div>
+            </div>
           </div>
         </div>
       )}
