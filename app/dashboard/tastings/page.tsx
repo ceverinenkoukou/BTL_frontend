@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type {
@@ -30,6 +30,7 @@ import {
   Plus, UtensilsCrossed, Loader2, CheckCircle2,
   Frown, Meh, Smile, Laugh, Heart,
   Download, Search, Calendar, UserRound, Package, TrendingUp, X, MapPin,
+  Gift, Ticket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -68,6 +69,7 @@ const EMPTY_FORM = {
   promotion_selectionnee: "" as string | "",
 };
 
+// Couleurs pour les types de promotion
 const PROMO_TYPE_STYLES: Record<TypePromotion, { bg: string; border: string; text: string; icon: string; label: string }> = {
   OFFERT: {
     bg: "bg-emerald-50",
@@ -145,6 +147,7 @@ export default function TastingsPage() {
     }
     setSaving(true);
     try {
+      const hasPromotion = form.a_achete && Boolean(form.promotion_selectionnee);
       const payload: CreateDegustationPayload = {
         site: form.site,
         produit: form.produit,
@@ -153,20 +156,23 @@ export default function TastingsPage() {
         intention_achat: form.intention_achat as IntentionAchat,
         a_achete: form.a_achete,
         nom_client: form.nom_client.trim() || undefined,
-        ...(form.a_achete && {
+        ...(form.a_achete && !hasPromotion && {
           conditionnement: form.conditionnement,
           quantite: form.quantite,
         }),
       };
       const { data: created } = await api.post<Degustation>("/degustations/", payload);
 
+      // Si une promotion a été sélectionnée, enregistrer le gain
       if (form.a_achete && form.promotion_selectionnee && siteInfo) {
         try {
           const gainResult = await enregistrerGainPromotion(form.promotion_selectionnee, {
             site_id: form.site,
+            produit_id: form.produit,
             nom_client: form.nom_client.trim() || undefined,
+            tranche_age: form.tranche_age || undefined,
           });
-          toast.success(`🎉 ${gainResult.recompense || "Avantage"} enregistré !`);
+          toast.success(`🎉 ${gainResult.recompense} enregistré !`);
         } catch (promoErr: unknown) {
           const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
           toast.warning(promoMsg ?? "Erreur lors de l'enregistrement de la promotion.");
@@ -222,6 +228,7 @@ export default function TastingsPage() {
 
   return (
     <div className="space-y-6">
+
       {/* ── Hero banner ── */}
       {isAdmin ? (
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 text-white shadow-2xl shadow-indigo-200">
@@ -510,6 +517,7 @@ export default function TastingsPage() {
                     </div>
                   </div>
 
+                  {/* ── Promotions configurées par l'admin ── */}
                   {siteInfo?.promotions && siteInfo.promotions.length > 0 && (
                     <div className="space-y-3 pt-2">
                       <div className="flex items-center gap-2">
@@ -584,6 +592,7 @@ export default function TastingsPage() {
                         })}
                       </div>
 
+                      {/* Option "Aucune promotion" */}
                       <button
                         type="button"
                         onClick={() => setForm(f => ({ ...f, promotion_selectionnee: "" }))}
@@ -619,7 +628,7 @@ export default function TastingsPage() {
               </div>
 
               <Button type="submit" className="w-full h-12 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700" disabled={saving}>
-                {saving ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Enenregistrement…</> : <><CheckCircle2 className="w-5 h-5 mr-2" />Enregistrer la dégustation</>}
+                {saving ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Enregistrement…</> : <><CheckCircle2 className="w-5 h-5 mr-2" />Enregistrer la dégustation</>}
               </Button>
             </form>
           </DialogContent>

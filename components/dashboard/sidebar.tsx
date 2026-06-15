@@ -53,6 +53,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard/stats", label: "Statistiques", icon: <BarChart3 className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/wheel", label: "Roue à cadeaux", icon: <Gift className="w-5 h-5" />, roles: ["Hotesse", "Superviseur"] },
   { href: "/dashboard/goodies", label: "Goodies", icon: <Gift className="w-5 h-5" />, roles: ["Administrateur"] },
+  { href: "/dashboard/sites", label: "Sites", icon: <MapPin className="w-5 h-5" />, roles: ["Administrateur"] },
   { href: "/dashboard/objectifs", label: "Objectifs", icon: <Target className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/rapports", label: "Rapports journaliers", icon: <FileText className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
 ];

@@ -75,6 +75,7 @@ export default function RapportsPage() {
 
   const totalDegs = filtered.reduce((s, r) => s + r.nb_degustations, 0);
   const totalVentes = filtered.reduce((s, r) => s + r.nb_ventes, 0);
+  const totalGoodies = filtered.reduce((s, r) => s + r.nb_goodies, 0);
   const totalCA = filtered.reduce((s, r) => s + Number(r.chiffre_affaires), 0);
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -107,10 +108,11 @@ export default function RapportsPage() {
       </div>
 
       {/* Totals */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Dégustations", value: totalDegs, color: "text-blue-600" },
           { label: "Ventes", value: totalVentes, color: "text-emerald-600" },
+          { label: "Goodies", value: totalGoodies, color: "text-fuchsia-600" },
           { label: "CA", value: fmtXOF(totalCA), color: "text-violet-600" },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-xl border bg-card shadow-sm p-4 text-center">
@@ -213,6 +215,7 @@ export default function RapportsPage() {
                 <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Site</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Dégustations</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Ventes</th>
+                <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Goodies</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">CA</th>
                 <th className="px-4 py-3 font-semibold text-muted-foreground">Email</th>
               </tr>
@@ -232,6 +235,9 @@ export default function RapportsPage() {
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">
                     {r.nb_ventes}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold text-fuchsia-600">
+                    {r.nb_goodies}
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-violet-600">
                     {fmtXOF(r.chiffre_affaires)}
