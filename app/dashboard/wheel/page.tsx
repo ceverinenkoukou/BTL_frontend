@@ -245,10 +245,10 @@ export default function WheelPage() {
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
     
     const totalSpins = 5 + Math.random() * 3;
-    const finalAngle = 360 * totalSpins + (360 - prizeAngle);
-    
-    let currentRotation = rotation;
-    const targetRotation = currentRotation + finalAngle;
+    const currentRotation = ((rotation % 360) + 360) % 360;
+    const targetFinalRot = (360 - prizeAngle + 360) % 360;
+    const delta = (targetFinalRot - currentRotation + 360) % 360;
+    const targetRotation = currentRotation + 360 * totalSpins + delta;
     const duration = 5000;
     const startTime = Date.now();
 
