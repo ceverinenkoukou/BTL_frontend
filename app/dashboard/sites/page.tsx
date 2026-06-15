@@ -1,0 +1,506 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import api from "@/lib/api";
+import type { CampagneList, Entreprise, Promotion, SiteList } from "@/lib/types/backend";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import {
+  Building2,
+  Edit2,
+  Loader2,
+  MapPin,
+  Search,
+  SlidersHorizontal,
+  Store,
+  Target,
+  Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
+
+function unwrapList<T>(data: T[] | { results?: T[] }): T[] {
+  if (Array.isArray(data)) return data;
+  return data.results ?? [];
+}
+
+type SiteForm = {
+  nom: string;
+  ville: string;
+  emplacement_precis: string;
+};
+
+const emptySiteForm: SiteForm = {
+  nom: "",
+  ville: "Libreville",
+  emplacement_precis: "",
+};
+
+export default function SitesPage() {
+  const [sites, setSites] = useState<SiteList[]>([]);
+  const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
+  const [entreprises, setEntreprises] = useState<Entreprise[]>([]);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingOffers, setLoadingOffers] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterCompany, setFilterCompany] = useState("all");
+  const [filterCampaign, setFilterCampaign] = useState("all");
+  const [editingSite, setEditingSite] = useState<SiteList | null>(null);
+  const [offersSite, setOffersSite] = useState<SiteList | null>(null);
+  const [siteForm, setSiteForm] = useState<SiteForm>(emptySiteForm);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sitesRes, campaignsRes, entreprisesRes] = await Promise.all([
+        api.get("/sites/"),
+        api.get("/campagnes/"),
+        api.get("/entreprises/"),
+      ]);
+
+      setSites(unwrapList<SiteList>(sitesRes.data));
+      setCampaigns(unwrapList<CampagneList>(campaignsRes.data));
+      setEntreprises(unwrapList<Entreprise>(entreprisesRes.data));
+    } catch {
+      toast.error("Erreur lors du chargement des sites.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  const campaignById = useMemo(
+    () => new Map(campaigns.map(campaign => [campaign.id, campaign])),
+    [campaigns],
+  );
+
+  const filteredSites = useMemo(() => {
+    return sites.filter(site => {
+      const campaign = campaignById.get(site.campagne);
+      const matchCompany = filterCompany === "all" || campaign?.entreprise === filterCompany;
+      const matchCampaign = filterCampaign === "all" || site.campagne === filterCampaign;
+      const searchable = [
+        site.nom,
+        site.ville,
+        site.emplacement_precis ?? "",
+        site.campagne_nom,
+        site.entreprise_nom,
+      ].join(" ").toLowerCase();
+      const matchSearch = !searchQuery || searchable.includes(searchQuery.toLowerCase());
+      return matchCompany && matchCampaign && matchSearch;
+    });
+  }, [campaignById, filterCampaign, filterCompany, searchQuery, sites]);
+
+  const groupedSites = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; sites: SiteList[] }>();
+
+    filteredSites.forEach(site => {
+      const key = `${site.nom.trim().toLowerCase()}|${site.ville.trim().toLowerCase()}|${(site.emplacement_precis ?? "").trim().toLowerCase()}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          label: site.nom,
+          sites: [],
+        });
+      }
+      groups.get(key)!.sites.push(site);
+    });
+
+    return [...groups.values()];
+  }, [filteredSites]);
+
+  const openEditDialog = (site: SiteList) => {
+    setEditingSite(site);
+    setSiteForm({
+      nom: site.nom,
+      ville: site.ville,
+      emplacement_precis: site.emplacement_precis ?? "",
+    });
+  };
+
+  const handleUpdateSite = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingSite) return;
+
+    setSaving(true);
+    try {
+      await api.patch(`/sites/${editingSite.id}/`, {
+        nom: siteForm.nom.trim(),
+        ville: siteForm.ville.trim() || "Libreville",
+        emplacement_precis: siteForm.emplacement_precis.trim() || null,
+        campagne: editingSite.campagne,
+      });
+
+      toast.success("Site mis à jour.");
+      setEditingSite(null);
+      setSiteForm(emptySiteForm);
+      fetchAll();
+    } catch {
+      toast.error("Erreur lors de la mise à jour du site.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteSite = async (site: SiteList) => {
+    if (!confirm(`Supprimer le site "${site.nom}" de la campagne "${site.campagne_nom}" ?`)) return;
+
+    try {
+      await api.delete(`/sites/${site.id}/`);
+      toast.success("Site supprimé.");
+      fetchAll();
+    } catch {
+      toast.error("Erreur lors de la suppression du site.");
+    }
+  };
+
+  const openOffersDialog = async (site: SiteList) => {
+    setOffersSite(site);
+    setPromotions([]);
+    setLoadingOffers(true);
+
+    try {
+      const { data } = await api.get(`/promotions/?campagne=${site.campagne}`);
+      setPromotions(unwrapList<Promotion>(data));
+    } catch {
+      toast.error("Erreur lors du chargement des offres.");
+    } finally {
+      setLoadingOffers(false);
+    }
+  };
+
+  const updatePromotionSites = async (promotion: Promotion, nextSiteIds: string[]) => {
+    setSaving(true);
+    try {
+      const { data } = await api.patch<Promotion>(`/promotions/${promotion.id}/`, {
+        sites: nextSiteIds,
+      });
+
+      setPromotions(current =>
+        current.map(item => (item.id === promotion.id ? data : item)),
+      );
+      toast.success(nextSiteIds.length ? "Ciblage de l'offre mis à jour." : "Offre rendue globale.");
+    } catch {
+      toast.error("Erreur lors de la mise à jour de l'offre.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const campaignSites = offersSite
+    ? sites.filter(site => site.campagne === offersSite.campagne)
+    : [];
+
+  return (
+    <div className="space-y-6">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-emerald-800 to-cyan-700 text-white shadow-2xl shadow-emerald-200">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_65%)]" />
+        <div className="relative z-10 p-6 md:p-8">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Gestion des sites</h1>
+              </div>
+              <p className="text-white/70 text-sm ml-12">
+                Modifier les sites des campagnes et cibler les offres par site.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
+                <p className="text-lg font-black">{sites.length}</p>
+                <p className="text-xs text-white/65">sites</p>
+              </div>
+              <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
+                <p className="text-lg font-black">{groupedSites.length}</p>
+                <p className="text-xs text-white/65">lieux</p>
+              </div>
+              <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
+                <p className="text-lg font-black">{campaigns.length}</p>
+                <p className="text-xs text-white/65">campagnes</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Rechercher site, ville, campagne..."
+            value={searchQuery}
+            onChange={event => setSearchQuery(event.target.value)}
+            className="pl-9 h-10"
+          />
+        </div>
+        <Select value={filterCompany} onValueChange={value => {
+          setFilterCompany(value);
+          setFilterCampaign("all");
+        }}>
+          <SelectTrigger className="h-10 w-56">
+            <SelectValue placeholder="Toutes entreprises" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes entreprises</SelectItem>
+            {entreprises.map(entreprise => (
+              <SelectItem key={entreprise.id} value={entreprise.id}>
+                {entreprise.nom_commercial}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterCampaign} onValueChange={setFilterCampaign}>
+          <SelectTrigger className="h-10 w-56">
+            <SelectValue placeholder="Toutes campagnes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes campagnes</SelectItem>
+            {campaigns
+              .filter(campaign => filterCompany === "all" || campaign.entreprise === filterCompany)
+              .map(campaign => (
+                <SelectItem key={campaign.id} value={campaign.id}>
+                  {campaign.nom}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : groupedSites.length === 0 ? (
+        <div className="rounded-xl border bg-card py-16 text-center text-muted-foreground">
+          <Store className="w-10 h-10 mx-auto mb-3 opacity-40" />
+          <p className="font-medium">Aucun site trouvé</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groupedSites.map(group => (
+            <div key={group.key} className="rounded-xl border bg-card shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b bg-muted/30 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Store className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <h2 className="font-bold truncate">{group.label}</h2>
+                    <Badge variant="outline">{group.sites.length} campagne{group.sites.length > 1 ? "s" : ""}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {group.sites[0]?.ville}
+                    {group.sites[0]?.emplacement_precis ? ` - ${group.sites[0].emplacement_precis}` : ""}
+                  </p>
+                </div>
+              </div>
+
+              <div className="divide-y">
+                {group.sites.map(site => {
+                  const campaign = campaignById.get(site.campagne);
+                  return (
+                    <div key={site.id} className="p-4 flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                            <Target className="w-3 h-3 mr-1" />
+                            {site.campagne_nom}
+                          </Badge>
+                          <Badge variant="outline">
+                            <Building2 className="w-3 h-3 mr-1" />
+                            {site.entreprise_nom}
+                          </Badge>
+                          {campaign && (
+                            <Badge variant="outline">
+                              {campaign.type_recompense_display}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          {site.nb_superviseurs} superviseur{site.nb_superviseurs > 1 ? "s" : ""} - {site.nb_hotesses} hôtesse{site.nb_hotesses > 1 ? "s" : ""}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="outline" size="sm" onClick={() => openOffersDialog(site)} className="gap-2">
+                          <SlidersHorizontal className="w-4 h-4" />
+                          Offres
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => openEditDialog(site)} className="gap-2">
+                          <Edit2 className="w-4 h-4" />
+                          Modifier
+                        </Button>
+                        <Button variant="outline" size="icon" onClick={() => handleDeleteSite(site)}>
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={!!editingSite} onOpenChange={open => !open && setEditingSite(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Modifier le site</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleUpdateSite} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nom</Label>
+              <Input value={siteForm.nom} onChange={event => setSiteForm(form => ({ ...form, nom: event.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Ville</Label>
+              <Input value={siteForm.ville} onChange={event => setSiteForm(form => ({ ...form, ville: event.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Emplacement précis</Label>
+              <Input value={siteForm.emplacement_precis} onChange={event => setSiteForm(form => ({ ...form, emplacement_precis: event.target.value }))} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setEditingSite(null)}>Annuler</Button>
+              <Button type="submit" disabled={saving || !siteForm.nom.trim()}>
+                {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Enregistrer
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!offersSite} onOpenChange={open => !open && setOffersSite(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Offres ciblées par site</DialogTitle>
+          </DialogHeader>
+
+          {offersSite && (
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-muted/30 p-4">
+                <p className="font-semibold">{offersSite.nom}</p>
+                <p className="text-sm text-muted-foreground">
+                  Campagne: {offersSite.campagne_nom} - Entreprise: {offersSite.entreprise_nom}
+                </p>
+              </div>
+
+              {loadingOffers ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : promotions.length === 0 ? (
+                <div className="rounded-xl border py-10 text-center text-muted-foreground">
+                  Aucune offre promotionnelle sur cette campagne.
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[60vh] overflow-auto pr-1">
+                  {promotions.map(promotion => {
+                    const isGlobal = promotion.sites.length === 0;
+                    return (
+                      <div key={promotion.id} className="rounded-xl border p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-semibold">
+                                {promotion.quantite_requise} produit{promotion.quantite_requise > 1 ? "s" : ""} - {promotion.recompense_description}
+                              </p>
+                              <Badge variant={promotion.is_active ? "default" : "outline"}>
+                                {promotion.is_active ? "Active" : "Inactive"}
+                              </Badge>
+                              {isGlobal && <Badge variant="outline">Tous les sites</Badge>}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">{promotion.type_promotion_display}</p>
+                          </div>
+                          {isGlobal ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={saving}
+                              onClick={() => updatePromotionSites(promotion, [offersSite.id])}
+                            >
+                              Cibler ce site
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={saving}
+                              onClick={() => updatePromotionSites(promotion, [])}
+                            >
+                              Rendre globale
+                            </Button>
+                          )}
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-2">
+                          {campaignSites.map(site => {
+                            const checked = isGlobal || promotion.sites.includes(site.id);
+                            return (
+                              <label
+                                key={site.id}
+                                className={cn(
+                                  "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm",
+                                  checked ? "bg-emerald-50 border-emerald-200" : "bg-background",
+                                )}
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  disabled={saving || isGlobal}
+                                  onCheckedChange={value => {
+                                    const current = isGlobal ? [] : promotion.sites;
+                                    const next = value
+                                      ? Array.from(new Set([...current, site.id]))
+                                      : current.filter(id => id !== site.id);
+                                    updatePromotionSites(promotion, next);
+                                  }}
+                                />
+                                <span className="min-w-0">
+                                  <span className="font-medium block truncate">{site.nom}</span>
+                                  <span className="text-xs text-muted-foreground">{site.ville}</span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Aucun site coché = offre globale sur toute la campagne.
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

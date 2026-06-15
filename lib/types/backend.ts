@@ -131,6 +131,8 @@ export interface CampagneList {
 export interface Promotion {
   id: string;
   campagne: string;
+  sites: string[];
+  sites_noms: string[];
   type_promotion: TypePromotion;
   type_promotion_display: string;
   quantite_requise: number;
@@ -226,6 +228,7 @@ export interface CreateCampagnePayload {
 
 export interface CreatePromotionPayload {
   campagne: string;
+  sites?: string[];
   type_promotion: TypePromotion;
   quantite_requise: number;
   recompense_description: string;
@@ -463,6 +466,7 @@ export interface RapportJournalier {
   date: string;
   nb_degustations: number;
   nb_ventes: number;
+  nb_goodies: number;
   chiffre_affaires: string;
   email_envoye: boolean;
   created_at: string;

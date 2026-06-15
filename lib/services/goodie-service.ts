@@ -4,7 +4,7 @@
  * Intégration avec l'API /api/gains-goodies/enregistrer/
  */
 
-import { api } from "./api";
+import api from "@/lib/api";
 
 export interface Goodie {
   id: string;

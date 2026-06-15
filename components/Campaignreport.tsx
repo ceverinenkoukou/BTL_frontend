@@ -32,9 +32,78 @@ import { useState, useCallback } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FileDown, Loader2 } from "lucide-react";
-import { HostessTasting } from './types';
-import { Sale } from 'lib/types';
-import  { StaffMember } from '';
+import type { Campaign, CampaignSite, CampaignTeamMember, Company, Profile, Sale, Tasting, Zone } from "@/lib/types";
+
+type HostessTasting = Tasting;
+type StaffMember = CampaignTeamMember & {
+  daily_objective?: number;
+  site?: CampaignSite;
+};
+type RGB = [number, number, number];
+type BrandCompany = Company & {
+  brand?: {
+    primaryColor?: string;
+    logoBase64?: string;
+    logoMimeType?: string;
+  };
+  color?: string;
+  logoUrl?: string;
+};
+type ReportCampaign = Campaign & {
+  company?: BrandCompany;
+  zone?: Zone;
+};
+type ReportSale = Sale & {
+  notes?: string;
+  goodies_given?: number;
+};
+type HostessStat = {
+  id: string;
+  name: string;
+  site: string;
+  siteId?: string;
+  tastings: number;
+  sales: number;
+  revenue: number;
+  dailyObjective: number;
+  avgPerDay: number;
+  perfPct: number;
+  goodiesCount: number;
+  promoGains: Record<string, number>;
+  totalQty: number;
+};
+type SiteStat = {
+  id: string;
+  name: string;
+  location: string;
+  tastings: number;
+  sales: number;
+  revenue: number;
+  goodies: number;
+  promoGains: Record<string, number>;
+  hostesses: HostessStat[];
+};
+type Palette = ReturnType<typeof buildPalette>;
+type CampaignReportProps = {
+  campaign: ReportCampaign;
+  user?: Profile | null;
+  tastings?: HostessTasting[];
+  sales?: ReportSale[];
+  team?: StaffMember[];
+  sites?: CampaignSite[];
+};
+type GeneratePDFArgs = {
+  campaign: ReportCampaign;
+  user?: Profile | null;
+  hostessStats: HostessStat[];
+  siteStats: SiteStat[];
+  tastings: HostessTasting[];
+  sales: ReportSale[];
+  isAdminOrSupervisor: boolean;
+  palette: Palette;
+  logoBase64: string | null;
+  logoMimeType: string;
+};
 
 
 // ─────────────────────────────────────────────────────────────
@@ -42,7 +111,7 @@ import  { StaffMember } from '';
 // ─────────────────────────────────────────────────────────────
 
 /** Convertit "#rrggbb" ou "rgb(r,g,b)" en tableau [r,g,b] */
-function hexToRgb(hex: string) {
+function hexToRgb(hex: string): RGB | null {
   if (!hex) return null;
   const clean = hex.replace(/^#/, "");
   if (clean.length === 3) {
@@ -63,23 +132,23 @@ function hexToRgb(hex: string) {
 }
 
 /** Mélange deux couleurs rgb avec un ratio (0 = c1, 1 = c2) */
-function mixRgb(c1: number[], c2: number[], ratio = 0.5) {
-  return c1.map((v, i) => Math.round(v + (c2[i] - v) * ratio));
+function mixRgb(c1: RGB, c2: RGB, ratio = 0.5): RGB {
+  return c1.map((v, i) => Math.round(v + (c2[i] - v) * ratio)) as RGB;
 }
 
 /** Éclaircit une couleur vers le blanc */
-const lighten = (c: number[], amount = 0.85) => mixRgb(c, [255, 255, 255], amount);
+const lighten = (c: RGB, amount = 0.85) => mixRgb(c, [255, 255, 255], amount);
 
 /** Assombrit une couleur vers le noir */
-const darken  = (c: number[], amount = 0.3)  => mixRgb(c, [0, 0, 0], amount);
+const darken  = (c: RGB, amount = 0.3)  => mixRgb(c, [0, 0, 0], amount);
 
 /** Luminosité perceptuelle (0–255) */
-function luminance([r, g, b]: number[]) {
+function luminance([r, g, b]: RGB) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
 /** Choisit blanc ou noir selon le contraste avec bg */
-function contrastColor(bg: number[]) {
+function contrastColor(bg: RGB): RGB {
   return luminance(bg) > 140 ? [30, 30, 40] : [255, 255, 255];
 }
 
@@ -88,7 +157,7 @@ function contrastColor(bg: number[]) {
  * Toutes les autres couleurs sont dérivées algorithmiquement,
  * garantissant la cohérence sur n'importe quel branding.
  */
-function buildPalette(primary: number[]) {
+function buildPalette(primary: RGB) {
   const P = primary;
   return {
     primary:    P,
@@ -96,18 +165,18 @@ function buildPalette(primary: number[]) {
     accent:     lighten(P, 0.88),          // fond très clair (tableaux alternés, badges)
     accentBorder: lighten(P, 0.65),        // bordure légère
     headerText: contrastColor(P),          // texte sur fond primaire
-    dark:       [30, 30, 40],              // texte principal
-    mid:        [100, 100, 120],           // texte secondaire
-    light:      [240, 240, 245],           // fond neutre clair
-    white:      [255, 255, 255],
-    success:    [22, 163, 74],
-    warn:       [202, 138, 4],
-    error:      [220, 38, 38],
+    dark:       [30, 30, 40] as RGB,       // texte principal
+    mid:        [100, 100, 120] as RGB,    // texte secondaire
+    light:      [240, 240, 245] as RGB,    // fond neutre clair
+    white:      [255, 255, 255] as RGB,
+    success:    [22, 163, 74] as RGB,
+    warn:       [202, 138, 4] as RGB,
+    error:      [220, 38, 38] as RGB,
   };
 }
 
 /** Palette de fallback (gris ardoise neutre — fonctionne pour toute entreprise) */
-const FALLBACK_PRIMARY = [71, 85, 105]; // slate-600
+const FALLBACK_PRIMARY: RGB = [71, 85, 105]; // slate-600
 
 // ─────────────────────────────────────────────────────────────
 // 2. Extraction couleur depuis logo (canvas côté client)
@@ -118,7 +187,7 @@ const FALLBACK_PRIMARY = [71, 85, 105]; // slate-600
  * en analysant les pixels non-transparents les plus saturés du bord supérieur.
  * Retourne null en cas d'échec (CORS, format non supporté…).
  */
-async function extractDominantColor(src: string): Promise<number[] | null> {
+async function extractDominantColor(src: string): Promise<RGB | null> {
   return new Promise((resolve) => {
     try {
       const img = new Image();
@@ -129,13 +198,18 @@ async function extractDominantColor(src: string): Promise<number[] | null> {
           const canvas = document.createElement("canvas");
           canvas.width = SIZE; canvas.height = SIZE;
           const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
           ctx.drawImage(img, 0, 0, SIZE, SIZE);
           const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
 
           // Trouver le pixel non-transparent le plus saturé
-          let bestSat = -1, bestRgb = null;
+          let bestSat = -1;
+          let bestRgb: RGB | null = null;
           for (let i = 0; i < data.length; i += 4) {
-            const [r, g, b, a] = [data[i], data[i+1], data[i+2], data[i+3]];
+            const [r, g, b, a] = [data[i], data[i+1], data[i+2], data[i+3]] as [number, number, number, number];
             if (a < 128) continue;                         // transparent
             const max = Math.max(r, g, b);
             const min = Math.min(r, g, b);
@@ -166,9 +240,9 @@ async function extractDominantColor(src: string): Promise<number[] | null> {
  * Retourne { palette, logoBase64, logoMimeType } pour une entreprise donnée.
  * Essaie toutes les sources dans l'ordre de priorité.
  */
-async function resolveBranding(company:Entreprise) {
-  let primaryRgb = null;
-  let logoBase64  = null;
+async function resolveBranding(company?: BrandCompany) {
+  let primaryRgb: RGB | null = null;
+  let logoBase64: string | null = null;
   let logoMimeType = "image/png";
 
   // Priorité 1 — champ brand structuré
@@ -220,7 +294,7 @@ const pct     = (a: number, b: number) => b > 0 ? Math.round((a / b) * 100) : 0;
 const GMS_ID = "3";
 const CHR_ID = "4";
 
-function computePromoGains(campaignId: string, qty:number, promoType = "canettes") {
+function computePromoGains(campaignId: string, qty:number, promoType = "canettes"): Record<string, number> {
   if (campaignId === GMS_ID) {
     if (promoType === "canettes")
       return { canettesOffertes: Math.floor(qty / 4), ticketsTombola: Math.floor(qty / 6) };
@@ -235,7 +309,7 @@ function computePromoGains(campaignId: string, qty:number, promoType = "canettes
 // 5. Agrégations données
 // ─────────────────────────────────────────────────────────────
 
-function buildHostessStats(tastings: HostessTasting[], sales: Sale[], team: StaffMember[], campaign: Campaign) {
+function buildHostessStats(tastings: HostessTasting[], sales: ReportSale[], team: StaffMember[], campaign: ReportCampaign): HostessStat[] {
   return team
     .filter(m => m.role === "hostess")
     .map(h => {
@@ -262,17 +336,17 @@ function buildHostessStats(tastings: HostessTasting[], sales: Sale[], team: Staf
     });
 }
 
-function buildSiteStats(hostessStats: HostessStat[], tastings: HostessTasting[], sales: Sale[], sites: Site[]) {
+function buildSiteStats(hostessStats: HostessStat[], tastings: HostessTasting[], sales: ReportSale[], sites: CampaignSite[]): SiteStat[] {
   return sites.map(site => {
     const hIds = hostessStats.filter(h => h.siteId === site.id).map(h => h.id);
     const sH   = hostessStats.filter(h => h.siteId === site.id);
-    const promoGainsAgg = sH.reduce((acc, h) => {
+    const promoGainsAgg = sH.reduce<Record<string, number>>((acc, h) => {
       Object.entries(h.promoGains).forEach(([k, v]) => { acc[k] = (acc[k] ?? 0) + v; });
       return acc;
     }, {});
     return {
       id: site.id, name: site.name ?? "—",
-      location: site.location ?? site.address ?? "—",
+      location: site.zone?.name ?? site.address ?? "—",
       tastings: tastings.filter(t => hIds.includes(t.hostess_id)).length,
       sales:    sales.filter(s => hIds.includes(s.hostess_id)).length,
       revenue:  sales.filter(s => hIds.includes(s.hostess_id)).reduce((a, s) => a + (s.total_amount ?? 0), 0),
@@ -290,7 +364,7 @@ function buildSiteStats(hostessStats: HostessStat[], tastings: HostessTasting[],
 function generatePDF({
   campaign, user, hostessStats, siteStats, tastings, sales,
   isAdminOrSupervisor, palette, logoBase64, logoMimeType,
-}) {
+}: GeneratePDFArgs) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const PW = doc.internal.pageSize.getWidth();
   const PH = doc.internal.pageSize.getHeight();
@@ -299,7 +373,7 @@ function generatePDF({
   let Y = M;
 
   const P = palette;
-  const company = campaign.company ?? {};
+  const company = campaign.company ?? ({} as BrandCompany);
   const isGMS  = campaign.id === GMS_ID;
   const isCHR  = campaign.id === CHR_ID;
   const isPromo = isGMS || isCHR;
@@ -404,7 +478,7 @@ function generatePDF({
     Y = 106;
   }
 
-  function sectionTitle(title) {
+  function sectionTitle(title: string) {
     guard(16);
     // Fond accent + barre primaire gauche
     doc.setFillColor(...P.accent);
@@ -418,7 +492,7 @@ function generatePDF({
     Y += 13;
   }
 
-  function kpiRow(kpis) {
+  function kpiRow(kpis: { value: string | number; label: string }[]) {
     guard(24);
     const colW = CW / kpis.length;
     kpis.forEach((k, i) => {
@@ -442,7 +516,7 @@ function generatePDF({
     Y += 26;
   }
 
-  function table(head, body) {
+  function table(head: string[], body: (string | number)[][]) {
     guard(28);
     autoTable(doc, {
       startY: Y,
@@ -463,7 +537,8 @@ function generatePDF({
       alternateRowStyles: { fillColor: P.accent },
       columnStyles: { 0: { fontStyle: "bold" } },
     });
-    Y = doc.lastAutoTable.finalY + 6;
+    const autoTableDoc = doc as jsPDF & { lastAutoTable?: { finalY: number } };
+    Y = (autoTableDoc.lastAutoTable?.finalY ?? Y) + 6;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -510,7 +585,7 @@ function generatePDF({
       ]
     );
   } else {
-    const prodMap = {};
+    const prodMap: Record<string, { qty: number; rev: number }> = {};
     sales.forEach(s => {
       const k = s.product?.name ?? "—";
       if (!prodMap[k]) prodMap[k] = { qty: 0, rev: 0 };
@@ -640,7 +715,7 @@ export default function CampaignReport({
   sales     = [],
   team      = [],
   sites     = [],
-}) {
+}: CampaignReportProps) {
   const [loading, setLoading] = useState(false);
   const isAdminOrSupervisor = user?.role === "admin" || user?.role === "supervisor";
 
