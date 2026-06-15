@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Building2, Plus, Package, Mail, Phone, MapPin,
   Trash2, Edit2, ChevronRight, ChevronLeft, X, Check,
-  Palette, Upload, Loader2,
+  Palette, Upload, Loader2, Send, KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -52,6 +52,8 @@ export default function CompaniesPage() {
   const [submitting, setSubmitting]       = useState(false);
   const [step, setStep]                   = useState<1 | 2>(1);
   const [editingCompany, setEditingCompany] = useState<Entreprise | null>(null);
+  const [sendNewPassword, setSendNewPassword] = useState(false);
+  const [resendingId, setResendingId]     = useState<string | null>(null);
 
   // Step-1 fields
   const [cName,     setCName]     = useState("");
@@ -134,8 +136,29 @@ export default function CompaniesPage() {
     setCColor1(company.couleur_primaire ?? "#006776");
     setCColor2(company.couleur_secondaire ?? "#00899b");
     setEntries([{ ...EMPTY_PRODUCT }]);
+    setSendNewPassword(false);
     setStep(1);
     setDialogOpen(true);
+  };
+
+  const handleResendCredentials = async (company: Entreprise) => {
+    if (!confirm(`Générer et envoyer un nouveau mot de passe à ${company.email} ?`)) return;
+    setResendingId(company.id);
+    try {
+      const { data } = await api.post<{ detail: string; email_sent: boolean }>(
+        `/entreprises/${company.id}/resend-credentials/`
+      );
+      if (data.email_sent) {
+        toast.success(`Nouveaux identifiants envoyés à ${company.email}.`);
+      } else {
+        toast.warning("Mot de passe régénéré mais l'email n'a pas pu être envoyé. Vérifiez la configuration SMTP.");
+      }
+      setCompanies(prev => prev.map(c => c.id === company.id ? { ...c, is_password_changed: false } : c));
+    } catch {
+      toast.error("Erreur lors du renvoi des identifiants.");
+    } finally {
+      setResendingId(null);
+    }
   };
 
   // ── Actions ──────────────────────────────────────────────────
@@ -189,7 +212,22 @@ export default function CompaniesPage() {
         };
         const { data: updated } = await api.patch<Entreprise>(`/entreprises/${editingCompany.id}/`, payload);
         setCompanies(prev => prev.map(c => c.id === editingCompany.id ? updated : c));
-        toast.success("Entreprise mise à jour.");
+        if (sendNewPassword) {
+          try {
+            const { data: resendData } = await api.post<{ detail: string; email_sent: boolean }>(
+              `/entreprises/${editingCompany.id}/resend-credentials/`
+            );
+            if (resendData.email_sent) {
+              toast.success(`Entreprise mise à jour. Nouveaux identifiants envoyés à ${editingCompany.email}.`);
+            } else {
+              toast.warning("Entreprise mise à jour, mais l'email de mot de passe n'a pas pu être envoyé.");
+            }
+          } catch {
+            toast.warning("Entreprise mise à jour, mais erreur lors de l'envoi du mot de passe.");
+          }
+        } else {
+          toast.success("Entreprise mise à jour.");
+        }
       } else {
         const payload: CreateEntreprisePayload = {
           email:             cEmail.trim(),
@@ -327,6 +365,16 @@ export default function CompaniesPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleResendCredentials(company)}
+                        disabled={resendingId === company.id}
+                        className="w-7 h-7 bg-white/20 hover:bg-amber-500/80 rounded-lg flex items-center justify-center transition-colors"
+                        title="Renvoyer les identifiants"
+                      >
+                        {resendingId === company.id
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Send className="w-3.5 h-3.5" />}
+                      </button>
                       <button onClick={() => openEdit(company)} className="w-7 h-7 bg-white/20 hover:bg-white/35 rounded-lg flex items-center justify-center transition-colors">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -585,6 +633,25 @@ export default function CompaniesPage() {
                   <div className="h-4" style={{ backgroundColor: cColor2 }} />
                 </div>
               </div>
+
+              {editingCompany && (
+                <div className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                  <div className="space-y-0.5">
+                    <label htmlFor="send_new_password" className="text-xs font-bold text-amber-800 uppercase tracking-wide cursor-pointer flex items-center gap-1.5">
+                      <KeyRound className="w-3.5 h-3.5" />
+                      Envoyer un nouveau mot de passe
+                    </label>
+                    <p className="text-[10px] text-amber-600">Génère et envoie de nouveaux identifiants à {editingCompany.email}</p>
+                  </div>
+                  <input
+                    id="send_new_password"
+                    type="checkbox"
+                    checked={sendNewPassword}
+                    onChange={e => setSendNewPassword(e.target.checked)}
+                    className="w-4 h-4 text-amber-600 border-slate-300 rounded focus:ring-amber-500"
+                  />
+                </div>
+              )}
 
               <div className="flex justify-end pt-2">
                 <button
