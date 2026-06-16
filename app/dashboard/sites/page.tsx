@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import type { CampagneList, Entreprise, Promotion, SiteList } from "@/lib/types/backend";
+import type { CampagneList, CreatePromotionPayload, Entreprise, Promotion, SiteList, TypePromotion } from "@/lib/types/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,6 +27,7 @@ import {
   Edit2,
   Loader2,
   MapPin,
+  Plus,
   Search,
   SlidersHorizontal,
   Store,
@@ -52,6 +53,20 @@ const emptySiteForm: SiteForm = {
   emplacement_precis: "",
 };
 
+type PromoForm = {
+  type_promotion: TypePromotion;
+  quantite_requise: string;
+  quantite_offerte: string;
+  recompense_description: string;
+};
+
+const emptyPromoForm: PromoForm = {
+  type_promotion: "OFFERT",
+  quantite_requise: "3",
+  quantite_offerte: "1",
+  recompense_description: "",
+};
+
 export default function SitesPage() {
   const [sites, setSites] = useState<SiteList[]>([]);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
@@ -60,6 +75,8 @@ export default function SitesPage() {
   const [loading, setLoading] = useState(true);
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showPromoForm, setShowPromoForm] = useState(false);
+  const [promoForm, setPromoForm] = useState<PromoForm>(emptyPromoForm);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCompany, setFilterCompany] = useState("all");
   const [filterCampaign, setFilterCampaign] = useState("all");
@@ -178,6 +195,8 @@ export default function SitesPage() {
   const openOffersDialog = async (site: SiteList) => {
     setOffersSite(site);
     setPromotions([]);
+    setShowPromoForm(false);
+    setPromoForm(emptyPromoForm);
     setLoadingOffers(true);
 
     try {
@@ -187,6 +206,35 @@ export default function SitesPage() {
       toast.error("Erreur lors du chargement des offres.");
     } finally {
       setLoadingOffers(false);
+    }
+  };
+
+  const handleCreatePromotion = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!offersSite) return;
+    const qty = parseInt(promoForm.quantite_requise, 10);
+    const qtyOfferte = parseInt(promoForm.quantite_offerte, 10);
+    if (!qty || qty < 1 || !qtyOfferte || qtyOfferte < 1 || !promoForm.recompense_description.trim()) return;
+    setSaving(true);
+    try {
+      const payload: CreatePromotionPayload = {
+        campagne: offersSite.campagne,
+        sites: [offersSite.id],
+        type_promotion: promoForm.type_promotion,
+        quantite_requise: qty,
+        quantite_offerte: qtyOfferte,
+        recompense_description: promoForm.recompense_description.trim(),
+        is_active: true,
+      };
+      const { data } = await api.post<Promotion>("/promotions/", payload);
+      setPromotions(current => [...current, data]);
+      setShowPromoForm(false);
+      setPromoForm(emptyPromoForm);
+      toast.success("Offre créée et ciblée sur " + offersSite.nom);
+    } catch {
+      toast.error("Erreur lors de la création de l'offre.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -409,6 +457,78 @@ export default function SitesPage() {
                 </p>
               </div>
 
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-muted-foreground">Offres de la campagne</p>
+                <Button
+                  type="button" size="sm"
+                  variant={showPromoForm ? "outline" : "default"}
+                  onClick={() => { setShowPromoForm(v => !v); setPromoForm(emptyPromoForm); }}
+                  className="gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  Nouvelle offre pour ce site
+                </Button>
+              </div>
+
+              {showPromoForm && (
+                <form onSubmit={handleCreatePromotion} className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-emerald-800">
+                    Offre ciblée uniquement sur <span className="font-bold">{offersSite.nom}</span>
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Type d'offre</Label>
+                      <Select
+                        value={promoForm.type_promotion}
+                        onValueChange={v => setPromoForm(f => ({ ...f, type_promotion: v as TypePromotion }))}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="OFFERT">Produit offert</SelectItem>
+                          <SelectItem value="GAGNE">À gagner / Bon cadeau</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Description de la récompense</Label>
+                      <Input
+                        placeholder="Ex : 1 bière offerte, bon cadeau…"
+                        className="h-9"
+                        value={promoForm.recompense_description}
+                        onChange={e => setPromoForm(f => ({ ...f, recompense_description: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Qté requise (achat client)</Label>
+                      <Input
+                        type="number" min={1} className="h-9"
+                        value={promoForm.quantite_requise}
+                        onChange={e => setPromoForm(f => ({ ...f, quantite_requise: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Qté offerte (Vol. offert dans le journal)</Label>
+                      <Input
+                        type="number" min={1} className="h-9"
+                        value={promoForm.quantite_offerte}
+                        onChange={e => setPromoForm(f => ({ ...f, quantite_offerte: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="ghost"
+                      onClick={() => { setShowPromoForm(false); setPromoForm(emptyPromoForm); }}
+                    >Annuler</Button>
+                    <Button type="submit" size="sm" disabled={saving || !promoForm.recompense_description.trim()}>
+                      {saving && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+                      Créer l'offre
+                    </Button>
+                  </div>
+                </form>
+              )}
+
               {loadingOffers ? (
                 <div className="flex items-center justify-center py-10">
                   <Loader2 className="w-6 h-6 animate-spin text-primary" />
@@ -427,7 +547,7 @@ export default function SitesPage() {
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-semibold">
-                                {promotion.quantite_requise} produit{promotion.quantite_requise > 1 ? "s" : ""} - {promotion.recompense_description}
+                                Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
                               </p>
                               <Badge variant={promotion.is_active ? "default" : "outline"}>
                                 {promotion.is_active ? "Active" : "Inactive"}
