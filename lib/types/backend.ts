@@ -138,6 +138,8 @@ export interface Promotion {
   quantite_requise: number;
   quantite_offerte: number;
   recompense_description: string;
+  produit_cible: string | null;
+  produit_cible_nom: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -234,6 +236,7 @@ export interface CreatePromotionPayload {
   quantite_requise: number;
   quantite_offerte: number;
   recompense_description: string;
+  produit_cible?: string | null;
   is_active?: boolean;
 }
 

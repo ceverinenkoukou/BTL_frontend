@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import type { CampagneList, CreatePromotionPayload, Entreprise, Promotion, SiteList, TypePromotion } from "@/lib/types/backend";
+import type { CampagneList, CreatePromotionPayload, Entreprise, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypePromotion } from "@/lib/types/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -33,6 +33,8 @@ import {
   Store,
   Target,
   Trash2,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -58,6 +60,7 @@ type PromoForm = {
   quantite_requise: string;
   quantite_offerte: string;
   recompense_description: string;
+  produit_cible: string;
 };
 
 const emptyPromoForm: PromoForm = {
@@ -65,7 +68,17 @@ const emptyPromoForm: PromoForm = {
   quantite_requise: "3",
   quantite_offerte: "1",
   recompense_description: "",
+  produit_cible: "",
 };
+
+type EditPromoForm = PromoForm & { id: string };
+
+type HotesseForm = {
+  email: string;
+  name: string;
+};
+
+const emptyHotesseForm: HotesseForm = { email: "", name: "" };
 
 export default function SitesPage() {
   const [sites, setSites] = useState<SiteList[]>([]);
@@ -77,12 +90,23 @@ export default function SitesPage() {
   const [saving, setSaving] = useState(false);
   const [showPromoForm, setShowPromoForm] = useState(false);
   const [promoForm, setPromoForm] = useState<PromoForm>(emptyPromoForm);
+  const [editingPromo, setEditingPromo] = useState<EditPromoForm | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCompany, setFilterCompany] = useState("all");
   const [filterCampaign, setFilterCampaign] = useState("all");
   const [editingSite, setEditingSite] = useState<SiteList | null>(null);
   const [offersSite, setOffersSite] = useState<SiteList | null>(null);
   const [siteForm, setSiteForm] = useState<SiteForm>(emptySiteForm);
+  const [campagneProduits, setCampagneProduits] = useState<Produit[]>([]);
+
+  // --- Hôtesses ---
+  const [hotelSite, setHotelSite] = useState<SiteList | null>(null);
+  const [siteDetail, setSiteDetail] = useState<{ superviseurs: TeamMember[]; hotesses: TeamMember[] } | null>(null);
+  const [loadingTeam, setLoadingTeam] = useState(false);
+  const [allHotesses, setAllHotesses] = useState<TeamMember[]>([]);
+  const [showHotesseForm, setShowHotesseForm] = useState(false);
+  const [hotesseForm, setHotesseForm] = useState<HotesseForm>(emptyHotesseForm);
+  const [savingTeam, setSavingTeam] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -197,15 +221,72 @@ export default function SitesPage() {
     setPromotions([]);
     setShowPromoForm(false);
     setPromoForm(emptyPromoForm);
+    setCampagneProduits([]);
     setLoadingOffers(true);
 
     try {
-      const { data } = await api.get(`/promotions/?campagne=${site.campagne}`);
-      setPromotions(unwrapList<Promotion>(data));
+      const campagne = campaigns.find(c => c.id === site.campagne);
+      const entrepriseId = campagne?.entreprise;
+      const [promoRes, produitsRes] = await Promise.all([
+        api.get(`/promotions/?campagne=${site.campagne}`),
+        entrepriseId ? api.get(`/entreprises/${entrepriseId}/`) : Promise.resolve({ data: { produits: [] } }),
+      ]);
+      setPromotions(unwrapList<Promotion>(promoRes.data));
+      setCampagneProduits(produitsRes.data.produits ?? []);
     } catch {
       toast.error("Erreur lors du chargement des offres.");
     } finally {
       setLoadingOffers(false);
+    }
+  };
+
+  const handleDeletePromotion = async (promoId: string) => {
+    if (!confirm("Supprimer cette offre promotionnelle ?")) return;
+    setSaving(true);
+    try {
+      await api.delete(`/promotions/${promoId}/`);
+      setPromotions(current => current.filter(p => p.id !== promoId));
+      toast.success("Offre supprimée.");
+    } catch {
+      toast.error("Erreur lors de la suppression de l'offre.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEditPromo = (promotion: Promotion) => {
+    setEditingPromo({
+      id: promotion.id,
+      type_promotion: promotion.type_promotion,
+      quantite_requise: String(promotion.quantite_requise),
+      quantite_offerte: String(promotion.quantite_offerte ?? 1),
+      recompense_description: promotion.recompense_description,
+      produit_cible: promotion.produit_cible ?? "",
+    });
+  };
+
+  const handleUpdatePromotion = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingPromo) return;
+    const qty = parseInt(editingPromo.quantite_requise, 10);
+    const qtyOfferte = parseInt(editingPromo.quantite_offerte, 10);
+    if (!qty || qty < 1 || !qtyOfferte || qtyOfferte < 1 || !editingPromo.recompense_description.trim()) return;
+    setSaving(true);
+    try {
+      const { data } = await api.patch<Promotion>(`/promotions/${editingPromo.id}/`, {
+        type_promotion: editingPromo.type_promotion,
+        quantite_requise: qty,
+        quantite_offerte: qtyOfferte,
+        recompense_description: editingPromo.recompense_description.trim(),
+        produit_cible: editingPromo.produit_cible || null,
+      });
+      setPromotions(current => current.map(p => (p.id === data.id ? data : p)));
+      setEditingPromo(null);
+      toast.success("Offre mise à jour.");
+    } catch {
+      toast.error("Erreur lors de la mise à jour de l'offre.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -224,6 +305,7 @@ export default function SitesPage() {
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: promoForm.recompense_description.trim(),
+        produit_cible: promoForm.produit_cible || null,
         is_active: true,
       };
       const { data } = await api.post<Promotion>("/promotions/", payload);
@@ -259,6 +341,86 @@ export default function SitesPage() {
   const campaignSites = offersSite
     ? sites.filter(site => site.campagne === offersSite.campagne)
     : [];
+
+  // --- Hôtesses handlers ---
+  const openHotessesDialog = async (site: SiteList) => {
+    setHotelSite(site);
+    setSiteDetail(null);
+    setAllHotesses([]);
+    setShowHotesseForm(false);
+    setHotesseForm(emptyHotesseForm);
+    setLoadingTeam(true);
+    try {
+      const [detailRes, usersRes] = await Promise.all([
+        api.get(`/sites/${site.id}/`),
+        api.get("/users/terrain-staff/"),
+      ]);
+      setSiteDetail({ superviseurs: detailRes.data.superviseurs ?? [], hotesses: detailRes.data.hotesses ?? [] });
+      const allStaff = unwrapList<TeamMember>(usersRes.data);
+      setAllHotesses(allStaff.filter(u => u.role === "Hotesse"));
+    } catch {
+      toast.error("Erreur lors du chargement de l'équipe.");
+    } finally {
+      setLoadingTeam(false);
+    }
+  };
+
+  const assignHotesses = async (hotessesIds: string[]) => {
+    if (!hotelSite || !siteDetail) return;
+    setSavingTeam(true);
+    try {
+      await api.post(`/sites/${hotelSite.id}/manage-team/`, {
+        superviseurs_ids: siteDetail.superviseurs.map(s => s.id),
+        hotesses_ids: hotessesIds,
+        notify: true,
+      });
+      setSiteDetail(prev => prev ? {
+        ...prev,
+        hotesses: allHotesses.filter(h => hotessesIds.includes(h.id)),
+      } : prev);
+      fetchAll();
+      toast.success("Hôtesses mises à jour.");
+    } catch {
+      toast.error("Erreur lors de l'assignation.");
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  const toggleHotesse = (hotesseId: string) => {
+    if (!siteDetail) return;
+    const current = siteDetail.hotesses.map(h => h.id);
+    const next = current.includes(hotesseId)
+      ? current.filter(id => id !== hotesseId)
+      : [...current, hotesseId];
+    assignHotesses(next);
+  };
+
+  const handleCreateHotesse = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!hotesseForm.email.trim() || !hotesseForm.name.trim()) return;
+    setSavingTeam(true);
+    try {
+      const { data: newUser } = await api.post<RemoteUser & { role_display: string }>("/users/", {
+        email: hotesseForm.email.trim(),
+        name: hotesseForm.name.trim(),
+        role: "Hotesse",
+      });
+      const newMember: TeamMember = { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role, role_display: newUser.role_display ?? "Hôtesse" };
+      setAllHotesses(prev => [...prev, newMember]);
+      setShowHotesseForm(false);
+      setHotesseForm(emptyHotesseForm);
+      toast.success(`Hôtesse ${newUser.name} créée. Elle sera notifiée par email.`);
+      if (siteDetail) {
+        const currentIds = siteDetail.hotesses.map(h => h.id);
+        await assignHotesses([...currentIds, newUser.id]);
+      }
+    } catch {
+      toast.error("Erreur lors de la création de l'hôtesse.");
+    } finally {
+      setSavingTeam(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -396,6 +558,10 @@ export default function SitesPage() {
                           <SlidersHorizontal className="w-4 h-4" />
                           Offres
                         </Button>
+                        <Button variant="outline" size="sm" onClick={() => openHotessesDialog(site)} className="gap-2">
+                          <Users className="w-4 h-4" />
+                          Hôtesses
+                        </Button>
                         <Button variant="outline" size="sm" onClick={() => openEditDialog(site)} className="gap-2">
                           <Edit2 className="w-4 h-4" />
                           Modifier
@@ -490,14 +656,29 @@ export default function SitesPage() {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Description de la récompense</Label>
-                      <Input
-                        placeholder="Ex : 1 bière offerte, bon cadeau…"
-                        className="h-9"
-                        value={promoForm.recompense_description}
-                        onChange={e => setPromoForm(f => ({ ...f, recompense_description: e.target.value }))}
-                      />
+                      <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
+                      <Select
+                        value={promoForm.produit_cible || "__none__"}
+                        onValueChange={v => setPromoForm(f => ({ ...f, produit_cible: v === "__none__" ? "" : v }))}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Tous les produits" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Tous les produits</SelectItem>
+                          {campagneProduits.map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Description de la récompense</Label>
+                    <Input
+                      placeholder="Ex : 1 bière offerte, bon cadeau…"
+                      className="h-9"
+                      value={promoForm.recompense_description}
+                      onChange={e => setPromoForm(f => ({ ...f, recompense_description: e.target.value }))}
+                    />
                   </div>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -541,82 +722,286 @@ export default function SitesPage() {
                 <div className="space-y-3 max-h-[60vh] overflow-auto pr-1">
                   {promotions.map(promotion => {
                     const isGlobal = promotion.sites.length === 0;
+                    const isEditing = editingPromo?.id === promotion.id;
                     return (
                       <div key={promotion.id} className="rounded-xl border p-4 space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-semibold">
-                                Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
-                              </p>
-                              <Badge variant={promotion.is_active ? "default" : "outline"}>
-                                {promotion.is_active ? "Active" : "Inactive"}
-                              </Badge>
-                              {isGlobal && <Badge variant="outline">Tous les sites</Badge>}
+                        {isEditing ? (
+                          <form onSubmit={handleUpdatePromotion} className="space-y-3">
+                            <div className="grid sm:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Type d'offre</Label>
+                                <Select
+                                  value={editingPromo.type_promotion}
+                                  onValueChange={v => setEditingPromo(f => f ? { ...f, type_promotion: v as TypePromotion } : f)}
+                                >
+                                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="OFFERT">Produit offert</SelectItem>
+                                    <SelectItem value="GAGNE">À gagner / Bon cadeau</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
+                                <Select
+                                  value={editingPromo.produit_cible || "__none__"}
+                                  onValueChange={v => setEditingPromo(f => f ? { ...f, produit_cible: v === "__none__" ? "" : v } : f)}
+                                >
+                                  <SelectTrigger className="h-9"><SelectValue placeholder="Tous les produits" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Tous les produits</SelectItem>
+                                    {campagneProduits.map(p => (
+                                      <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
-                            <p className="text-xs text-muted-foreground mt-1">{promotion.type_promotion_display}</p>
-                          </div>
-                          {isGlobal ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={saving}
-                              onClick={() => updatePromotionSites(promotion, [offersSite.id])}
-                            >
-                              Cibler ce site
-                            </Button>
-                          ) : (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={saving}
-                              onClick={() => updatePromotionSites(promotion, [])}
-                            >
-                              Rendre globale
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="grid sm:grid-cols-2 gap-2">
-                          {campaignSites.map(site => {
-                            const checked = isGlobal || promotion.sites.includes(site.id);
-                            return (
-                              <label
-                                key={site.id}
-                                className={cn(
-                                  "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm",
-                                  checked ? "bg-emerald-50 border-emerald-200" : "bg-background",
-                                )}
-                              >
-                                <Checkbox
-                                  checked={checked}
-                                  disabled={saving || isGlobal}
-                                  onCheckedChange={value => {
-                                    const current = isGlobal ? [] : promotion.sites;
-                                    const next = value
-                                      ? Array.from(new Set([...current, site.id]))
-                                      : current.filter(id => id !== site.id);
-                                    updatePromotionSites(promotion, next);
-                                  }}
+                            <div className="space-y-1">
+                              <Label className="text-xs">Description de la récompense</Label>
+                              <Input
+                                className="h-9"
+                                value={editingPromo.recompense_description}
+                                onChange={e => setEditingPromo(f => f ? { ...f, recompense_description: e.target.value } : f)}
+                              />
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Qté requise</Label>
+                                <Input
+                                  type="number" min={1} className="h-9"
+                                  value={editingPromo.quantite_requise}
+                                  onChange={e => setEditingPromo(f => f ? { ...f, quantite_requise: e.target.value } : f)}
                                 />
-                                <span className="min-w-0">
-                                  <span className="font-medium block truncate">{site.nom}</span>
-                                  <span className="text-xs text-muted-foreground">{site.ville}</span>
-                                </span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Aucun site coché = offre globale sur toute la campagne.
-                        </p>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Qté offerte</Label>
+                                <Input
+                                  type="number" min={1} className="h-9"
+                                  value={editingPromo.quantite_offerte}
+                                  onChange={e => setEditingPromo(f => f ? { ...f, quantite_offerte: e.target.value } : f)}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button type="button" size="sm" variant="ghost" onClick={() => setEditingPromo(null)}>Annuler</Button>
+                              <Button type="submit" size="sm" disabled={saving || !editingPromo.recompense_description.trim()}>
+                                {saving && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+                                Enregistrer
+                              </Button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-semibold">
+                                  Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
+                                </p>
+                                {promotion.produit_cible_nom && (
+                                  <Badge variant="outline" className="text-xs">{promotion.produit_cible_nom}</Badge>
+                                )}
+                                <Badge variant={promotion.is_active ? "default" : "outline"}>
+                                  {promotion.is_active ? "Active" : "Inactive"}
+                                </Badge>
+                                {isGlobal && <Badge variant="outline">Tous les sites</Badge>}
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1">{promotion.type_promotion_display}</p>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button
+                                type="button" variant="ghost" size="icon"
+                                onClick={() => openEditPromo(promotion)}
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                type="button" variant="ghost" size="icon"
+                                disabled={saving}
+                                onClick={() => handleDeletePromotion(promotion.id)}
+                              >
+                                <Trash2 className="w-4 h-4 text-red-500" />
+                              </Button>
+                              {isGlobal ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={saving}
+                                  onClick={() => updatePromotionSites(promotion, [offersSite.id])}
+                                >
+                                  Cibler ce site
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={saving}
+                                  onClick={() => updatePromotionSites(promotion, [])}
+                                >
+                                  Rendre globale
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {!isEditing && (
+                          <>
+                            <div className="grid sm:grid-cols-2 gap-2">
+                              {campaignSites.map(site => {
+                                const checked = isGlobal || promotion.sites.includes(site.id);
+                                return (
+                                  <label
+                                    key={site.id}
+                                    className={cn(
+                                      "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm",
+                                      checked ? "bg-emerald-50 border-emerald-200" : "bg-background",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      disabled={saving || isGlobal}
+                                      onCheckedChange={value => {
+                                        const current = isGlobal ? [] : promotion.sites;
+                                        const next = value
+                                          ? Array.from(new Set([...current, site.id]))
+                                          : current.filter(id => id !== site.id);
+                                        updatePromotionSites(promotion, next);
+                                      }}
+                                    />
+                                    <span className="min-w-0">
+                                      <span className="font-medium block truncate">{site.nom}</span>
+                                      <span className="text-xs text-muted-foreground">{site.ville}</span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Aucun site coché = offre globale sur toute la campagne.
+                            </p>
+                          </>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      {/* ---- Dialog Hôtesses ---- */}
+      <Dialog open={!!hotelSite} onOpenChange={open => !open && setHotelSite(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Gérer les hôtesses — {hotelSite?.nom}</DialogTitle>
+          </DialogHeader>
+
+          {hotelSite && (
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-muted/30 p-3">
+                <p className="text-sm text-muted-foreground">
+                  Campagne&nbsp;: <span className="font-medium text-foreground">{hotelSite.campagne_nom}</span>
+                  &nbsp;—&nbsp;Entreprise&nbsp;: <span className="font-medium text-foreground">{hotelSite.entreprise_nom}</span>
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-muted-foreground">Hôtesses disponibles</p>
+                <Button
+                  type="button" size="sm"
+                  variant={showHotesseForm ? "outline" : "default"}
+                  onClick={() => { setShowHotesseForm(v => !v); setHotesseForm(emptyHotesseForm); }}
+                  className="gap-1.5"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Nouvelle hôtesse
+                </Button>
+              </div>
+
+              {showHotesseForm && (
+                <form onSubmit={handleCreateHotesse} className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-emerald-800">Créer et affecter une hôtesse</p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Nom complet</Label>
+                      <Input
+                        placeholder="Nom Prénom"
+                        className="h-9"
+                        value={hotesseForm.name}
+                        onChange={e => setHotesseForm(f => ({ ...f, name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Email</Label>
+                      <Input
+                        type="email"
+                        placeholder="hotesse@email.com"
+                        className="h-9"
+                        value={hotesseForm.email}
+                        onChange={e => setHotesseForm(f => ({ ...f, email: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="ghost"
+                      onClick={() => { setShowHotesseForm(false); setHotesseForm(emptyHotesseForm); }}
+                    >Annuler</Button>
+                    <Button type="submit" size="sm" disabled={savingTeam || !hotesseForm.name.trim() || !hotesseForm.email.trim()}>
+                      {savingTeam && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+                      Créer et affecter
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {loadingTeam ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[50vh] overflow-auto pr-1">
+                  {allHotesses.length === 0 ? (
+                    <div className="rounded-xl border py-8 text-center text-muted-foreground text-sm">
+                      Aucune hôtesse enregistrée.
+                    </div>
+                  ) : (
+                    allHotesses.map(hotesse => {
+                      const assigned = siteDetail?.hotesses.some(h => h.id === hotesse.id) ?? false;
+                      return (
+                        <label
+                          key={hotesse.id}
+                          className={cn(
+                            "flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer",
+                            assigned ? "bg-emerald-50 border-emerald-300" : "bg-background hover:bg-muted/40",
+                          )}
+                        >
+                          <Checkbox
+                            checked={assigned}
+                            disabled={savingTeam}
+                            onCheckedChange={() => toggleHotesse(hotesse.id)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-sm">{hotesse.name}</p>
+                            <p className="text-xs text-muted-foreground">{hotesse.email}</p>
+                          </div>
+                          {assigned && (
+                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-xs">Affectée</Badge>
+                          )}
+                          {savingTeam && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Les hôtesses cochées sont directement affectées à ce site. Un email de notification leur sera envoyé si elles sont nouvellement ajoutées.
+              </p>
             </div>
           )}
         </DialogContent>

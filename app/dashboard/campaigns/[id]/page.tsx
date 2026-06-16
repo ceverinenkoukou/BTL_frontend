@@ -365,9 +365,10 @@ export default function CampaignDetailPage() {
     setWonPrize(null);
     const idx = Math.floor(Math.random() * wheelPrizes.length);
     const selected = wheelPrizes[idx];
-    const anglePerSlice = 360 / wheelPrizes.length;
+     const anglePerSlice = 360 / wheelPrizes.length;
     const prizeAngle = idx * anglePerSlice + anglePerSlice / 2;
     const totalSpins = 5 + Math.random() * 3;
+    const finalAngle = 360 * totalSpins + (360 - prizeAngle);
     const startRot = wheelRotationRef.current;
     const normalizedStart = ((startRot % 360) + 360) % 360;
     const targetFinalRot = (360 - prizeAngle + 360) % 360;
@@ -379,6 +380,7 @@ export default function CampaignDetailPage() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
+      wheelRotationRef.current = (startRot + (targetRot - startRot) * eased) % 360;
       wheelRotationRef.current = normalizedStart + (targetRot - normalizedStart) * eased;
       drawWheelImmediate(wheelRotationRef.current);
       if (progress < 1) {
