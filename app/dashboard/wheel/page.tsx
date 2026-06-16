@@ -250,10 +250,12 @@ export default function WheelPage() {
     // Pour que l'aiguille (droite, 0°) pointe sur prizeCenter,
     // il faut : -rotation ≡ prizeCenter (mod 360)
     // => rotation_finale ≡ -prizeCenter ≡ (360 - prizeCenter) % 360
-    const currentRotation = ((rotation % 360) + 360) % 360;
+    const startCumulative = cumulativeRotationRef.current;
+    const currentRotation = ((startCumulative % 360) + 360) % 360;
     const targetFinalRot = (360 - prizeAngle + 360) % 360;
     const delta = (targetFinalRot - currentRotation + 360) % 360;
-    const targetRotation = currentRotation + 360 * totalSpins + delta;
+    const totalSpins = 5 + Math.floor(Math.random() * 3);
+    const targetCumulative = startCumulative + 360 * totalSpins + delta;
     const duration = 5000;
     const startTime = Date.now();
 
