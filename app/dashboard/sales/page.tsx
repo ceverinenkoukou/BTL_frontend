@@ -21,14 +21,53 @@ import * as XLSX from "xlsx";
 
 type VenteEnrichie = Vente;
 
-interface GainGoodieReport {
+// ─────────────────────────────────────────────────────────────────────────
+// Types du rapport PDF — alimentés par GET /rapports-pdf/entreprise/?nom=...
+// Ces données sont déjà jointes et fiables côté backend (RapportPDFViewSet) :
+// plus de reconstruction par fenêtre de temps en JS.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface RapportPDFMeta {
+  nom: string;
+  logo: string;
+  couleur_primaire: string;
+  couleur_secondaire: string;
+}
+
+interface RapportPDFPerformance {
+  hotesse: string;
+  site: string;
+  actes_vente: number;
+  volume_vendu: number;
+  volume_offert: number;
+  goodies_remis: number;
+}
+
+interface RapportPDFJournalRow {
   id: string;
-  goodie_nom: string;
-  site_nom: string;
-  produit_nom: string | null;
-  quantite_produit: number;
-  nom_client: string | null;
-  created_at: string;
+  heure: string;
+  hotesse: string;
+  site: string;
+  client: string;
+  produit: string;
+  volume_vendu: number;
+  volume_offert: number;
+  goodie_remporte: string;
+}
+
+interface RapportPDFTotaux {
+  actes_vente: number;
+  volume_vendu: number;
+  volume_offert: number;
+  goodies_remis: number;
+}
+
+interface RapportPDFResponse {
+  meta: RapportPDFMeta;
+  performances: RapportPDFPerformance[];
+  goodies_distribution: Record<string, Record<string, number>>;
+  journal: RapportPDFJournalRow[];
+  totaux: RapportPDFTotaux;
 }
 
 type VenteTypeFilter = "all" | Vente["type_vente"];
@@ -145,8 +184,23 @@ export default function SalesPage() {
     }));
   }, [filtered]);
 
+  // ───────────────────────────────────────────────────────────────────────
+  // exportCompanyPDF
+  //
+  // AVANT : cette fonction appelait /ventes/, /campagnes/{id}/rapport-sites/
+  // et /gains-goodies/ séparément, puis reconstruisait le journal des
+  // transactions en JS via un matching par "bucket de minute" + fenêtre de
+  // 10 minutes (OFFER_MATCH_WINDOW_MS). Cette logique provoquait des
+  // doublons et des "+1" erronés sur Vol. Offert, et ignorait totalement
+  // GainPromotion.
+  //
+  // APRÈS : un seul appel à /rapports-pdf/entreprise/?nom=<nom>. Le backend
+  // (RapportPDFViewSet) retourne des données déjà jointes via les vraies
+  // relations Django (Vente.degustation, GainGoodie.degustation/promotion,
+  // GainPromotion), donc fiables. Cette fonction ne fait plus que la mise
+  // en forme HTML — le template visuel (CSS, script html2pdf) est inchangé.
+  // ───────────────────────────────────────────────────────────────────────
   const exportCompanyPDF = async (entrepriseNom: string) => {
-    const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
     const esc = (value: string | number | null | undefined) =>
       String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -154,250 +208,75 @@ export default function SalesPage() {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
-    const formatTime = (value: string) =>
-      new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-    const normalizeClientName = (value: string | null | undefined) =>
-      (value || "Client")
-        .trim()
-        .replace(/\s+(achat|offert)$/i, "")
-        .replace(/\s+/g, " ");
-    
-    const firstSale = companySales[0]; 
-    const logoUrl = firstSale?.entreprise_logo || ""; 
-    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46"; 
-    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488"; 
 
-    const goodiesSiteMap = new Map<string, Map<string, number>>();
-    const goodiesTotalsBySite = new Map<string, number>();
-    let gainGoodies: GainGoodieReport[] = [];
-
+    let rapport: RapportPDFResponse;
     try {
-      const companyCampaignNames = new Set(companySales.map(s => s.campagne_nom));
-      const companyCampaigns = campaigns.filter(c =>
-        c.entreprise_nom === entrepriseNom && companyCampaignNames.has(c.nom)
-      );
-      const companySiteNames = new Set(companySales.map(s => s.site_nom));
-
-      const rapports = await Promise.all(
-        companyCampaigns.map(c =>
-          api
-            .get<CampagneRapportSites>(`/campagnes/${c.id}/rapport-sites/`)
-            .then(res => res.data)
-            .catch(() => null)
-        )
-      );
-
-      rapports.forEach(rapport => {
-        rapport?.sites.forEach(site => {
-          let siteTotal = 0;
-
-          (site.goodies ?? []).forEach(goodie => {
-            const quantite = Number(goodie.quantite_distribuee ?? 0);
-            if (quantite <= 0) return;
-
-            if (!goodiesSiteMap.has(site.nom)) {
-              goodiesSiteMap.set(site.nom, new Map<string, number>());
-            }
-
-            const currentSiteGoodies = goodiesSiteMap.get(site.nom)!;
-            const currentQty = currentSiteGoodies.get(goodie.goodie_nom) ?? 0;
-            currentSiteGoodies.set(goodie.goodie_nom, currentQty + quantite);
-            siteTotal += quantite;
-          });
-
-          if (siteTotal === 0) {
-            siteTotal = Number(site.goodies_distribues_total ?? 0);
-          }
-
-          if (siteTotal > 0) {
-            goodiesTotalsBySite.set(site.nom, (goodiesTotalsBySite.get(site.nom) ?? 0) + siteTotal);
-          }
-        });
+      const res = await api.get<RapportPDFResponse>("/rapports-pdf/entreprise/", {
+        params: { nom: entrepriseNom },
       });
-
-      const gainsRes = await api
-        .get<GainGoodieReport[] | { results?: GainGoodieReport[] }>("/gains-goodies/")
-        .catch(() => ({ data: [] as GainGoodieReport[] }));
-      const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data.results ?? []);
-      gainGoodies = gainsData.filter(gain => companySiteNames.has(gain.site_nom));
+      rapport = res.data;
     } catch {
-      toast.error("Impossible de charger le détail des goodies pour le PDF.");
+      toast.error("Impossible de charger les données du rapport.");
+      return;
     }
 
-    const globalTotalVendu = companySales.reduce((sum, s) => sum + (s.type_vente === "NORMAL" ? s.quantite : 0), 0);
-    const globalTotalOfferts = companySales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0);
-    const globalTotalGoodies = [...goodiesTotalsBySite.values()].reduce((sum, count) => sum + count, 0);
-    const hostesseSiteMap = new Map<string, {
-      hotesse: string;
-      site: string;
-      actes: number;
-      vendu: number;
-      offert: number;
-      goodies: number;
-    }>();
+    const { meta, performances, goodies_distribution, journal, totaux } = rapport;
+    const logoUrl = meta.logo || "";
+    const colorPrimary = meta.couleur_primaire || "#065f46";
+    const colorSecondary = meta.couleur_secondaire || "#0d9488";
 
-    companySales.forEach(s => {
-      const key = `${s.hotesse_nom}__${s.site_nom}`;
-      if (!hostesseSiteMap.has(key)) {
-        hostesseSiteMap.set(key, {
-          hotesse: s.hotesse_nom || "Non renseignée",
-          site: s.site_nom,
-          actes: 0,
-          vendu: 0,
-          offert: 0,
-          goodies: 0,
-        });
-      }
-      const row = hostesseSiteMap.get(key)!;
-      if (s.type_vente === "NORMAL") {
-        row.actes += 1;
-        row.vendu += s.quantite;
-      } else {
-        row.offert += s.quantite;
-      }
-    });
-
-    goodiesTotalsBySite.forEach((count, siteNom) => {
-      const hostessesForSite = [...hostesseSiteMap.values()].filter(row => row.site === siteNom);
-      if (hostessesForSite.length === 1) {
-        hostessesForSite[0].goodies = count;
-      }
-    });
-
-    const hostesseRows = [...hostesseSiteMap.values()]
-      .sort((a, b) => b.vendu - a.vendu || b.offert - a.offert || a.hotesse.localeCompare(b.hotesse))
+    // ── Tableau 1 : Performances cumulées par hôtesse / site ───────────────
+    const hostesseRows = [...performances]
+      .sort((a, b) =>
+        b.volume_vendu - a.volume_vendu ||
+        b.volume_offert - a.volume_offert ||
+        a.hotesse.localeCompare(b.hotesse)
+      )
       .map(row => `
         <tr>
           <td class="b">${esc(row.hotesse)}</td>
           <td class="site-name b">${esc(row.site)}</td>
-          <td class="r b">${row.actes}</td>
-          <td class="r">${row.vendu} u.</td>
-          <td class="r text-gift">${row.offert ? `${row.offert} u.` : "0"}</td>
-          <td class="r b">${row.goodies}</td>
+          <td class="r b">${row.actes_vente}</td>
+          <td class="r">${row.volume_vendu} u.</td>
+          <td class="r text-gift">${row.volume_offert ? `${row.volume_offert} u.` : "0"}</td>
+          <td class="r b">${row.goodies_remis}</td>
         </tr>
       `).join("");
 
-    type TransactionRow = {
-      time: number;
-      heure: string;
-      hotesse: string;
-      site: string;
-      client: string;
-      produit: string;
-      vendu: number;
-      offert: number;
-      goodie: string;
-    };
+    // ── Tableau 2 : Répartition des goodies distribués ──────────────────────
+    let goodiesRowsHtml = "";
+    const goodieKeys = Object.keys(goodies_distribution);
+    if (goodieKeys.length === 0) {
+      goodiesRowsHtml = `<tr><td colspan="4" class="muted-row">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
+    } else {
+      goodiesRowsHtml = goodieKeys.map(perfKey => {
+        // perfKey est au format "hotesse | site" (clé construite côté backend)
+        const [hotesse, site] = perfKey.split(" | ");
+        const distribution = goodies_distribution[perfKey];
+        const itemsHtml = Object.entries(distribution).map(([goodieNom, quantite]) => `
+          <div class="goodie-detail-item">
+            <span class="goodie-label">${esc(goodieNom)}</span>
+            <span class="goodie-qty">x${quantite}</span>
+          </div>
+        `).join("");
+        const totalSiteGoodies = Object.values(distribution).reduce((a, b) => a + b, 0);
 
-    const OFFER_MATCH_WINDOW_MS = 10 * 60 * 1000;
-    const transactionMap = new Map<string, TransactionRow>();
-    const goodieLookup = new Map<string, string[]>();
-    const isPlaceholderClient = (client: string) => client === "Client";
+        return `
+          <tr>
+            <td class="b">${esc(hotesse || "-")}</td>
+            <td class="b site-name">${esc(site || "-")}</td>
+            <td><div class="goodies-grid-cell">${itemsHtml}</div></td>
+            <td class="r b text-star" style="font-size:13px;">${totalSiteGoodies} lot(s)</td>
+          </tr>
+        `;
+      }).join("");
+    }
 
-    gainGoodies.forEach(gain => {
-      const date = new Date(gain.created_at);
-      const minuteBucket = Math.floor(date.getTime() / 60000);
-      const client = normalizeClientName(gain.nom_client);
-      const product = gain.produit_nom || "";
-      const keys = [
-        `${minuteBucket}__${gain.site_nom}__${client}__${product}`,
-        `${minuteBucket}__${gain.site_nom}__${client}__`,
-      ];
-
-      keys.forEach(key => {
-        const values = goodieLookup.get(key) ?? [];
-        values.push(gain.goodie_nom);
-        goodieLookup.set(key, values);
-      });
-    });
-
-    [...companySales]
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .forEach(s => {
-        const date = new Date(s.created_at);
-        const saleTime = date.getTime();
-        const minuteBucket = Math.floor(date.getTime() / 60000);
-        const client = normalizeClientName(s.nom_client);
-        let key = `${minuteBucket}__${s.hotesse_nom}__${s.site_nom}__${client}__${s.produit_nom}`;
-        const goodies =
-          goodieLookup.get(`${minuteBucket}__${s.site_nom}__${client}__${s.produit_nom}`) ??
-          goodieLookup.get(`${minuteBucket}__${s.site_nom}__${client}__`);
-
-        if (s.type_vente !== "NORMAL") {
-          const matchingTransaction = [...transactionMap.entries()]
-            .filter(([, row]) => {
-              const sameHostess = row.hotesse === (s.hotesse_nom || "Non renseignée");
-              const sameSite = row.site === s.site_nom;
-              const sameProduct = row.produit === s.produit_nom;
-              const sameClient =
-                row.client === client ||
-                isPlaceholderClient(row.client) ||
-                isPlaceholderClient(client);
-              const closeEnough = Math.abs(row.time - saleTime) <= OFFER_MATCH_WINDOW_MS;
-
-              return row.vendu > 0 && sameHostess && sameSite && sameProduct && sameClient && closeEnough;
-            })
-            .sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
-
-          if (matchingTransaction) {
-            key = matchingTransaction[0];
-          }
-        }
-
-        if (!transactionMap.has(key)) {
-          transactionMap.set(key, {
-            time: saleTime,
-            heure: formatTime(s.created_at),
-            hotesse: s.hotesse_nom || "Non renseignée",
-            site: s.site_nom,
-            client,
-            produit: s.produit_nom,
-            vendu: 0,
-            offert: 0,
-            goodie: goodies?.join(", ") || "-",
-          });
-        }
-
-        const row = transactionMap.get(key)!;
-        if (isPlaceholderClient(row.client) && !isPlaceholderClient(client)) {
-          row.client = client;
-        }
-        if (row.goodie === "-" && goodies?.length) {
-          row.goodie = goodies.join(", ");
-        }
-        if (s.type_vente === "NORMAL") row.vendu += s.quantite;
-        else row.offert += s.quantite;
-      });
-
-    gainGoodies.forEach(gain => {
-      const date = new Date(gain.created_at);
-      const minuteBucket = Math.floor(date.getTime() / 60000);
-      const client = normalizeClientName(gain.nom_client);
-      const product = gain.produit_nom || "Lot";
-      const hasSaleTransaction = [...transactionMap.values()].some(row =>
-        row.site === gain.site_nom &&
-        row.client === client &&
-        row.produit === product &&
-        Math.floor(row.time / 60000) === minuteBucket
-      );
-
-      if (hasSaleTransaction) return;
-
-      transactionMap.set(`goodie__${gain.id}`, {
-        time: date.getTime(),
-        heure: formatTime(gain.created_at),
-        hotesse: "-",
-        site: gain.site_nom,
-        client,
-        produit: product,
-        vendu: 0,
-        offert: gain.quantite_produit || 0,
-        goodie: gain.goodie_nom,
-      });
-    });
-
-    const transactionRowsHtml = [...transactionMap.values()]
-      .sort((a, b) => b.time - a.time)
+    // ── Tableau 3 : Journal chronologique des transactions ──────────────────
+    // Vol. Vendu / Vol. Offert / Goodie sont déjà corrects (calculés côté
+    // backend via les relations FK réelles, sans devinette temporelle).
+    const transactionRowsHtml = [...journal]
+      .sort((a, b) => b.heure.localeCompare(a.heure))
       .map(row => `
         <tr>
           <td class="time">${esc(row.heure)}</td>
@@ -405,43 +284,11 @@ export default function SalesPage() {
           <td class="site-name">${esc(row.site)}</td>
           <td class="b">${esc(row.client)}</td>
           <td><span class="product-pill">${esc(row.produit)}</span></td>
-          <td class="r b">${row.vendu ? `${row.vendu} u.` : "-"}</td>
-          <td class="r b text-gift">${row.offert ? `+${row.offert} u.` : "-"}</td>
-          <td>${esc(row.goodie)}</td>
+          <td class="r b">${row.volume_vendu ? `${row.volume_vendu} u.` : "-"}</td>
+          <td class="r b text-gift">${row.volume_offert ? `+${row.volume_offert} u.` : "-"}</td>
+          <td>${esc(row.goodie_remporte)}</td>
         </tr>
       `).join("");
-
-    let goodiesRowsHtml = "";
-    if (goodiesSiteMap.size === 0) {
-      goodiesRowsHtml = `<tr><td colspan="4" class="muted-row">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
-    } else {
-      goodiesRowsHtml = [...goodiesSiteMap.entries()].map(([siteNom, goodiesDistribution]) => {
-        const itemsHtml = [...goodiesDistribution.entries()].map(([goodieNom, quantiteTotale]) => `
-          <div class="goodie-detail-item">
-            <span class="goodie-label">${esc(goodieNom)}</span>
-            <span class="goodie-qty">x${quantiteTotale}</span>
-          </div>
-        `).join("");
-
-        const totalSiteGoodies = [...goodiesDistribution.values()].reduce((a, b) => a + b, 0);
-        const hotesses = [...hostesseSiteMap.values()]
-          .filter(row => row.site === siteNom)
-          .map(row => row.hotesse)
-          .filter((value, index, arr) => arr.indexOf(value) === index)
-          .join(", ");
-
-        return `
-          <tr>
-            <td class="b">${esc(hotesses || "-")}</td>
-            <td class="b site-name">${esc(siteNom)}</td>
-            <td>
-              <div class="goodies-grid-cell">${itemsHtml}</div>
-            </td>
-            <td class="r b text-star" style="font-size:13px;">${totalSiteGoodies} lot(s)</td>
-          </tr>
-        `;
-      }).join("");
-    }
 
     const html = `<!DOCTYPE html>
     <html lang="fr">
@@ -532,7 +379,7 @@ export default function SalesPage() {
         .meta-date{text-align:right;color:#64748b;font-size:12px}
         .meta-date .date-box{background:#f8fafc !important;padding:8px 16px;border-radius:10px;border:1px solid #dbe3ec;margin-top:8px;display:inline-block;font-weight:800;color:#334155;font-size:15px}
 
-        .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:38px}
+        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:38px}
         .kpi{background:#f8fafc !important;border:1px solid #dbe3ec;border-radius:14px;padding:18px 20px}
         .kpi .l{font-size:13px;color:#64748b;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
         .kpi .v{font-size:26px;font-weight:950;color:#0f172a;letter-spacing:-0.4px}
@@ -609,9 +456,10 @@ export default function SalesPage() {
         </div>
 
         <div class="kpis">
-          <div class="kpi"><div class="l">Clients servis / ventes</div><div class="v">${companySales.filter(s => s.type_vente === "NORMAL").length}</div></div>
-          <div class="kpi"><div class="l">Volume total vendu</div><div class="v">${globalTotalVendu} u.</div></div>
-          <div class="kpi"><div class="l">Volume total offert</div><div class="v text-gift">${globalTotalOfferts} u.</div></div>
+          <div class="kpi"><div class="l">Clients servis / ventes</div><div class="v">${totaux.actes_vente}</div></div>
+          <div class="kpi"><div class="l">Volume total vendu</div><div class="v">${totaux.volume_vendu} u.</div></div>
+          <div class="kpi"><div class="l">Volume total offert</div><div class="v text-gift">${totaux.volume_offert} u.</div></div>
+          <div class="kpi"><div class="l">Goodies gagnés</div><div class="v text-star">${totaux.goodies_remis}</div></div>
         </div>
 
         <h2 class="section-title">1. Performances cumulées par hôtesse & site</h2>
@@ -630,10 +478,10 @@ export default function SalesPage() {
             ${hostesseRows || `<tr><td colspan="6" class="muted-row">Aucune vente enregistrée pour cette période.</td></tr>`}
             <tr class="tot-row">
               <td colspan="2" class="b">TOTAL GÉNÉRAL</td>
-              <td class="r">${companySales.filter(s => s.type_vente === "NORMAL").length}</td>
-              <td class="r">${globalTotalVendu} u.</td>
-              <td class="r text-gift">${globalTotalOfferts} u.</td>
-              <td class="r text-star">${globalTotalGoodies}</td>
+              <td class="r">${totaux.actes_vente}</td>
+              <td class="r">${totaux.volume_vendu} u.</td>
+              <td class="r text-gift">${totaux.volume_offert} u.</td>
+              <td class="r text-star">${totaux.goodies_remis}</td>
             </tr>
           </tbody>
         </table>

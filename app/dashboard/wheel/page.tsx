@@ -65,6 +65,7 @@ export default function WheelPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cumulativeRotationRef = useRef(0);
   
   // Sécurisation : État pour savoir si le composant est monté côté client
   const [isMounted, setIsMounted] = useState(false);
@@ -172,7 +173,7 @@ export default function WheelPage() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const anglePerSlice = (2 * Math.PI) / prizes.length;
-    const rotationRad = (rotation * Math.PI) / 180;
+    const rotationRad = (((rotation % 360) + 360) % 360) * Math.PI / 180;
 
     prizes.forEach((prize, index) => {
       const startAngle = index * anglePerSlice + rotationRad;
@@ -239,16 +240,20 @@ export default function WheelPage() {
         break;
       }
     }
-
-    const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
     const anglePerSlice = 360 / prizes.length;
+    const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
-    
-    const totalSpins = 5 + Math.random() * 3;
-    const finalAngle = 360 * totalSpins + (360 - prizeAngle);
-    
-    let currentRotation = rotation;
-    const targetRotation = currentRotation + finalAngle;
+    // Milieu du segment gagnant (0° = droite, sens horaire canvas)
+    // const prizeCenter = prizeIndex * anglePerSlice + anglePerSlice / 2;
+
+    // La roue tourne en sens antihoraire (rotation diminue).
+    // Pour que l'aiguille (droite, 0°) pointe sur prizeCenter,
+    // il faut : -rotation ≡ prizeCenter (mod 360)
+    // => rotation_finale ≡ -prizeCenter ≡ (360 - prizeCenter) % 360
+    const currentRotation = ((rotation % 360) + 360) % 360;
+    const targetFinalRot = (360 - prizeAngle + 360) % 360;
+    const delta = (targetFinalRot - currentRotation + 360) % 360;
+    const targetRotation = currentRotation + 360 * totalSpins + delta;
     const duration = 5000;
     const startTime = Date.now();
 
@@ -256,26 +261,24 @@ export default function WheelPage() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      
-      const newRotation = currentRotation + (targetRotation - currentRotation) * eased;
-      setRotation(newRotation % 360);
+
+      const current = startCumulative + (targetCumulative - startCumulative) * eased;
+      cumulativeRotationRef.current = current;
+      setRotation(current);
 
       if (progress < 1) {
         requestAnimationFrame(animate);
       } else {
+        cumulativeRotationRef.current = targetCumulative;
+        setRotation(targetCumulative);
         setSpinning(false);
         setWonPrize(selectedPrize);
         setShowWinDialog(true);
-        
-        // Import dynamique sécurisé de canvas-confetti au moment du clic
+
         if (selectedPrize.name !== "Réessayez") {
           import("canvas-confetti").then((module) => {
             const confetti = module.default;
-            confetti({
-              particleCount: 100,
-              spread: 70,
-              origin: { y: 0.6 },
-            });
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           });
         }
       }
