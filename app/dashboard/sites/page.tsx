@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import type { CampagneList, CreatePromotionPayload, Entreprise, Promotion, RemoteUser, SiteList, TeamMember, TypePromotion } from "@/lib/types/backend";
+import type { CampagneList, CreatePromotionPayload, Entreprise, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypePromotion } from "@/lib/types/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -60,6 +60,7 @@ type PromoForm = {
   quantite_requise: string;
   quantite_offerte: string;
   recompense_description: string;
+  produit_cible: string;
 };
 
 const emptyPromoForm: PromoForm = {
@@ -67,6 +68,7 @@ const emptyPromoForm: PromoForm = {
   quantite_requise: "3",
   quantite_offerte: "1",
   recompense_description: "",
+  produit_cible: "",
 };
 
 type EditPromoForm = PromoForm & { id: string };
@@ -95,6 +97,7 @@ export default function SitesPage() {
   const [editingSite, setEditingSite] = useState<SiteList | null>(null);
   const [offersSite, setOffersSite] = useState<SiteList | null>(null);
   const [siteForm, setSiteForm] = useState<SiteForm>(emptySiteForm);
+  const [campagneProduits, setCampagneProduits] = useState<Produit[]>([]);
 
   // --- Hôtesses ---
   const [hotelSite, setHotelSite] = useState<SiteList | null>(null);
@@ -218,11 +221,18 @@ export default function SitesPage() {
     setPromotions([]);
     setShowPromoForm(false);
     setPromoForm(emptyPromoForm);
+    setCampagneProduits([]);
     setLoadingOffers(true);
 
     try {
-      const { data } = await api.get(`/promotions/?campagne=${site.campagne}`);
-      setPromotions(unwrapList<Promotion>(data));
+      const campagne = campaigns.find(c => c.id === site.campagne);
+      const entrepriseId = campagne?.entreprise;
+      const [promoRes, produitsRes] = await Promise.all([
+        api.get(`/promotions/?campagne=${site.campagne}`),
+        entrepriseId ? api.get(`/entreprises/${entrepriseId}/`) : Promise.resolve({ data: { produits: [] } }),
+      ]);
+      setPromotions(unwrapList<Promotion>(promoRes.data));
+      setCampagneProduits(produitsRes.data.produits ?? []);
     } catch {
       toast.error("Erreur lors du chargement des offres.");
     } finally {
@@ -251,6 +261,7 @@ export default function SitesPage() {
       quantite_requise: String(promotion.quantite_requise),
       quantite_offerte: String(promotion.quantite_offerte ?? 1),
       recompense_description: promotion.recompense_description,
+      produit_cible: promotion.produit_cible ?? "",
     });
   };
 
@@ -267,6 +278,7 @@ export default function SitesPage() {
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: editingPromo.recompense_description.trim(),
+        produit_cible: editingPromo.produit_cible || null,
       });
       setPromotions(current => current.map(p => (p.id === data.id ? data : p)));
       setEditingPromo(null);
@@ -293,6 +305,7 @@ export default function SitesPage() {
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: promoForm.recompense_description.trim(),
+        produit_cible: promoForm.produit_cible || null,
         is_active: true,
       };
       const { data } = await api.post<Promotion>("/promotions/", payload);
@@ -643,14 +656,29 @@ export default function SitesPage() {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Description de la récompense</Label>
-                      <Input
-                        placeholder="Ex : 1 bière offerte, bon cadeau…"
-                        className="h-9"
-                        value={promoForm.recompense_description}
-                        onChange={e => setPromoForm(f => ({ ...f, recompense_description: e.target.value }))}
-                      />
+                      <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
+                      <Select
+                        value={promoForm.produit_cible || "__none__"}
+                        onValueChange={v => setPromoForm(f => ({ ...f, produit_cible: v === "__none__" ? "" : v }))}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Tous les produits" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Tous les produits</SelectItem>
+                          {campagneProduits.map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Description de la récompense</Label>
+                    <Input
+                      placeholder="Ex : 1 bière offerte, bon cadeau…"
+                      className="h-9"
+                      value={promoForm.recompense_description}
+                      onChange={e => setPromoForm(f => ({ ...f, recompense_description: e.target.value }))}
+                    />
                   </div>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -714,13 +742,28 @@ export default function SitesPage() {
                                 </Select>
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs">Description de la récompense</Label>
-                                <Input
-                                  className="h-9"
-                                  value={editingPromo.recompense_description}
-                                  onChange={e => setEditingPromo(f => f ? { ...f, recompense_description: e.target.value } : f)}
-                                />
+                                <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
+                                <Select
+                                  value={editingPromo.produit_cible || "__none__"}
+                                  onValueChange={v => setEditingPromo(f => f ? { ...f, produit_cible: v === "__none__" ? "" : v } : f)}
+                                >
+                                  <SelectTrigger className="h-9"><SelectValue placeholder="Tous les produits" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Tous les produits</SelectItem>
+                                    {campagneProduits.map(p => (
+                                      <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Description de la récompense</Label>
+                              <Input
+                                className="h-9"
+                                value={editingPromo.recompense_description}
+                                onChange={e => setEditingPromo(f => f ? { ...f, recompense_description: e.target.value } : f)}
+                              />
                             </div>
                             <div className="grid sm:grid-cols-2 gap-3">
                               <div className="space-y-1">
@@ -755,6 +798,9 @@ export default function SitesPage() {
                                 <p className="font-semibold">
                                   Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
                                 </p>
+                                {promotion.produit_cible_nom && (
+                                  <Badge variant="outline" className="text-xs">{promotion.produit_cible_nom}</Badge>
+                                )}
                                 <Badge variant={promotion.is_active ? "default" : "outline"}>
                                   {promotion.is_active ? "Active" : "Inactive"}
                                 </Badge>
