@@ -136,6 +136,7 @@ export interface Promotion {
   type_promotion: TypePromotion;
   type_promotion_display: string;
   quantite_requise: number;
+  quantite_offerte: number;
   recompense_description: string;
   is_active: boolean;
   created_at: string;
@@ -231,6 +232,7 @@ export interface CreatePromotionPayload {
   sites?: string[];
   type_promotion: TypePromotion;
   quantite_requise: number;
+  quantite_offerte: number;
   recompense_description: string;
   is_active?: boolean;
 }
