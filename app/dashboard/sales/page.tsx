@@ -54,6 +54,9 @@ interface GainGoodieReport {
   produit_nom: string | null;
   quantite_produit: number;
   nom_client: string | null;
+  promotion_nom: string | null;
+  promotion_quantite_requise: number | null;
+  promotion_quantite_offerte: number | null;
   created_at: string;
 }
 
@@ -228,7 +231,7 @@ export default function SalesPage() {
       }).join("");
     }
 
-    type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string };
+    type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string; promo: string; qRequise: number; qOfferte: number };
     const OFFER_WINDOW = 10 * 60 * 1000;
     const isPlaceholder = (c: string) => c === "Client";
     const goodieLookup = new Map<string, string[]>();
@@ -254,7 +257,7 @@ export default function SalesPage() {
         ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
         if (match) key = match[0];
       }
-      if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-" });
+      if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-", promo: "-", qRequise: 0, qOfferte: 0 });
       const row = tMap.get(key)!;
       if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
       if (row.goodie === "-" && goodies?.length) row.goodie = goodies.join(", ");
@@ -266,10 +269,29 @@ export default function SalesPage() {
       const client = normalizeClientName(gain.nom_client);
       const product = gain.produit_nom || "Lot";
       const hasSale = [...tMap.values()].some(row => row.site === gain.site_nom && row.client === client && row.produit === product && Math.floor(row.time / 60000) === mb);
-      if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+      if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom, promo: gain.promotion_nom || "-", qRequise: gain.promotion_quantite_requise || 0, qOfferte: gain.promotion_quantite_offerte || 0 });
     });
+    // Goodie section 2 : rebuild from gainGoodies directly (source of truth)
+    const goodiesBySite2 = new Map<string, { goodieNom: string; qty: number; promo: string; qReq: number; qOff: number }[]>();
+    gainGoodies.forEach(gain => {
+      if (!goodiesBySite2.has(gain.site_nom)) goodiesBySite2.set(gain.site_nom, []);
+      const arr = goodiesBySite2.get(gain.site_nom)!;
+      const existing = arr.find(r => r.goodieNom === gain.goodie_nom && r.promo === (gain.promotion_nom || "-"));
+      if (existing) { existing.qty += 1; }
+      else arr.push({ goodieNom: gain.goodie_nom, qty: 1, promo: gain.promotion_nom || "-", qReq: gain.promotion_quantite_requise || 0, qOff: gain.promotion_quantite_offerte || 0 });
+    });
+    const goodiesRowsHtml2 = gainGoodies.length === 0
+      ? `<tr><td colspan="5" class="muted-row">Aucun goodie enregistré pour cette période.</td></tr>`
+      : [...goodiesBySite2.entries()].map(([siteNom, items]) => {
+          const hotesses = [...hostMap.values()].filter(r => r.site === siteNom).map(r => r.hotesse).filter((v, i, a) => a.indexOf(v) === i).join(", ");
+          const total = items.reduce((s, i) => s + i.qty, 0);
+          const itemsHtml = items.map(item => `<div class="goodie-detail-item"><span class="goodie-label">${esc(item.goodieNom)}</span><span class="goodie-qty">x${item.qty}</span></div>`).join("");
+          const promoLabel = items[0]?.promo !== "-" ? `<div style="font-size:11px;color:#6d28d9;margin-top:4px">${esc(items[0].promo)} (achat ${items[0].qReq}, offre ${items[0].qOff})</div>` : "";
+          return `<tr><td class="b">${esc(hotesses || "-")}</td><td class="b site-name">${esc(siteNom)}</td><td><div class="goodies-grid-cell">${itemsHtml}</div>${promoLabel}</td><td class="r b text-star" style="font-size:13px;">${total} lot(s)</td></tr>`;
+        }).join("");
+
     const transactionRowsHtml = tMap.size === 0
-      ? `<tr><td colspan="8" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`
+      ? `<tr><td colspan="9" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`
       : [...tMap.values()].sort((a, b) => b.time - a.time).map(row => `<tr>
           <td class="time">${esc(row.heure)}</td><td class="b">${esc(row.hotesse)}</td>
           <td class="site-name">${esc(row.site)}</td><td class="b">${esc(row.client)}</td>
@@ -277,6 +299,7 @@ export default function SalesPage() {
           <td class="r b">${row.vendu ? `${row.vendu} u.` : "-"}</td>
           <td class="r b text-gift">${row.offert ? `+${row.offert} u.` : "-"}</td>
           <td>${esc(row.goodie)}</td>
+          <td style="font-size:11px;color:#6d28d9">${row.promo !== "-" ? `${esc(row.promo)}<br/><span style="color:#94a3b8">${row.qRequise} → ${row.qOfferte} offert(s)</span>` : "-"}</td>
         </tr>`).join("");
 
     const safeNom = entrepriseNom.replace(/\s+/g, "_");
@@ -374,13 +397,13 @@ export default function SalesPage() {
   </tbody></table>
   <h2 class="section-title">2. Répartition des goodies distribués</h2>
   <table><thead><tr>
-    <th>Hôtesse</th><th>Site d'activité</th><th>Détail des Dotations / Lots distribués</th><th class="r">Volume total</th>
-  </tr></thead><tbody>${goodiesRowsHtml}</tbody></table>
+    <th>Hôtesse</th><th>Site d'activité</th><th>Détail des Dotations / Offre déclenchée</th><th class="r">Volume total</th>
+  </tr></thead><tbody>${goodiesRowsHtml2}</tbody></table>
   <div class="page-break">
     <h2 class="section-title">3. Journal des transactions</h2>
     <table><thead><tr>
       <th>Heure</th><th>Hôtesse</th><th>Site</th><th>Client</th>
-      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th>
+      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th><th>Offre promotionnelle</th>
     </tr></thead><tbody>${transactionRowsHtml}</tbody></table>
   </div>
   <div class="foot">Rapport généré automatiquement depuis MHedia BTL</div>

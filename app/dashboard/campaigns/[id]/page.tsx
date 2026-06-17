@@ -284,10 +284,9 @@ export default function CampaignDetailPage() {
         .map(g => ({ id: g.id, name: g.nom }));
     }
     if (activeGoodies.length === 0) return [];
-    return [
-      ...activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true })),
-      { id: "retry", name: "Réessayez", isGoodie: false },
-    ];
+    
+    // Suppression complète de la mention "Réessayez" pour garantir un gain à 100%
+    return activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true }));
   }, [goodies, siteInfo]);
 
   const drawWheelImmediate = (rot: number) => {
@@ -324,7 +323,7 @@ export default function CampaignDetailPage() {
       ctx.font = "12px sans-serif";
       ctx.fillStyle = "#94a3b8";
       ctx.fillText("configuré", cx, cy + 8);
-      ctx.fillText("pour cette campagne", cx, cy + 24);
+      ctx.fillText("ou disponible", cx, cy + 24);
       return;
     }
 
@@ -365,7 +364,7 @@ export default function CampaignDetailPage() {
     setWonPrize(null);
     const idx = Math.floor(Math.random() * wheelPrizes.length);
     const selected = wheelPrizes[idx];
-     const anglePerSlice = 360 / wheelPrizes.length;
+    const anglePerSlice = 360 / wheelPrizes.length;
     const prizeAngle = idx * anglePerSlice + anglePerSlice / 2;
     const totalSpins = 5 + Math.random() * 3;
     const finalAngle = 360 * totalSpins + (360 - prizeAngle);
@@ -380,7 +379,6 @@ export default function CampaignDetailPage() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      wheelRotationRef.current = (startRot + (targetRot - startRot) * eased) % 360;
       wheelRotationRef.current = normalizedStart + (targetRot - normalizedStart) * eased;
       drawWheelImmediate(wheelRotationRef.current);
       if (progress < 1) {
@@ -388,28 +386,26 @@ export default function CampaignDetailPage() {
       } else {
         setWheelSpinning(false);
         setWonPrize(selected.name);
-        if (selected.name !== "Réessayez") {
-          confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
-        }
+        confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
       }
     };
     requestAnimationFrame(animate);
   };
 
   useEffect(() => {
-    if (activeWheelPromoId) {
+    if (activeWheelPromoId || wheelOpen) {
       wheelRotationRef.current = 0;
       const t = setTimeout(() => drawWheelImmediate(0), 80);
       return () => clearTimeout(t);
     }
-  }, [activeWheelPromoId]);
+  }, [activeWheelPromoId, wheelOpen]);
 
   useEffect(() => {
-    if (activeWheelPromoId && !wheelSpinning) {
+    if ((activeWheelPromoId || wheelOpen) && !wheelSpinning) {
       const t = setTimeout(() => drawWheelImmediate(wheelRotationRef.current), 50);
       return () => clearTimeout(t);
     }
-  }, [siteInfo, goodies, activeWheelPromoId, wheelSpinning]);
+  }, [siteInfo, goodies, activeWheelPromoId, wheelOpen, wheelSpinning]);
 
   useEffect(() => {
     if (isHostess && campaignSites.length === 1 && !degForm.site) {
@@ -1096,25 +1092,25 @@ export default function CampaignDetailPage() {
               )}
             </div>
           )}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: p1 }} /></div>
-                Performance par site
-              </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={siteRapport!.sites.map(s => ({ nom: s.nom, degustations: s.degustations, ventes: s.ventes }))} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barSize={18}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                    <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 9 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
-                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{ fill: "rgba(0,0,0,0.03)" }} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                    {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />}
-                    {showVente && <Bar dataKey="ventes" name="Ventes" fill={p2} radius={[4, 4, 0, 0]} />}
-                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: p1 }} /></div>
+              Performance par site
+            </h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={siteRapport!.sites.map(s => ({ nom: s.nom, degustations: s.degustations, ventes: s.ventes }))} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barSize={18}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                  <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 9 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{ fill: "rgba(0,0,0,0.03)" }} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                  {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />}
+                  {showVente && <Bar dataKey="ventes" name="Ventes" fill={p2} radius={[4, 4, 0, 0]} />}
+                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
+          </div>
 
           {/* Affiche le graphique des dégustations/ventes par jour par quantité */}
           {(tastings.length > 0 || ventes.length > 0) && (
@@ -1472,8 +1468,6 @@ export default function CampaignDetailPage() {
             </div>
           </div>
 
-          
-
           {/* Formulaire principal */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50/60">
@@ -1580,7 +1574,7 @@ export default function CampaignDetailPage() {
             <div className="flex flex-col items-center gap-3">
               <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /><span className="text-lg font-bold text-amber-700">Roue de fortune</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
               <canvas ref={wheelCanvasRef} width={280} height={280} className="max-w-full" />
-              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", wonPrize === "Réessayez" ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-amber-50 border-amber-200 text-amber-700")}>{wonPrize === "Réessayez" ? "😔 Réessayez" : `🎁 ${wonPrize}`}</div>)}
+              {wonPrize && (<div className="w-full rounded-2xl p-3.5 text-center font-bold text-base border bg-amber-50 border-amber-200 text-amber-700">{`🎁 ${wonPrize}`}</div>)}
               {getWheelPrizes().length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 w-full pt-2 border-t border-slate-100">
                   {getWheelPrizes().map((prize, i) => (<div key={prize.id} className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-3 h-3 rounded-full shrink-0" style={{ background: WHEEL_COLORS[i % WHEEL_COLORS.length] }} />{prize.name}</div>))}
@@ -1590,13 +1584,11 @@ export default function CampaignDetailPage() {
                 <Button size="lg" className="w-full text-white" style={{ background: brandGrad }} onClick={spinWheel} disabled={wheelSpinning}>
                   {wheelSpinning ? <><RotateCcw className="w-5 h-5 mr-2 animate-spin" />En cours…</> : <><Sparkles className="w-5 h-5 mr-2" />Lancer la roue !</>}
                 </Button>
-              ) : wonPrize === "Réessayez" ? (
-                <div className="flex gap-3 w-full">
-                  <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Réessayer</Button>
-                  <Button variant="outline" className="flex-1" onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); }}>Fermer</Button>
-                </div>
               ) : (
-                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); wheelRotationRef.current = 0; }}><Gift className="w-4 h-4 mr-2" />Confirmer le gain</Button>
+                <div className="flex gap-3 w-full">
+                  <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Relancer</Button>
+                  <Button className="flex-1 text-white" style={{ background: brandGrad }} onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); wheelRotationRef.current = 0; }}><Gift className="w-4 h-4 mr-2" />Valider le gain</Button>
+                </div>
               )}
             </div>
           </div>
@@ -1608,9 +1600,9 @@ export default function CampaignDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
             <div className="flex flex-col items-center gap-3">
-              <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Gift className="w-5 h-5 text-emerald-600" /><span className="text-lg font-bold text-emerald-700">Roue des goodies</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
+              <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /><span className="text-lg font-bold text-amber-700">Roue des goodies</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
               <canvas ref={wheelCanvasRef} width={280} height={280} className="max-w-full" />
-              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", wonPrize === "Réessayez" ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-emerald-50 border-emerald-200 text-emerald-700")}>{wonPrize === "Réessayez" ? "😔 Réessayez" : `🎁 ${wonPrize}`}</div>)}
+              {wonPrize && (<div className="w-full rounded-2xl p-3.5 text-center font-bold text-base border bg-amber-50 border-amber-200 text-amber-700">{`🎁 ${wonPrize}`}</div>)}
               {getWheelPrizes().length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 w-full pt-2 border-t border-slate-100">
                   {getWheelPrizes().map((prize, i) => (<div key={prize.id} className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-3 h-3 rounded-full shrink-0" style={{ background: WHEEL_COLORS[i % WHEEL_COLORS.length] }} />{prize.name}</div>))}
@@ -1620,128 +1612,50 @@ export default function CampaignDetailPage() {
                 <Button size="lg" className="w-full text-white" style={{ background: brandGrad }} onClick={spinWheel} disabled={wheelSpinning}>
                   {wheelSpinning ? <><RotateCcw className="w-5 h-5 mr-2 animate-spin" />En cours…</> : <><Sparkles className="w-5 h-5 mr-2" />Lancer la roue !</>}
                 </Button>
-              ) : wonPrize === "Réessayez" ? (
-                <div className="flex gap-3 w-full">
-                  <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Réessayer</Button>
-                  <Button variant="outline" className="flex-1" onClick={() => { setWheelOpen(false); setWonPrize(null); }}>Fermer</Button>
-                </div>
               ) : (
-                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => { setWheelOpen(false); setWonPrize(null); wheelRotationRef.current = 0; }}><Gift className="w-4 h-4 mr-2" />Confirmer le gain</Button>
+                <div className="flex gap-3 w-full">
+                  <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Relancer</Button>
+                  <Button className="flex-1 text-white" style={{ background: brandGrad }} onClick={() => { setWheelOpen(false); setWonPrize(null); wheelRotationRef.current = 0; }}><Gift className="w-4 h-4 mr-2" />Valider le gain</Button>
+                </div>
               )}
             </div>
           </div>
         </div>
       )}
-      {/* Dégustations récentes */}
-          {tastings.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p2, 0.12) }}><UtensilsCrossed className="w-3.5 h-3.5" style={{ color: p2 }} /></div>
-                Mes activités récentes
-              </h3>
-              <div className="space-y-2">
-                {tastings.slice(0, 5).map((t, i) => (
-                  <div key={t.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: brandGrad }}>{i+1}</div>
-                    <div className="flex-1 min-w-0"><span className="font-medium text-foreground">{t.produit_nom}</span>{t.nom_client && <span className="text-muted-foreground ml-2 text-xs">· {t.nom_client}</span>}<span className="text-muted-foreground ml-2 text-xs">{t.tranche_age_display}</span></div>
-                    <div className="flex items-center gap-1 text-xs text-amber-500"><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{t.note_gout}/5</div>
-                    {t.a_achete && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">✓</span>}
-                  </div>
-                ))}
-                {tastings.length > 5 && <p className="text-xs text-center text-muted-foreground">+{tastings.length - 5} autres</p>}
-              </div>
-            </div>
-          )}
+
     </div>
 
-    {/* Dialog gestion equipe */}
+    {/* Team management modal */}
     <Dialog open={teamDialogOpen} onOpenChange={setTeamDialogOpen}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UserPlus className="w-4 h-4" style={{ color: p1 }} />
-            Gérer l&apos;équipe &mdash; {campaign?.nom}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex-1 overflow-y-auto space-y-5 pr-1 mt-2">
-          {/* Superviseurs */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
-              Superviseurs ({teamSel.superviseurs_ids.length} sélectionné{teamSel.superviseurs_ids.length > 1 ? "s" : ""})
-            </p>
-            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
-              {allStaff.filter(m => m.role === "Superviseur").length === 0 && (
-                <p className="text-xs text-muted-foreground p-3 italic">Aucun superviseur disponible</p>
-              )}
-              {allStaff.filter(m => m.role === "Superviseur").map(m => (
-                <label key={m.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
-                  <Checkbox
-                    checked={teamSel.superviseurs_ids.includes(m.id)}
-                    onCheckedChange={() => toggleTeamMember("superviseurs_ids", m.id)}
-                    className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
-                  />
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
-                    <p className="text-xs text-muted-foreground">Superviseur</p>
-                  </div>
-                  {teamSel.superviseurs_ids.includes(m.id) && (
-                    <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />
-                  )}
-                </label>
+      <DialogContent className="max-w-md rounded-2xl">
+        <DialogHeader><DialogTitle className="text-base font-bold flex items-center gap-2"><Users className="w-5 h-5 text-indigo-500" /> Gérer l'équipe de terrain</DialogTitle></DialogHeader>
+        <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
+          <div>
+            <h4 className="text-xs font-bold uppercase text-rose-500 tracking-wider mb-2">Hôtesses disponibles</h4>
+            <div className="space-y-1.5">
+              {allStaff.filter(s => s.role === "Hotesse").map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2.5 rounded-xl border bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold">{initials(s.name)}</div><span className="text-sm font-medium">{s.name}</span></div>
+                  <Checkbox checked={teamSel.hotesses_ids.includes(s.id)} onCheckedChange={() => toggleTeamMember("hotesses_ids", s.id)} />
+                </div>
               ))}
             </div>
           </div>
-
-          {/* Hôtesses */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
-              Hôtesses ({teamSel.hotesses_ids.length} sélectionnée{teamSel.hotesses_ids.length > 1 ? "s" : ""})
-            </p>
-            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
-              {allStaff.filter(m => m.role === "Hotesse").length === 0 && (
-                <p className="text-xs text-muted-foreground p-3 italic">Aucune hôtesse disponible</p>
-              )}
-              {allStaff.filter(m => m.role === "Hotesse").map(m => (
-                <label key={m.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
-                  <Checkbox
-                    checked={teamSel.hotesses_ids.includes(m.id)}
-                    onCheckedChange={() => toggleTeamMember("hotesses_ids", m.id)}
-                    className="data-[state=checked]:bg-rose-500 data-[state=checked]:border-rose-500"
-                  />
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
-                    <p className="text-xs text-muted-foreground">Hôtesse</p>
-                  </div>
-                  {teamSel.hotesses_ids.includes(m.id) && (
-                    <CheckCircle2 className="w-4 h-4 text-rose-400 shrink-0" />
-                  )}
-                </label>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-indigo-500 tracking-wider mb-2">Superviseurs disponibles</h4>
+            <div className="space-y-1.5">
+              {allStaff.filter(s => s.role === "Superviseur").map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2.5 rounded-xl border bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold">{initials(s.name)}</div><span className="text-sm font-medium">{s.name}</span></div>
+                  <Checkbox checked={teamSel.superviseurs_ids.includes(s.id)} onCheckedChange={() => toggleTeamMember("superviseurs_ids", s.id)} />
+                </div>
               ))}
             </div>
           </div>
         </div>
-
-        <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
-            {teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length} membre{teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length > 1 ? "s" : ""} sélectionné{teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length > 1 ? "s" : ""}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setTeamDialogOpen(false)}>
-              Annuler
-            </Button>
-            <Button size="sm" className="rounded-xl text-white" style={{ background: p1 }}
-              onClick={handleSaveTeam} disabled={savingTeam}>
-              {savingTeam ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Enregistrement…</> : "Enregistrer l'équipe"}
-            </Button>
-          </div>
+        <div className="flex gap-2 justify-end pt-2 border-t border-slate-100">
+          <Button variant="ghost" onClick={() => setTeamDialogOpen(false)}>Annuler</Button>
+          <Button onClick={handleSaveTeam} disabled={savingTeam} className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium">{savingTeam ? "Enregistrement..." : "Enregistrer"}</Button>
         </div>
       </DialogContent>
     </Dialog>

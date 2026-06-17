@@ -139,6 +139,8 @@ export interface Promotion {
   quantite_offerte: number;
   recompense_description: string;
   is_active: boolean;
+  goodies: string[];
+  goodies_details: { id: string; nom: string }[];
   created_at: string;
 }
 
