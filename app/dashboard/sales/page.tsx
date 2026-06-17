@@ -197,7 +197,10 @@ export default function SalesPage() {
 
     const totalVendu = reportSales.reduce((sum, s) => sum + (s.type_vente === "NORMAL" ? s.quantite : 0), 0);
     const totalOfferts = reportSales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0);
-    const totalGoodies = [...goodiesTotalsBySite.values()].reduce((sum, c) => sum + c, 0);
+    // Préférer gainGoodies comme source de vérité pour le total goodies
+    const totalGoodies = gainGoodies.length > 0
+      ? gainGoodies.length
+      : [...goodiesTotalsBySite.values()].reduce((sum, c) => sum + c, 0);
 
     const hostMap = new Map<string, { hotesse: string; site: string; actes: number; vendu: number; offert: number; goodies: number }>();
     reportSales.forEach(s => {
@@ -207,9 +210,39 @@ export default function SalesPage() {
       if (s.type_vente === "NORMAL") { row.actes += 1; row.vendu += s.quantite; }
       else row.offert += s.quantite;
     });
+    // Peupler goodies depuis goodiesTotalsBySite (rapport-sites)
     goodiesTotalsBySite.forEach((count, siteNom) => {
       const hs = [...hostMap.values()].filter(r => r.site === siteNom);
       if (hs.length === 1) hs[0].goodies = count;
+      else if (hs.length > 1) {
+        // Répartir également entre toutes les hôtesses du site
+        hs.forEach(h => { h.goodies = Math.round(count / hs.length); });
+      }
+    });
+    // Compléter depuis gainGoodies (source directe, plus fiable)
+    gainGoodies.forEach(gain => {
+      const hs = [...hostMap.values()].filter(r => r.site === gain.site_nom);
+      if (hs.length === 1) hs[0].goodies += 0; // déjà compté via goodiesTotalsBySite
+    });
+    // Si un site a des gainGoodies mais pas de ventes (pas dans hostMap), on l'ajoute
+    gainGoodies.forEach(gain => {
+      const key = `__${gain.site_nom}`;
+      if (![...hostMap.keys()].some(k => k.endsWith(`__${gain.site_nom}`))) {
+        if (!hostMap.has(key)) hostMap.set(key, { hotesse: "-", site: gain.site_nom, actes: 0, vendu: 0, offert: 0, goodies: 0 });
+        hostMap.get(key)!.goodies += 1;
+      }
+    });
+    // Recalculer les totaux goodies depuis gainGoodies directement
+    const goodiesCountBySite = new Map<string, number>();
+    gainGoodies.forEach(g => goodiesCountBySite.set(g.site_nom, (goodiesCountBySite.get(g.site_nom) ?? 0) + 1));
+    goodiesCountBySite.forEach((count, siteNom) => {
+      const hs = [...hostMap.values()].filter(r => r.site === siteNom);
+      // Seulement mettre à jour si gainGoodies donne un chiffre plus grand que rapport-sites
+      if (hs.length > 0 && count > hs.reduce((m, h) => Math.max(m, h.goodies), 0)) {
+        hs.forEach(h => { h.goodies = Math.round(count / hs.length); });
+      } else if (hs.length > 0 && hs.every(h => h.goodies === 0)) {
+        hs.forEach(h => { h.goodies = Math.round(count / hs.length); });
+      }
     });
     const hostesseRows = [...hostMap.values()]
       .sort((a, b) => b.vendu - a.vendu || b.offert - a.offert || a.hotesse.localeCompare(b.hotesse))
@@ -239,7 +272,13 @@ export default function SalesPage() {
       const mb = Math.floor(new Date(gain.created_at).getTime() / 60000);
       const client = normalizeClientName(gain.nom_client);
       const product = gain.produit_nom || "";
-      [`${mb}__${gain.site_nom}__${client}__${product}`, `${mb}__${gain.site_nom}__${client}__`].forEach(k => {
+      // Clés de lookup : avec client+produit, avec client seul, avec produit seul, et par site+minute seul
+      [
+        `${mb}__${gain.site_nom}__${client}__${product}`,
+        `${mb}__${gain.site_nom}__${client}__`,
+        `${mb}__${gain.site_nom}____${product}`,
+        `${mb}__${gain.site_nom}____`,
+      ].forEach(k => {
         const v = goodieLookup.get(k) ?? []; v.push(gain.goodie_nom); goodieLookup.set(k, v);
       });
     });
@@ -249,7 +288,13 @@ export default function SalesPage() {
       const mb = Math.floor(saleTime / 60000);
       const client = normalizeClientName(s.nom_client);
       let key = `${mb}__${s.hotesse_nom}__${s.site_nom}__${client}__${s.produit_nom}`;
-      const goodies = goodieLookup.get(`${mb}__${s.site_nom}__${client}__${s.produit_nom}`) ?? goodieLookup.get(`${mb}__${s.site_nom}__${client}__`);
+      const goodies =
+        goodieLookup.get(`${mb}__${s.site_nom}__${client}__${s.produit_nom ?? ""}`) ??
+        goodieLookup.get(`${mb}__${s.site_nom}__${client}__`) ??
+        (s.type_vente !== "NORMAL" ? (
+          goodieLookup.get(`${mb}__${s.site_nom}____${s.produit_nom ?? ""}`) ??
+          goodieLookup.get(`${mb}__${s.site_nom}____`)
+        ) : undefined);
       if (s.type_vente !== "NORMAL") {
         const match = [...tMap.entries()].filter(([, row]) =>
           row.vendu > 0 && row.hotesse === (s.hotesse_nom || "Non renseignée") && row.site === s.site_nom && row.produit === s.produit_nom &&
@@ -262,6 +307,19 @@ export default function SalesPage() {
       if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
       if (row.goodie === "-" && goodies?.length) row.goodie = goodies.join(", ");
       if (s.type_vente === "NORMAL") row.vendu += s.quantite; else row.offert += s.quantite;
+      // Enrichir avec les infos promo du gain si disponibles
+      if (s.type_vente !== "NORMAL" && row.promo === "-") {
+        const matchingGain = gainGoodies.find(g =>
+          g.site_nom === s.site_nom &&
+          Math.abs(new Date(g.created_at).getTime() - saleTime) <= OFFER_WINDOW &&
+          (g.produit_nom === s.produit_nom || !g.produit_nom || !s.produit_nom)
+        );
+        if (matchingGain?.promotion_nom) {
+          row.promo = matchingGain.promotion_nom;
+          row.qRequise = matchingGain.promotion_quantite_requise ?? 0;
+          row.qOfferte = matchingGain.promotion_quantite_offerte ?? 0;
+        }
+      }
     });
     gainGoodies.forEach(gain => {
       const date = new Date(gain.created_at);
@@ -470,7 +528,13 @@ export default function SalesPage() {
         .get<GainGoodieReport[] | { results?: GainGoodieReport[] }>("/gains-goodies/")
         .catch(() => ({ data: [] as GainGoodieReport[] }));
       const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data.results ?? []);
-      gainGoodies = gainsData.filter(gain => companySiteNames.has(gain.site_nom));
+
+      // Inclure aussi les sites des gains (en cas de goodie sans produit associé = pas de Vente créée)
+      gainGoodies = gainsData.filter(gain => {
+        // filtre par nom de site des ventes OU par campagne de la session
+        return companySiteNames.has(gain.site_nom) ||
+          rapports.some(r => r?.sites.some(s => s.nom === gain.site_nom));
+      });
     } catch {
       toast.error("Impossible de charger le détail des goodies pour le PDF.");
     }
