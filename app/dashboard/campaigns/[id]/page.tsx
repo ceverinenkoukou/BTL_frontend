@@ -79,6 +79,33 @@ const RATING_ICONS: { rating: number; icon: React.ReactNode; label: string }[] =
 
 const WHEEL_COLORS = ["#f97316","#3b82f6","#22c55e","#eab308","#ec4899","#8b5cf6","#14b8a6","#ef4444"];
 
+type WheelPrize = {
+  id: string;
+  name: string;
+  isGoodie: boolean;
+};
+
+function normalizeWheelDegrees(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function getPrizeAtPointer<T extends WheelPrize>(prizes: T[], rotationDegrees: number): T | null {
+  if (prizes.length === 0) return null;
+  const anglePerSlice = 360 / prizes.length;
+  const pointerAngleOnWheel = normalizeWheelDegrees(-rotationDegrees);
+  const index = Math.floor(pointerAngleOnWheel / anglePerSlice) % prizes.length;
+  return prizes[index] ?? null;
+}
+
+function fitCanvasLabel(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let shortened = text;
+  while (shortened.length > 3 && ctx.measureText(`${shortened}...`).width > maxWidth) {
+    shortened = shortened.slice(0, -1);
+  }
+  return `${shortened}...`;
+}
+
 const EMPTY_DEG_FORM = {
   site:            "",
   produit:         "",
@@ -138,8 +165,9 @@ export default function CampaignDetailPage() {
 
   const [wheelClientName, setWheelClientName] = useState("");
   const [wheelSpinning, setWheelSpinning] = useState(false);
+  const [savingWheelGain, setSavingWheelGain] = useState(false);
   const [wheelOpen, setWheelOpen] = useState(false);
-  const [wonPrize, setWonPrize] = useState<string | null>(null);
+  const [wonPrize, setWonPrize] = useState<WheelPrize | null>(null);
   const wheelCanvasRef = useRef<HTMLCanvasElement>(null);
   const wheelRotationRef = useRef(0);
   const [activeWheelPromoId, setActiveWheelPromoId] = useState<string | null>(null);
@@ -272,7 +300,7 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const getWheelPrizes = useCallback(() => {
+  const getWheelPrizes = useCallback((): WheelPrize[] => {
     let activeGoodies: { id: string; name: string }[] = [];
     if (siteInfo?.goodies_disponibles && siteInfo.goodies_disponibles.length > 0) {
       activeGoodies = siteInfo.goodies_disponibles
@@ -297,7 +325,7 @@ export default function CampaignDetailPage() {
     if (!ctx) return;
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const radius = Math.min(cx, cy) - 10;
+    const radius = Math.min(cx, cy) - 28;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const wheelPrizes = getWheelPrizes();
@@ -330,28 +358,73 @@ export default function CampaignDetailPage() {
 
     const anglePerSlice = (2 * Math.PI) / wheelPrizes.length;
     const rotRad = (rot * Math.PI) / 180;
+
+    ctx.save();
+    ctx.shadowColor = "rgba(15, 23, 42, 0.24)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 10;
+    const rim = ctx.createRadialGradient(cx, cy, radius * 0.62, cx, cy, radius + 16);
+    rim.addColorStop(0, "#f8fafc");
+    rim.addColorStop(0.74, "#334155");
+    rim.addColorStop(1, "#0f172a");
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + 16, 0, 2 * Math.PI);
+    ctx.fillStyle = rim;
+    ctx.fill();
+    ctx.restore();
+
     wheelPrizes.forEach((prize, i) => {
       const startAngle = i * anglePerSlice + rotRad;
       const endAngle = (i + 1) * anglePerSlice + rotRad;
+      const middleAngle = startAngle + anglePerSlice / 2;
       ctx.beginPath(); ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, radius, startAngle, endAngle);
       ctx.closePath();
       ctx.fillStyle = WHEEL_COLORS[i % WHEEL_COLORS.length];
       ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
       ctx.save(); ctx.translate(cx, cy);
-      ctx.rotate(startAngle + anglePerSlice / 2);
-      ctx.textAlign = "right"; ctx.fillStyle = "#fff";
-      ctx.font = "bold 12px sans-serif";
-      ctx.fillText(prize.name, radius - 14, 5);
+      ctx.rotate(middleAngle);
+      const flipped = Math.cos(middleAngle) < 0;
+      if (flipped) ctx.rotate(Math.PI);
+      ctx.textAlign = flipped ? "left" : "right";
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 12px sans-serif";
+      ctx.shadowColor = "rgba(15, 23, 42, 0.42)";
+      ctx.shadowBlur = 4;
+      const label = fitCanvasLabel(ctx, prize.name, Math.max(54, radius * 0.42));
+      ctx.fillText(label, flipped ? -(radius - 18) : radius - 18, 5);
       ctx.restore();
     });
+
+    const innerGlow = ctx.createRadialGradient(cx, cy, 10, cx, cy, radius);
+    innerGlow.addColorStop(0, "rgba(255,255,255,0.18)");
+    innerGlow.addColorStop(0.52, "rgba(255,255,255,0.05)");
+    innerGlow.addColorStop(1, "rgba(15,23,42,0.14)");
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = innerGlow; ctx.fill();
+
+    ctx.beginPath(); ctx.arc(cx, cy, radius + 2, 0, 2 * Math.PI);
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 4; ctx.stroke();
+
     ctx.beginPath(); ctx.arc(cx, cy, 26, 0, 2 * Math.PI);
-    ctx.fillStyle = "#fff"; ctx.fill();
-    ctx.strokeStyle = "#f97316"; ctx.lineWidth = 3; ctx.stroke();
-    ctx.moveTo(cx + radius + 14, cy);
-    ctx.lineTo(cx + radius - 8, cy - 12);
-    ctx.lineTo(cx + radius - 8, cy + 12);
+    const hub = ctx.createRadialGradient(cx - 8, cy - 10, 5, cx, cy, 30);
+    hub.addColorStop(0, "#ffffff");
+    hub.addColorStop(0.55, "#f8fafc");
+    hub.addColorStop(1, "#cbd5e1");
+    ctx.fillStyle = hub; ctx.fill();
+    ctx.strokeStyle = "#f97316"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.fillStyle = "#0f172a";
+    ctx.textAlign = "center";
+    ctx.font = "800 10px sans-serif";
+    ctx.fillText("BTL", cx, cy + 4);
+
+    ctx.beginPath();
+    ctx.moveTo(cx + radius + 22, cy);
+    ctx.lineTo(cx + radius - 8, cy - 16);
+    ctx.lineTo(cx + radius - 8, cy + 16);
     ctx.closePath(); ctx.fillStyle = "#f97316"; ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
   };
 
   const spinWheel = () => {
@@ -364,13 +437,11 @@ export default function CampaignDetailPage() {
     setWheelSpinning(true);
     setWonPrize(null);
     const idx = Math.floor(Math.random() * wheelPrizes.length);
-    const selected = wheelPrizes[idx];
-     const anglePerSlice = 360 / wheelPrizes.length;
+    const anglePerSlice = 360 / wheelPrizes.length;
     const prizeAngle = idx * anglePerSlice + anglePerSlice / 2;
-    const totalSpins = 5 + Math.random() * 3;
-    const finalAngle = 360 * totalSpins + (360 - prizeAngle);
+    const totalSpins = 5 + Math.floor(Math.random() * 3);
     const startRot = wheelRotationRef.current;
-    const normalizedStart = ((startRot % 360) + 360) % 360;
+    const normalizedStart = normalizeWheelDegrees(startRot);
     const targetFinalRot = (360 - prizeAngle + 360) % 360;
     const delta = (targetFinalRot - normalizedStart + 360) % 360;
     const targetRot = normalizedStart + 360 * totalSpins + delta;
@@ -387,13 +458,51 @@ export default function CampaignDetailPage() {
         requestAnimationFrame(animate);
       } else {
         setWheelSpinning(false);
-        setWonPrize(selected.name);
-        if (selected.name !== "Réessayez") {
+        const finalPrize = getPrizeAtPointer(wheelPrizes, targetRot);
+        setWonPrize(finalPrize);
+        if (finalPrize?.isGoodie) {
           confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
         }
       }
     };
     requestAnimationFrame(animate);
+  };
+
+  const handleConfirmWheelGain = async (closeWheel: () => void) => {
+    if (!wonPrize) return;
+    if (!wonPrize.isGoodie) {
+      closeWheel();
+      setWonPrize(null);
+      wheelRotationRef.current = 0;
+      return;
+    }
+
+    const siteId = degForm.site || siteInfo?.site_id;
+    if (!siteId) {
+      toast.error("Aucun site sélectionné pour enregistrer le goodie.");
+      return;
+    }
+
+    setSavingWheelGain(true);
+    try {
+      await api.post("/gains-goodies/enregistrer/", {
+        goodie_id: wonPrize.id,
+        site_id: siteId,
+        nom_client: wheelClientName.trim() || undefined,
+      });
+      invalidateCache("/gains-goodies");
+      invalidateCache("/goodies");
+      toast.success(`Gain enregistré : ${wonPrize.name}`);
+      closeWheel();
+      setWonPrize(null);
+      wheelRotationRef.current = 0;
+      fetchAll();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg ?? "Erreur lors de l'enregistrement du goodie.");
+    } finally {
+      setSavingWheelGain(false);
+    }
   };
 
   useEffect(() => {
@@ -1576,11 +1685,13 @@ export default function CampaignDetailPage() {
       {/* Modale roue pour les promotions */}
       {activeWheelPromoId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-white shadow-2xl">
             <div className="flex flex-col items-center gap-3">
               <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /><span className="text-lg font-bold text-amber-700">Roue de fortune</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
-              <canvas ref={wheelCanvasRef} width={280} height={280} className="max-w-full" />
-              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", wonPrize === "Réessayez" ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-amber-50 border-amber-200 text-amber-700")}>{wonPrize === "Réessayez" ? "😔 Réessayez" : `🎁 ${wonPrize}`}</div>)}
+              <div className="rounded-full p-3 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_44px_rgba(15,23,42,0.16)] border border-slate-100">
+                <canvas ref={wheelCanvasRef} width={300} height={300} className="block max-w-full rounded-full" />
+              </div>
+              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", !wonPrize.isGoodie ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-amber-50 border-amber-200 text-amber-700")}>{!wonPrize.isGoodie ? "😔 Réessayez" : `🎁 ${wonPrize.name}`}</div>)}
               {getWheelPrizes().length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 w-full pt-2 border-t border-slate-100">
                   {getWheelPrizes().map((prize, i) => (<div key={prize.id} className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-3 h-3 rounded-full shrink-0" style={{ background: WHEEL_COLORS[i % WHEEL_COLORS.length] }} />{prize.name}</div>))}
@@ -1590,13 +1701,13 @@ export default function CampaignDetailPage() {
                 <Button size="lg" className="w-full text-white" style={{ background: brandGrad }} onClick={spinWheel} disabled={wheelSpinning}>
                   {wheelSpinning ? <><RotateCcw className="w-5 h-5 mr-2 animate-spin" />En cours…</> : <><Sparkles className="w-5 h-5 mr-2" />Lancer la roue !</>}
                 </Button>
-              ) : wonPrize === "Réessayez" ? (
+              ) : !wonPrize.isGoodie ? (
                 <div className="flex gap-3 w-full">
                   <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Réessayer</Button>
                   <Button variant="outline" className="flex-1" onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); }}>Fermer</Button>
                 </div>
               ) : (
-                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); wheelRotationRef.current = 0; }}><Gift className="w-4 h-4 mr-2" />Confirmer le gain</Button>
+                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setActiveWheelPromoId(null))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
               )}
             </div>
           </div>
@@ -1606,11 +1717,13 @@ export default function CampaignDetailPage() {
       {/* Modale roue pour les goodies */}
       {wheelOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-white shadow-2xl">
             <div className="flex flex-col items-center gap-3">
               <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Gift className="w-5 h-5 text-emerald-600" /><span className="text-lg font-bold text-emerald-700">Roue des goodies</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
-              <canvas ref={wheelCanvasRef} width={280} height={280} className="max-w-full" />
-              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", wonPrize === "Réessayez" ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-emerald-50 border-emerald-200 text-emerald-700")}>{wonPrize === "Réessayez" ? "😔 Réessayez" : `🎁 ${wonPrize}`}</div>)}
+              <div className="rounded-full p-3 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_44px_rgba(15,23,42,0.16)] border border-slate-100">
+                <canvas ref={wheelCanvasRef} width={300} height={300} className="block max-w-full rounded-full" />
+              </div>
+              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", !wonPrize.isGoodie ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-emerald-50 border-emerald-200 text-emerald-700")}>{!wonPrize.isGoodie ? "😔 Réessayez" : `🎁 ${wonPrize.name}`}</div>)}
               {getWheelPrizes().length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 w-full pt-2 border-t border-slate-100">
                   {getWheelPrizes().map((prize, i) => (<div key={prize.id} className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-3 h-3 rounded-full shrink-0" style={{ background: WHEEL_COLORS[i % WHEEL_COLORS.length] }} />{prize.name}</div>))}
@@ -1620,13 +1733,13 @@ export default function CampaignDetailPage() {
                 <Button size="lg" className="w-full text-white" style={{ background: brandGrad }} onClick={spinWheel} disabled={wheelSpinning}>
                   {wheelSpinning ? <><RotateCcw className="w-5 h-5 mr-2 animate-spin" />En cours…</> : <><Sparkles className="w-5 h-5 mr-2" />Lancer la roue !</>}
                 </Button>
-              ) : wonPrize === "Réessayez" ? (
+              ) : !wonPrize.isGoodie ? (
                 <div className="flex gap-3 w-full">
                   <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Réessayer</Button>
                   <Button variant="outline" className="flex-1" onClick={() => { setWheelOpen(false); setWonPrize(null); }}>Fermer</Button>
                 </div>
               ) : (
-                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => { setWheelOpen(false); setWonPrize(null); wheelRotationRef.current = 0; }}><Gift className="w-4 h-4 mr-2" />Confirmer le gain</Button>
+                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setWheelOpen(false))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
               )}
             </div>
           </div>
