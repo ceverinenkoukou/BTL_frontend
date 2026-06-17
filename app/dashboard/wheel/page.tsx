@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, Goodie, SiteList } from "@/lib/types/backend";
+import type { CampagneList, Goodie, SiteList, Promotion } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +45,8 @@ type WheelPrize = {
   quantity_available: number; 
   quantity_won: number; 
   is_active: boolean;
-  isGoodie: boolean;  // Pour identifier si c'est un goodie réel
+  isGoodie: boolean;
+  promotionId?: string;
 };
 
 export default function WheelPage() {
@@ -57,6 +58,7 @@ export default function WheelPage() {
   const [selectedSite, setSelectedSite] = useState<string>("");
   const [prizes, setPrizes] = useState<WheelPrize[]>([]);
   const [goodies, setGoodies] = useState<Goodie[]>([]);
+  const [activePromotion, setActivePromotion] = useState<Promotion | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [savingGain, setSavingGain] = useState(false);
   const [rotation, setRotation] = useState(0);
@@ -66,6 +68,7 @@ export default function WheelPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cumulativeRotationRef = useRef(0);
+  const prizesRef = useRef<WheelPrize[]>([]);
   
   // Sécurisation : État pour savoir si le composant est monté côté client
   const [isMounted, setIsMounted] = useState(false);
@@ -90,48 +93,56 @@ export default function WheelPage() {
     }
   }, []);
 
-  // Charger les goodies de la campagne et construire les prix de la roue
+  // Charger les goodies via la promotion GAGNE active de la campagne
   const fetchPrizes = useCallback(async () => {
     if (!selectedCampaign) {
       setPrizes([]);
       setGoodies([]);
+      setActivePromotion(null);
       return;
     }
-    
+
     try {
-      const campGoodies = await getGoodiesByCampagne(selectedCampaign);
-      setGoodies(campGoodies);
-      
-      // Filtrer les goodies avec stock disponible
-      const activeGoodies = campGoodies.filter(g => g.quantite_restante > 0);
-      
+      // Chercher les promotions GAGNE actives de la campagne
+      const { data: promoData } = await api.get<{ results?: Promotion[]; } | Promotion[]>(
+        "/promotions/", { params: { campagne: selectedCampaign } }
+      );
+      const promos: Promotion[] = Array.isArray(promoData)
+        ? promoData
+        : (promoData as { results?: Promotion[] }).results ?? [];
+      const promoGagne = promos.find(
+        p => p.type_promotion === "GAGNE" && p.is_active && p.goodies_details.length > 0
+      ) ?? null;
+      setActivePromotion(promoGagne);
+
+      // Goodies à afficher : ceux de la promo GAGNE si elle existe, sinon tous les goodies de la campagne
+      let allGoodies: Goodie[];
+      if (promoGagne && promoGagne.goodies.length > 0) {
+        const campGoodies = await getGoodiesByCampagne(selectedCampaign);
+        allGoodies = campGoodies.filter(g => promoGagne.goodies.includes(g.id));
+      } else {
+        allGoodies = await getGoodiesByCampagne(selectedCampaign);
+      }
+      setGoodies(allGoodies);
+
+      const activeGoodies = allGoodies.filter(g => g.quantite_restante > 0);
       if (activeGoodies.length === 0) {
         setPrizes([]);
         return;
       }
-      
-      // Convertir les goodies en prix de roue
+
       const wheelPrizes: WheelPrize[] = activeGoodies.map(g => ({
         id: g.id,
         name: g.nom,
-        probability: 100 / (activeGoodies.length + 1),  // Distribution équitable
+        probability: 1,
         quantity_available: g.quantite_restante,
         quantity_won: g.quantite_distribuee || 0,
         is_active: true,
         isGoodie: true,
+        promotionId: promoGagne?.id,
       }));
-      
-      // Ajouter l'option "Réessayez"
-      wheelPrizes.push({
-        id: "retry",
-        name: "Réessayez",
-        probability: 100 / (activeGoodies.length + 1),
-        quantity_available: 9999,
-        quantity_won: 0,
-        is_active: true,
-        isGoodie: false,
-      });
-      
+
+      prizesRef.current = wheelPrizes;
       setPrizes(wheelPrizes);
     } catch {
       toast.error("Impossible de charger les goodies de la campagne");
@@ -224,24 +235,18 @@ export default function WheelPage() {
 
   // 4. ANIMATION DE LA ROUE ET CONFETTIS DYNAMIQUES
   const spinWheel = () => {
-    if (spinning || prizes.length === 0 || !isMounted) return;
+    // Utiliser prizesRef pour éviter les closures sur un état périmé
+    const currentPrizes = prizesRef.current;
+    if (spinning || currentPrizes.length === 0 || !isMounted) return;
 
     setSpinning(true);
     setWonPrize(null);
 
-    const totalProbability = prizes.reduce((sum, p) => sum + p.probability, 0);
-    let random = Math.random() * totalProbability;
-    let selectedPrize = prizes[0];
+    // Sélection uniforme par index
+    const prizeIndex = Math.floor(Math.random() * currentPrizes.length);
+    const selectedPrize = currentPrizes[prizeIndex];
 
-    for (const prize of prizes) {
-      random -= prize.probability;
-      if (random <= 0) {
-        selectedPrize = prize;
-        break;
-      }
-    }
-    const anglePerSlice = 360 / prizes.length;
-    const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
+    const anglePerSlice = 360 / currentPrizes.length;
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
     // Milieu du segment gagnant (0° = droite, sens horaire canvas)
     // const prizeCenter = prizeIndex * anglePerSlice + anglePerSlice / 2;
@@ -250,10 +255,14 @@ export default function WheelPage() {
     // Pour que l'aiguille (droite, 0°) pointe sur prizeCenter,
     // il faut : -rotation ≡ prizeCenter (mod 360)
     // => rotation_finale ≡ -prizeCenter ≡ (360 - prizeCenter) % 360
-    const currentRotation = ((rotation % 360) + 360) % 360;
+    const totalSpins = 5;
+    const startCumulative = cumulativeRotationRef.current;
+    const currentRotation = ((startCumulative % 360) + 360) % 360;
     const targetFinalRot = (360 - prizeAngle + 360) % 360;
-    const delta = (targetFinalRot - currentRotation + 360) % 360;
-    const targetRotation = currentRotation + 360 * totalSpins + delta;
+    const rawDelta = (targetFinalRot - currentRotation + 360) % 360;
+    // Si delta est 0 ou trop petit, forcer un tour complet pour éviter que la roue reste immobile
+    const delta = rawDelta < 5 ? rawDelta + 360 : rawDelta;
+    const targetCumulative = startCumulative + 360 * totalSpins + delta;
     const duration = 5000;
     const startTime = Date.now();
 
@@ -274,13 +283,13 @@ export default function WheelPage() {
         setSpinning(false);
         setWonPrize(selectedPrize);
         setShowWinDialog(true);
+        setCustomerName("");
+        setCustomerPhone("");
 
-        if (selectedPrize.name !== "Réessayez") {
-          import("canvas-confetti").then((module) => {
-            const confetti = module.default;
-            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-          });
-        }
+        import("canvas-confetti").then((module) => {
+          const confetti = module.default;
+          confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
+        });
       }
     };
 
@@ -298,6 +307,7 @@ export default function WheelPage() {
       await api.post("/gains-goodies/enregistrer/", {
         goodie_id: wonPrize.id,
         site_id: selectedSite,
+        promotion_id: wonPrize.promotionId ?? undefined,
         nom_client: customerName.trim() || undefined,
       });
       toast.success(`🎁 Gain enregistré${customerName ? ` pour ${customerName}` : ""} !`);
@@ -434,72 +444,61 @@ export default function WheelPage() {
           <DialogHeader>
             <DialogTitle className="text-2xl flex items-center justify-center gap-2">
               <Trophy className="w-8 h-8 text-primary" />
-              {wonPrize?.name === "Réessayez" ? "Pas de chance !" : "Félicitations !"}
+              Félicitations !
             </DialogTitle>
             <DialogDescription>
-              {wonPrize?.name === "Réessayez"
-                ? "Vous pouvez retenter votre chance !"
-                : `Vous avez gagné : ${wonPrize?.name}`}
+              {wonPrize ? `Vous avez gagné : ${wonPrize.name}` : ""}
             </DialogDescription>
           </DialogHeader>
 
-          {wonPrize?.name !== "Réessayez" && (
-            <div className="space-y-4 mt-4">
-              <div className={cn(
-                "mx-auto w-24 h-24 rounded-full flex items-center justify-center",
-                "bg-gradient-to-br from-primary to-accent"
-              )}>
-                <Gift className="w-12 h-12 text-white" />
-              </div>
+          <div className="space-y-4 mt-4">
+            <div className={cn(
+              "mx-auto w-24 h-24 rounded-full flex items-center justify-center",
+              "bg-gradient-to-br from-primary to-accent"
+            )}>
+              <Gift className="w-12 h-12 text-white" />
+            </div>
 
-              <div className="space-y-3 text-left">
-                <div className="space-y-2">
-                  <Label>Nom du client</Label>
-                  <Input
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Entrez le nom du gagnant"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Téléphone (optionnel)</Label>
-                  <Input
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="Numéro de téléphone"
-                  />
-                </div>
+            <div className="space-y-3 text-left">
+              <div className="space-y-2">
+                <Label>Nom du client</Label>
+                <Input
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Entrez le nom du gagnant"
+                />
               </div>
-
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => setShowWinDialog(false)}
-                >
-                  Annuler
-                </Button>
-                <Button className="flex-1" onClick={handleSaveSpin} disabled={savingGain}>
-                  {savingGain
-                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</>
-                    : "Enregistrer le gain"
-                  }
-                </Button>
+              <div className="space-y-2">
+                <Label>Téléphone (optionnel)</Label>
+                <Input
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="Numéro de téléphone"
+                />
               </div>
             </div>
-          )}
 
-          {wonPrize?.name === "Réessayez" && (
-            <Button
-              className="mt-4"
-              onClick={() => {
-                setShowWinDialog(false);
-                spinWheel();
-              }}
-            >
-              Réessayer
-            </Button>
-          )}
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setShowWinDialog(false);
+                  setWonPrize(null);
+                  setTimeout(() => spinWheel(), 300);
+                }}
+              >
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Rejouer
+              </Button>
+              <Button className="flex-1" onClick={handleSaveSpin} disabled={savingGain}>
+                {savingGain
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</>
+                  : "Enregistrer le gain"
+                }
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
