@@ -15,59 +15,46 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  ShoppingCart, Download, Package, FileText, Building2, MapPin,
+  ShoppingCart, Download, Package, FileText, Building2, MapPin, Archive, Eye, Trash2, ChevronDown, ChevronUp,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
 type VenteEnrichie = Vente;
 
-// ─────────────────────────────────────────────────────────────────────────
-// Types du rapport PDF — alimentés par GET /rapports-pdf/entreprise/?nom=...
-// Ces données sont déjà jointes et fiables côté backend (RapportPDFViewSet) :
-// plus de reconstruction par fenêtre de temps en JS.
-// ─────────────────────────────────────────────────────────────────────────
-
-interface RapportPDFMeta {
-  nom: string;
-  logo: string;
-  couleur_primaire: string;
-  couleur_secondaire: string;
-}
-
-interface RapportPDFPerformance {
-  hotesse: string;
-  site: string;
-  actes_vente: number;
-  volume_vendu: number;
-  volume_offert: number;
-  goodies_remis: number;
-}
-
-interface RapportPDFJournalRow {
+interface ArchivedReport {
   id: string;
-  heure: string;
-  hotesse: string;
-  site: string;
-  client: string;
-  produit: string;
-  volume_vendu: number;
-  volume_offert: number;
-  goodie_remporte: string;
+  entrepriseNom: string;
+  generatedAt: string;
+  label: string;
+  htmlContent: string;
 }
 
-interface RapportPDFTotaux {
-  actes_vente: number;
-  volume_vendu: number;
-  volume_offert: number;
-  goodies_remis: number;
+const ARCHIVE_KEY = "btl_rapport_archives";
+
+function loadArchives(): ArchivedReport[] {
+  try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) ?? "[]"); }
+  catch { return []; }
 }
 
-interface RapportPDFResponse {
-  meta: RapportPDFMeta;
-  performances: RapportPDFPerformance[];
-  goodies_distribution: Record<string, Record<string, number>>;
-  journal: RapportPDFJournalRow[];
-  totaux: RapportPDFTotaux;
+function saveArchive(report: ArchivedReport) {
+  const list = loadArchives();
+  if (list.some(a => a.id === report.id)) return;
+  list.unshift(report);
+  localStorage.setItem(ARCHIVE_KEY, JSON.stringify(list.slice(0, 100)));
+}
+
+function deleteArchive(id: string) {
+  localStorage.setItem(ARCHIVE_KEY, JSON.stringify(loadArchives().filter(a => a.id !== id)));
+}
+
+interface GainGoodieReport {
+  id: string;
+  goodie_nom: string;
+  site_nom: string;
+  produit_nom: string | null;
+  quantite_produit: number;
+  nom_client: string | null;
+  created_at: string;
 }
 
 type VenteTypeFilter = "all" | Vente["type_vente"];
@@ -113,6 +100,8 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
   const [selectedSaleType, setSelectedSaleType] = useState<VenteTypeFilter>("all");
+  const [archives, setArchives] = useState<ArchivedReport[]>([]);
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   const isHostess = user?.role === "Hotesse";
   const isAdmin = user?.role === "Administrateur";
@@ -134,6 +123,7 @@ export default function SalesPage() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { setArchives(loadArchives()); }, []);
 
   const filtered = sales.filter(s => {
     const campaignMatches = selectedCampaign === "all" || s.campagne_nom === campaigns.find(c => c.id === selectedCampaign)?.nom;
@@ -184,374 +174,323 @@ export default function SalesPage() {
     }));
   }, [filtered]);
 
-  // ───────────────────────────────────────────────────────────────────────
-  // exportCompanyPDF
-  //
-  // AVANT : cette fonction appelait /ventes/, /campagnes/{id}/rapport-sites/
-  // et /gains-goodies/ séparément, puis reconstruisait le journal des
-  // transactions en JS via un matching par "bucket de minute" + fenêtre de
-  // 10 minutes (OFFER_MATCH_WINDOW_MS). Cette logique provoquait des
-  // doublons et des "+1" erronés sur Vol. Offert, et ignorait totalement
-  // GainPromotion.
-  //
-  // APRÈS : un seul appel à /rapports-pdf/entreprise/?nom=<nom>. Le backend
-  // (RapportPDFViewSet) retourne des données déjà jointes via les vraies
-  // relations Django (Vente.degustation, GainGoodie.degustation/promotion,
-  // GainPromotion), donc fiables. Cette fonction ne fait plus que la mise
-  // en forme HTML — le template visuel (CSS, script html2pdf) est inchangé.
-  // ───────────────────────────────────────────────────────────────────────
-  const exportCompanyPDF = async (entrepriseNom: string) => {
+  const buildReportHtml = (
+    reportSales: VenteEnrichie[],
+    entrepriseNom: string,
+    logoUrl: string,
+    colorPrimary: string,
+    colorSecondary: string,
+    goodiesSiteMap: Map<string, Map<string, number>>,
+    goodiesTotalsBySite: Map<string, number>,
+    gainGoodies: GainGoodieReport[],
+    reportDateLabel: string,
+  ): string => {
     const esc = (value: string | number | null | undefined) =>
-      String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+      String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const formatTime = (value: string) =>
+      new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    const normalizeClientName = (value: string | null | undefined) =>
+      (value || "Client").trim().replace(/\s+(achat|offert)$/i, "").replace(/\s+/g, " ");
 
-    let rapport: RapportPDFResponse;
-    try {
-      const res = await api.get<RapportPDFResponse>("/rapports-pdf/entreprise/", {
-        params: { nom: entrepriseNom },
-      });
-      rapport = res.data;
-    } catch {
-      toast.error("Impossible de charger les données du rapport.");
-      return;
-    }
+    const totalVendu = reportSales.reduce((sum, s) => sum + (s.type_vente === "NORMAL" ? s.quantite : 0), 0);
+    const totalOfferts = reportSales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0);
+    const totalGoodies = [...goodiesTotalsBySite.values()].reduce((sum, c) => sum + c, 0);
 
-    const { meta, performances, goodies_distribution, journal, totaux } = rapport;
-    const logoUrl = meta.logo || "";
-    const colorPrimary = meta.couleur_primaire || "#065f46";
-    const colorSecondary = meta.couleur_secondaire || "#0d9488";
+    const hostMap = new Map<string, { hotesse: string; site: string; actes: number; vendu: number; offert: number; goodies: number }>();
+    reportSales.forEach(s => {
+      const key = `${s.hotesse_nom}__${s.site_nom}`;
+      if (!hostMap.has(key)) hostMap.set(key, { hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, actes: 0, vendu: 0, offert: 0, goodies: 0 });
+      const row = hostMap.get(key)!;
+      if (s.type_vente === "NORMAL") { row.actes += 1; row.vendu += s.quantite; }
+      else row.offert += s.quantite;
+    });
+    goodiesTotalsBySite.forEach((count, siteNom) => {
+      const hs = [...hostMap.values()].filter(r => r.site === siteNom);
+      if (hs.length === 1) hs[0].goodies = count;
+    });
+    const hostesseRows = [...hostMap.values()]
+      .sort((a, b) => b.vendu - a.vendu || b.offert - a.offert || a.hotesse.localeCompare(b.hotesse))
+      .map(row => `<tr>
+        <td class="b">${esc(row.hotesse)}</td><td class="site-name b">${esc(row.site)}</td>
+        <td class="r b">${row.actes}</td><td class="r">${row.vendu} u.</td>
+        <td class="r text-gift">${row.offert ? `${row.offert} u.` : "0"}</td><td class="r b">${row.goodies}</td>
+      </tr>`).join("");
 
-    // ── Tableau 1 : Performances cumulées par hôtesse / site ───────────────
-    const hostesseRows = [...performances]
-      .sort((a, b) =>
-        b.volume_vendu - a.volume_vendu ||
-        b.volume_offert - a.volume_offert ||
-        a.hotesse.localeCompare(b.hotesse)
-      )
-      .map(row => `
-        <tr>
-          <td class="b">${esc(row.hotesse)}</td>
-          <td class="site-name b">${esc(row.site)}</td>
-          <td class="r b">${row.actes_vente}</td>
-          <td class="r">${row.volume_vendu} u.</td>
-          <td class="r text-gift">${row.volume_offert ? `${row.volume_offert} u.` : "0"}</td>
-          <td class="r b">${row.goodies_remis}</td>
-        </tr>
-      `).join("");
-
-    // ── Tableau 2 : Répartition des goodies distribués ──────────────────────
     let goodiesRowsHtml = "";
-    const goodieKeys = Object.keys(goodies_distribution);
-    if (goodieKeys.length === 0) {
+    if (goodiesSiteMap.size === 0) {
       goodiesRowsHtml = `<tr><td colspan="4" class="muted-row">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
     } else {
-      goodiesRowsHtml = goodieKeys.map(perfKey => {
-        // perfKey est au format "hotesse | site" (clé construite côté backend)
-        const [hotesse, site] = perfKey.split(" | ");
-        const distribution = goodies_distribution[perfKey];
-        const itemsHtml = Object.entries(distribution).map(([goodieNom, quantite]) => `
-          <div class="goodie-detail-item">
-            <span class="goodie-label">${esc(goodieNom)}</span>
-            <span class="goodie-qty">x${quantite}</span>
-          </div>
-        `).join("");
-        const totalSiteGoodies = Object.values(distribution).reduce((a, b) => a + b, 0);
-
-        return `
-          <tr>
-            <td class="b">${esc(hotesse || "-")}</td>
-            <td class="b site-name">${esc(site || "-")}</td>
-            <td><div class="goodies-grid-cell">${itemsHtml}</div></td>
-            <td class="r b text-star" style="font-size:13px;">${totalSiteGoodies} lot(s)</td>
-          </tr>
-        `;
+      goodiesRowsHtml = [...goodiesSiteMap.entries()].map(([siteNom, dist]) => {
+        const itemsHtml = [...dist.entries()].map(([gNom, qty]) => `<div class="goodie-detail-item"><span class="goodie-label">${esc(gNom)}</span><span class="goodie-qty">x${qty}</span></div>`).join("");
+        const total = [...dist.values()].reduce((a, b) => a + b, 0);
+        const hotesses = [...hostMap.values()].filter(r => r.site === siteNom).map(r => r.hotesse).filter((v, i, a) => a.indexOf(v) === i).join(", ");
+        return `<tr><td class="b">${esc(hotesses || "-")}</td><td class="b site-name">${esc(siteNom)}</td><td><div class="goodies-grid-cell">${itemsHtml}</div></td><td class="r b text-star" style="font-size:13px;">${total} lot(s)</td></tr>`;
       }).join("");
     }
 
-    // ── Tableau 3 : Journal chronologique des transactions ──────────────────
-    // Vol. Vendu / Vol. Offert / Goodie sont déjà corrects (calculés côté
-    // backend via les relations FK réelles, sans devinette temporelle).
-    const transactionRowsHtml = [...journal]
-      .sort((a, b) => b.heure.localeCompare(a.heure))
-      .map(row => `
-        <tr>
-          <td class="time">${esc(row.heure)}</td>
-          <td class="b">${esc(row.hotesse)}</td>
-          <td class="site-name">${esc(row.site)}</td>
-          <td class="b">${esc(row.client)}</td>
+    type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string };
+    const OFFER_WINDOW = 10 * 60 * 1000;
+    const isPlaceholder = (c: string) => c === "Client";
+    const goodieLookup = new Map<string, string[]>();
+    gainGoodies.forEach(gain => {
+      const mb = Math.floor(new Date(gain.created_at).getTime() / 60000);
+      const client = normalizeClientName(gain.nom_client);
+      const product = gain.produit_nom || "";
+      [`${mb}__${gain.site_nom}__${client}__${product}`, `${mb}__${gain.site_nom}__${client}__`].forEach(k => {
+        const v = goodieLookup.get(k) ?? []; v.push(gain.goodie_nom); goodieLookup.set(k, v);
+      });
+    });
+    const tMap = new Map<string, TRow>();
+    [...reportSales].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).forEach(s => {
+      const saleTime = new Date(s.created_at).getTime();
+      const mb = Math.floor(saleTime / 60000);
+      const client = normalizeClientName(s.nom_client);
+      let key = `${mb}__${s.hotesse_nom}__${s.site_nom}__${client}__${s.produit_nom}`;
+      const goodies = goodieLookup.get(`${mb}__${s.site_nom}__${client}__${s.produit_nom}`) ?? goodieLookup.get(`${mb}__${s.site_nom}__${client}__`);
+      if (s.type_vente !== "NORMAL") {
+        const match = [...tMap.entries()].filter(([, row]) =>
+          row.vendu > 0 && row.hotesse === (s.hotesse_nom || "Non renseignée") && row.site === s.site_nom && row.produit === s.produit_nom &&
+          (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) && Math.abs(row.time - saleTime) <= OFFER_WINDOW
+        ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
+        if (match) key = match[0];
+      }
+      if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-" });
+      const row = tMap.get(key)!;
+      if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
+      if (row.goodie === "-" && goodies?.length) row.goodie = goodies.join(", ");
+      if (s.type_vente === "NORMAL") row.vendu += s.quantite; else row.offert += s.quantite;
+    });
+    gainGoodies.forEach(gain => {
+      const date = new Date(gain.created_at);
+      const mb = Math.floor(date.getTime() / 60000);
+      const client = normalizeClientName(gain.nom_client);
+      const product = gain.produit_nom || "Lot";
+      const hasSale = [...tMap.values()].some(row => row.site === gain.site_nom && row.client === client && row.produit === product && Math.floor(row.time / 60000) === mb);
+      if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+    });
+    const transactionRowsHtml = tMap.size === 0
+      ? `<tr><td colspan="8" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`
+      : [...tMap.values()].sort((a, b) => b.time - a.time).map(row => `<tr>
+          <td class="time">${esc(row.heure)}</td><td class="b">${esc(row.hotesse)}</td>
+          <td class="site-name">${esc(row.site)}</td><td class="b">${esc(row.client)}</td>
           <td><span class="product-pill">${esc(row.produit)}</span></td>
-          <td class="r b">${row.volume_vendu ? `${row.volume_vendu} u.` : "-"}</td>
-          <td class="r b text-gift">${row.volume_offert ? `+${row.volume_offert} u.` : "-"}</td>
-          <td>${esc(row.goodie_remporte)}</td>
-        </tr>
-      `).join("");
+          <td class="r b">${row.vendu ? `${row.vendu} u.` : "-"}</td>
+          <td class="r b text-gift">${row.offert ? `+${row.offert} u.` : "-"}</td>
+          <td>${esc(row.goodie)}</td>
+        </tr>`).join("");
 
-    const html = `<!DOCTYPE html>
-    <html lang="fr">
-    <head>
-      <meta charset="UTF-8">
-      <title>Rapport de Performance - ${entrepriseNom}</title>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-      <style>
-        :root {
-          --brand-primary: ${colorPrimary};
-          --brand-secondary: ${colorSecondary};
-        }
-        *{box-sizing:border-box;margin:0;padding:0}
-        
-        @page { 
-          size: auto; 
-          margin: 0mm; 
-        }
-
-        html, body {
-          background-color: #ffffff !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        
-        body {
-          font-family:'Segoe UI',Helvetica,Arial,sans-serif;
-          font-size:12px;
-          color:#334155;
-          padding: 18mm 15mm; 
-          padding-top: 85px;
-        }
-        
-        .action-bar {
-          position: fixed;
-          top: 0; left: 0; right: 0;
-          height: 60px;
-          background: #ffffff !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          padding: 0 40px;
-          gap: 12px;
-          z-index: 99999;
-          border-bottom: 1px solid #e2e8f0;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-        .btn {
-          padding: 8px 16px;
-          border-radius: 8px;
-          font-size: 12px;
-          font-weight: 700;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.2s ease;
-          border: none;
-        }
-        .btn-download { background: var(--brand-primary) !important; color: white !important; }
-        .btn-download:hover { opacity: 0.9; }
-        .btn-print { background: #f1f5f9 !important; color: #334155 !important; border: 1px solid #cbd5e1 !important; }
-        .btn-print:hover { background: #e2e8f0 !important; }
-
-        .report-wrapper {
-          background: #ffffff !important;
-          max-width: 980px;
-          margin: 0 auto;
-          padding: 34px;
-          border-radius: 0;
-          border: 0;
-          box-shadow: none;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-
-        .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--brand-primary);padding-bottom:24px;margin-bottom:32px}
-        .hdr-logo-area{display:flex;align-items:center;gap:18px}
-        
-        .corporate-logo-wrapper{width:65px;height:65px;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f8fafc !important;border:1px solid #e2e8f0}
-        .corporate-logo-img{width:100%;height:100%;object-fit:contain}
-        .corporate-logo-fallback{width:100%;height:100%;background:linear-gradient(135deg, var(--brand-primary), var(--brand-secondary)) !important;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:900}
-        
-        .hdr-text h1{font-size:24px;font-weight:900;color:var(--brand-primary);letter-spacing:-0.5px;text-transform:uppercase;line-height:1.15}
-        .hdr-text p{color:#64748b;font-size:16px;margin-top:6px;font-weight:800}
-        .meta-date{text-align:right;color:#64748b;font-size:12px}
-        .meta-date .date-box{background:#f8fafc !important;padding:8px 16px;border-radius:10px;border:1px solid #dbe3ec;margin-top:8px;display:inline-block;font-weight:800;color:#334155;font-size:15px}
-
-        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:38px}
-        .kpi{background:#f8fafc !important;border:1px solid #dbe3ec;border-radius:14px;padding:18px 20px}
-        .kpi .l{font-size:13px;color:#64748b;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
-        .kpi .v{font-size:26px;font-weight:950;color:#0f172a;letter-spacing:-0.4px}
-
-        h2.section-title{font-size:16px;font-weight:900;color:var(--brand-primary);margin:34px 0 16px;text-transform:uppercase;letter-spacing:0.2px;display:flex;align-items:center;gap:6px}
-        table{width:100%;border-collapse:collapse;margin-bottom:35px;background:#fff !important;}
-        th{background:var(--brand-primary) !important;color:#fff !important;padding:12px 14px;text-align:left;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:0.3px;line-height:1.05}
-        th:first-child{border-top-left-radius:9px}
-        th:last-child{border-top-right-radius:9px}
-        td{padding:12px 14px;border-bottom:1px solid #dbe3ec;vertical-align:middle;font-size:13px}
-        
-        .r{text-align:right}.b{font-weight:700}.text-center{text-align:center}
-        .site-name{color:var(--brand-primary) !important}
-        .text-gift{color:var(--brand-primary) !important;font-weight:900}
-        .text-star{color:#6d28d9 !important;font-weight:600}
-        .time{font-family:ui-monospace,Menlo,Consolas,monospace;color:#64748b;font-size:13px}
-        .product-pill{display:inline-block;background:#f1f5f9 !important;border-radius:8px;padding:4px 10px;font-weight:800;color:#475569;font-size:12px}
-        .muted-row{color:#94a3b8 !important;padding:24px 26px !important;font-weight:700}
-        
-        .tag-container{display:flex;flex-wrap:wrap;gap:4px}
-        .tag{padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;display:inline-block}
-        .hotesse-tag{background:#f1f5f9 !important;border:1px solid #cbd5e1;color:#475569}
-        
-        .goodies-grid-cell{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
-        .goodie-detail-item{background:#f3e8ff !important;border:1px solid #e9d5ff;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center}
-        .goodie-label{color:#581c87 !important;font-weight:600;font-size:11px}
-        .goodie-qty{background:#7e22ce !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
-        
-        .tot-row td{background:var(--brand-primary) !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px}
-        .tot-row td.text-gift{color:#fef3c7 !important}
-        .tot-row td.text-star{color:#f3e8ff !important}
-        .page-break{break-before:page;page-break-before:always;padding-top:8px}
-        
-        .foot{margin-top:20px;text-align:center;color:#94a3b8;font-size:10px;border-top:1px dashed #e2e8f0;padding-top:15px}
-        
-        @media print{
-          html, body{padding:0 !important; background:white !important; margin: 0mm !important;}
-          body { padding: 20mm 15mm !important; } 
-          .action-bar{display:none !important;}
-          .report-wrapper{border:none !important; box-shadow:none !important; padding:0 !important; max-width:100% !important;}
-          .page-break{break-before:page;page-break-before:always}
-          table{page-break-inside:auto} 
-          tr{page-break-inside:avoid;page-break-after:auto}
-        }
-      </style>
-    </head>
-    <body>
-
-      <div class="action-bar">
-        <button class="btn btn-download" onclick="generateDirectPDF()"> PDF</button>
-        <button class="btn btn-print" onclick="window.print()">🖨️ Imprimer</button>
+    const safeNom = entrepriseNom.replace(/\s+/g, "_");
+    return `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<title>Rapport - ${esc(entrepriseNom)} — ${reportDateLabel}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  :root{--brand-primary:${colorPrimary};--brand-secondary:${colorSecondary}}
+  *{box-sizing:border-box;margin:0;padding:0}
+  @page{size:auto;margin:0mm}
+  html,body{background:#fff !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+  body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#334155;padding:18mm 15mm;padding-top:85px}
+  .action-bar{position:fixed;top:0;left:0;right:0;height:60px;background:#fff !important;box-shadow:0 4px 20px rgba(0,0,0,.08);display:flex;align-items:center;justify-content:flex-end;padding:0 40px;gap:12px;z-index:99999;border-bottom:1px solid #e2e8f0}
+  .btn{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .2s;border:none}
+  .btn-download{background:var(--brand-primary) !important;color:#fff !important}.btn-download:hover{opacity:.9}
+  .btn-print{background:#f1f5f9 !important;color:#334155 !important;border:1px solid #cbd5e1 !important}.btn-print:hover{background:#e2e8f0 !important}
+  .report-wrapper{background:#fff !important;max-width:980px;margin:0 auto;padding:34px}
+  .hdr-container{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--brand-primary);padding-bottom:24px;margin-bottom:32px}
+  .hdr-logo-area{display:flex;align-items:center;gap:18px}
+  .corporate-logo-wrapper{width:65px;height:65px;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f8fafc !important;border:1px solid #e2e8f0}
+  .corporate-logo-img{width:100%;height:100%;object-fit:contain}
+  .corporate-logo-fallback{width:100%;height:100%;background:linear-gradient(135deg,var(--brand-primary),var(--brand-secondary)) !important;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:900}
+  .hdr-text h1{font-size:24px;font-weight:900;color:var(--brand-primary);letter-spacing:-.5px;text-transform:uppercase;line-height:1.15}
+  .hdr-text p{color:#64748b;font-size:16px;margin-top:6px;font-weight:800}
+  .meta-date{text-align:right;color:#64748b;font-size:12px}
+  .meta-date .date-box{background:#f8fafc !important;padding:8px 16px;border-radius:10px;border:1px solid #dbe3ec;margin-top:8px;display:inline-block;font-weight:800;color:#334155;font-size:15px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:38px}
+  .kpi{background:#f8fafc !important;border:1px solid #dbe3ec;border-radius:14px;padding:18px 20px}
+  .kpi .l{font-size:13px;color:#64748b;font-weight:900;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+  .kpi .v{font-size:26px;font-weight:950;color:#0f172a;letter-spacing:-.4px}
+  h2.section-title{font-size:16px;font-weight:900;color:var(--brand-primary);margin:34px 0 16px;text-transform:uppercase;letter-spacing:.2px;display:flex;align-items:center;gap:6px}
+  table{width:100%;border-collapse:collapse;margin-bottom:35px;background:#fff !important}
+  th{background:var(--brand-primary) !important;color:#fff !important;padding:12px 14px;text-align:left;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.3px;line-height:1.05}
+  th:first-child{border-top-left-radius:9px}th:last-child{border-top-right-radius:9px}
+  td{padding:12px 14px;border-bottom:1px solid #dbe3ec;vertical-align:middle;font-size:13px}
+  .r{text-align:right}.b{font-weight:700}
+  .site-name{color:var(--brand-primary) !important}
+  .text-gift{color:var(--brand-primary) !important;font-weight:900}
+  .text-star{color:#6d28d9 !important;font-weight:600}
+  .time{font-family:ui-monospace,Menlo,Consolas,monospace;color:#64748b;font-size:13px}
+  .product-pill{display:inline-block;background:#f1f5f9 !important;border-radius:8px;padding:4px 10px;font-weight:800;color:#475569;font-size:12px}
+  .muted-row{color:#94a3b8 !important;padding:24px 26px !important;font-weight:700}
+  .goodies-grid-cell{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+  .goodie-detail-item{background:#f3e8ff !important;border:1px solid #e9d5ff;border-radius:6px;padding:4px 10px;display:flex;justify-content:space-between;align-items:center}
+  .goodie-label{color:#581c87 !important;font-weight:600;font-size:11px}
+  .goodie-qty{background:#7e22ce !important;color:#fff !important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+  .tot-row td{background:var(--brand-primary) !important;color:#fff !important;font-weight:800;padding:14px;font-size:12px}
+  .tot-row td.text-gift{color:#fef3c7 !important}.tot-row td.text-star{color:#f3e8ff !important}
+  .page-break{break-before:page;page-break-before:always;padding-top:8px}
+  .foot{margin-top:20px;text-align:center;color:#94a3b8;font-size:10px;border-top:1px dashed #e2e8f0;padding-top:15px}
+  @media print{
+    html,body{padding:0 !important;background:white !important;margin:0mm !important}
+    body{padding:20mm 15mm !important}
+    .action-bar{display:none !important}
+    .report-wrapper{border:none !important;box-shadow:none !important;padding:0 !important;max-width:100% !important}
+    .page-break{break-before:page;page-break-before:always}
+    table{page-break-inside:auto}tr{page-break-inside:avoid;page-break-after:auto}
+  }
+</style></head>
+<body>
+<div class="action-bar">
+  <button class="btn btn-download" onclick="generateDirectPDF()">⬇ PDF</button>
+  <button class="btn btn-print" onclick="window.print()">🖨️ Imprimer</button>
+</div>
+<div id="capture-zone" class="report-wrapper">
+  <div class="hdr-container">
+    <div class="hdr-logo-area">
+      <div class="corporate-logo-wrapper">
+        ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="corporate-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />` : ""}
+        <div class="corporate-logo-fallback" style="${logoUrl ? "display:none;" : "display:flex;"}">${esc(entrepriseNom.charAt(0))}</div>
       </div>
-      <div id="capture-zone" class="report-wrapper">
-        <div class="hdr-container">
-          <div class="hdr-logo-area">
-            <div class="corporate-logo-wrapper">
-              ${logoUrl 
-                ? `<img src="${logoUrl}" alt="Logo" class="corporate-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />` 
-                : ""
-              }
-              <div class="corporate-logo-fallback" style="${logoUrl ? "display:none;" : "display:flex;"}">
-                ${entrepriseNom.charAt(0)}
-              </div>
-            </div>
-            <div class="hdr-text">
-              <h1>Rapport de performance détaillé</h1>
-              <p>${esc(entrepriseNom)}</p>
-            </div>
-          </div>
-          <div class="meta-date">
-            Rapport généré le<br/>
-            <div class="date-box">${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
-          </div>
-        </div>
+      <div class="hdr-text"><h1>Rapport de performance</h1><p>${esc(entrepriseNom)}</p></div>
+    </div>
+    <div class="meta-date">Rapport du<br/><div class="date-box">${reportDateLabel}</div></div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Clients servis / ventes</div><div class="v">${reportSales.filter(s => s.type_vente === "NORMAL").length}</div></div>
+    <div class="kpi"><div class="l">Volume total vendu</div><div class="v">${totalVendu} u.</div></div>
+    <div class="kpi"><div class="l">Volume total offert</div><div class="v text-gift">${totalOfferts} u.</div></div>
+  </div>
+  <h2 class="section-title">1. Performances par hôtesse &amp; site</h2>
+  <table><thead><tr>
+    <th>Hôtesse</th><th>Site d'affectation</th>
+    <th class="r">Actes de vente</th><th class="r">Volume vendu</th><th class="r">Volume offert</th><th class="r">Goodies remis</th>
+  </tr></thead><tbody>
+    ${hostesseRows || `<tr><td colspan="6" class="muted-row">Aucune vente enregistrée pour cette période.</td></tr>`}
+    <tr class="tot-row">
+      <td colspan="2" class="b">TOTAL DU JOUR</td>
+      <td class="r">${reportSales.filter(s => s.type_vente === "NORMAL").length}</td>
+      <td class="r">${totalVendu} u.</td>
+      <td class="r text-gift">${totalOfferts} u.</td>
+      <td class="r text-star">${totalGoodies}</td>
+    </tr>
+  </tbody></table>
+  <h2 class="section-title">2. Répartition des goodies distribués</h2>
+  <table><thead><tr>
+    <th>Hôtesse</th><th>Site d'activité</th><th>Détail des Dotations / Lots distribués</th><th class="r">Volume total</th>
+  </tr></thead><tbody>${goodiesRowsHtml}</tbody></table>
+  <div class="page-break">
+    <h2 class="section-title">3. Journal des transactions</h2>
+    <table><thead><tr>
+      <th>Heure</th><th>Hôtesse</th><th>Site</th><th>Client</th>
+      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th>
+    </tr></thead><tbody>${transactionRowsHtml}</tbody></table>
+  </div>
+  <div class="foot">Rapport généré automatiquement depuis MHedia BTL</div>
+</div>
+<script>
+  function generateDirectPDF() {
+    const element = document.getElementById('capture-zone');
+    const opt = {
+      margin: 10,
+      filename: "Rapport_${safeNom}_${reportDateLabel.replace(/\s+/g, "_")}.pdf",
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    html2pdf().set(opt).from(element).save();
+  }
+</script>
+</body></html>`;
+  };
 
-        <div class="kpis">
-          <div class="kpi"><div class="l">Clients servis / ventes</div><div class="v">${totaux.actes_vente}</div></div>
-          <div class="kpi"><div class="l">Volume total vendu</div><div class="v">${totaux.volume_vendu} u.</div></div>
-          <div class="kpi"><div class="l">Volume total offert</div><div class="v text-gift">${totaux.volume_offert} u.</div></div>
-          <div class="kpi"><div class="l">Goodies gagnés</div><div class="v text-star">${totaux.goodies_remis}</div></div>
-        </div>
+  const exportCompanyPDF = async (entrepriseNom: string) => {
+    const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
+    const todayStr = new Date().toISOString().slice(0, 10);
 
-        <h2 class="section-title">1. Performances cumulées par hôtesse & site</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Hôtesse</th>
-              <th>Site d'affectation</th>
-              <th class="r">Actes de vente</th>
-              <th class="r">Volume vendu</th>
-              <th class="r">Volume offert</th>
-              <th class="r">Goodies remis</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${hostesseRows || `<tr><td colspan="6" class="muted-row">Aucune vente enregistrée pour cette période.</td></tr>`}
-            <tr class="tot-row">
-              <td colspan="2" class="b">TOTAL GÉNÉRAL</td>
-              <td class="r">${totaux.actes_vente}</td>
-              <td class="r">${totaux.volume_vendu} u.</td>
-              <td class="r text-gift">${totaux.volume_offert} u.</td>
-              <td class="r text-star">${totaux.goodies_remis}</td>
-            </tr>
-          </tbody>
-        </table>
+    const firstSale = companySales[0];
+    const logoUrl = firstSale?.entreprise_logo || "";
+    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46";
+    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
 
-        <h2 class="section-title">2. Répartition globale des goodies distribués</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Hôtesse</th>
-              <th>Site d'activité</th>
-              <th>Détail des Dotations / Lots distribués</th>
-              <th class="r">Volume total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${goodiesRowsHtml}
-          </tbody>
-        </table>
+    const goodiesSiteMap = new Map<string, Map<string, number>>();
+    const goodiesTotalsBySite = new Map<string, number>();
+    let gainGoodies: GainGoodieReport[] = [];
 
-        <div class="page-break">
-          <h2 class="section-title">3. Journal des transactions</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Heure</th>
-                <th>Hôtesse</th>
-                <th>Site</th>
-                <th>Client</th>
-                <th>Produit ciblé</th>
-                <th class="r">Vol. vendu</th>
-                <th class="r">Vol. offert</th>
-                <th>Goodie / lot gagné</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${transactionRowsHtml || `<tr><td colspan="8" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
+    try {
+      const companyCampaignNames = new Set(companySales.map(s => s.campagne_nom));
+      const companyCampaigns = campaigns.filter(c =>
+        c.entreprise_nom === entrepriseNom && companyCampaignNames.has(c.nom)
+      );
+      const companySiteNames = new Set(companySales.map(s => s.site_nom));
 
-        <div class="foot">Rapport généré automatiquement depuis MHedia BTL</div>
-      </div>
+      const rapports = await Promise.all(
+        companyCampaigns.map(c =>
+          api.get<CampagneRapportSites>(`/campagnes/${c.id}/rapport-sites/`).then(res => res.data).catch(() => null)
+        )
+      );
 
-      <script>
-        function generateDirectPDF() {
-          const element = document.getElementById('capture-zone');
-          const opt = {
-            margin:       10,
-            filename:     "Rapport_Performance_${entrepriseNom.replace(/\s+/g, '_')}.pdf",
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true, logging: false },
-            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-          };
-          
-          // Lancement du téléchargement direct sans ouvrir la boîte de dialogue d'impression
-          html2pdf().set(opt).from(element).save();
-        }
-      </script>
-    </body>
-    </html>`;
+      rapports.forEach(rapport => {
+        rapport?.sites.forEach(site => {
+          let siteTotal = 0;
+          (site.goodies ?? []).forEach(goodie => {
+            const quantite = Number(goodie.quantite_distribuee ?? 0);
+            if (quantite <= 0) return;
+            if (!goodiesSiteMap.has(site.nom)) goodiesSiteMap.set(site.nom, new Map<string, number>());
+            const sg = goodiesSiteMap.get(site.nom)!;
+            sg.set(goodie.goodie_nom, (sg.get(goodie.goodie_nom) ?? 0) + quantite);
+            siteTotal += quantite;
+          });
+          if (siteTotal === 0) siteTotal = Number(site.goodies_distribues_total ?? 0);
+          if (siteTotal > 0) goodiesTotalsBySite.set(site.nom, (goodiesTotalsBySite.get(site.nom) ?? 0) + siteTotal);
+        });
+      });
 
+      const gainsRes = await api
+        .get<GainGoodieReport[] | { results?: GainGoodieReport[] }>("/gains-goodies/")
+        .catch(() => ({ data: [] as GainGoodieReport[] }));
+      const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data.results ?? []);
+      gainGoodies = gainsData.filter(gain => companySiteNames.has(gain.site_nom));
+    } catch {
+      toast.error("Impossible de charger le détail des goodies pour le PDF.");
+    }
+
+    // Group all company sales by day
+    const dayMap = new Map<string, VenteEnrichie[]>();
+    companySales.forEach(s => {
+      const day = new Date(s.created_at).toISOString().slice(0, 10);
+      if (!dayMap.has(day)) dayMap.set(day, []);
+      dayMap.get(day)!.push(s);
+    });
+
+    // Auto-archive past days not yet saved
+    const existingArchiveIds = new Set(loadArchives().map(a => a.id));
+    [...dayMap.entries()]
+      .filter(([day]) => day < todayStr)
+      .forEach(([day, daySales]) => {
+        const archiveId = `${entrepriseNom}__${day}`;
+        if (existingArchiveIds.has(archiveId)) return;
+        const dayGoodies = gainGoodies.filter(g => new Date(g.created_at).toISOString().slice(0, 10) === day);
+        const dayLabel = new Date(day).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+        const html = buildReportHtml(daySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, dayGoodies, dayLabel);
+        saveArchive({ id: archiveId, entrepriseNom, generatedAt: `${day}T23:59:59.000Z`, label: dayLabel, htmlContent: html });
+      });
+    setArchives(loadArchives());
+
+    // Generate and open today's report only
+    const todaySales = dayMap.get(todayStr) ?? [];
+    const todayGoodies = gainGoodies.filter(g => new Date(g.created_at).toISOString().slice(0, 10) === todayStr);
+    const todayLabel = new Date(todayStr).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+    if (todaySales.length === 0) {
+      toast.info(`Aucune vente enregistrée aujourd'hui pour ${entrepriseNom}. Les jours précédents ont été archivés.`);
+      return;
+    }
+
+    const html = buildReportHtml(todaySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, todayGoodies, todayLabel);
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, "_blank");
-    
-    if (win) {
-      win.document.title = `Rapport de Performance - ${entrepriseNom}`;
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    toast.success(`Aperçu du rapport de ${entrepriseNom} disponible`);
+    if (win) win.document.title = `Rapport du jour — ${entrepriseNom}`;
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    toast.success(`Rapport du jour ouvert pour ${entrepriseNom}`);
   };
 
   return (
@@ -731,6 +670,98 @@ export default function SalesPage() {
               ))}
             </div>
           )}
+
+          {/* ── Rapports archivés ── */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <button
+              onClick={() => setArchiveOpen(o => !o)}
+              className="w-full flex items-center justify-between gap-3 px-5 py-4 hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-violet-100 rounded-xl flex items-center justify-center shrink-0">
+                  <Archive className="w-4 h-4 text-violet-700" />
+                </div>
+                <div className="text-left">
+                  <p className="font-bold text-sm text-foreground">Rapports archivés</p>
+                  <p className="text-xs text-muted-foreground">
+                    {archives.length} rapport{archives.length !== 1 ? "s" : ""} — jours précédents consultables &amp; téléchargeables
+                  </p>
+                </div>
+              </div>
+              {archiveOpen
+                ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+                : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+            </button>
+
+            {archiveOpen && (
+              <div className="border-t border-slate-100">
+                {archives.length === 0 ? (
+                  <div className="px-5 py-10 text-center">
+                    <Archive className="w-10 h-10 text-slate-200 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">Aucun rapport archivé pour le moment.</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Les rapports des jours précédents seront archivés automatiquement lors du prochain clic sur "PDF / Impression".
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-50">
+                    {archives.map(archive => (
+                      <div key={archive.id} className="flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-slate-50/60 transition-colors">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 bg-violet-50 rounded-lg flex items-center justify-center shrink-0">
+                            <FileText className="w-3.5 h-3.5 text-violet-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{archive.entrepriseNom}</p>
+                            <p className="text-xs text-violet-700 font-medium truncate">{archive.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Archivé le {new Date(archive.generatedAt).toLocaleString("fr-FR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => {
+                              const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
+                              const url = URL.createObjectURL(blob);
+                              const win = window.open(url, "_blank");
+                              if (win) win.document.title = `Rapport — ${archive.entrepriseNom} — ${archive.label}`;
+                              setTimeout(() => URL.revokeObjectURL(url), 15000);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold transition-colors"
+                          >
+                            <Eye className="w-3 h-3" />Consulter
+                          </button>
+                          <button
+                            onClick={() => {
+                              const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `Rapport_${archive.entrepriseNom.replace(/\s+/g, "_")}_${archive.generatedAt.slice(0, 10)}.html`;
+                              a.click();
+                              setTimeout(() => URL.revokeObjectURL(url), 5000);
+                              toast.success("Téléchargement lancé");
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold transition-colors"
+                          >
+                            <Download className="w-3 h-3" />Télécharger
+                          </button>
+                          <button
+                            onClick={() => { deleteArchive(archive.id); setArchives(loadArchives()); }}
+                            className="p-1.5 rounded-lg border border-red-100 bg-red-50 hover:bg-red-100 text-red-500 transition-colors"
+                            title="Supprimer de l'archive"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       ) : (
         /* ── Non-admin (Hôtesse / Superviseur / Entreprise) ── */
