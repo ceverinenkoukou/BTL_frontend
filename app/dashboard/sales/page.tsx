@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
+
 import api from "@/lib/api";
 import type { Vente, CampagneList, CampagneRapportSites } from "@/lib/types/backend";
 import { Card, CardContent } from "@/components/ui/card";
