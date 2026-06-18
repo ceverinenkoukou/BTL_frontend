@@ -16,7 +16,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  ShoppingCart, Download, Package, FileText, Building2, MapPin, Archive, Eye, Trash2, ChevronDown, ChevronUp,
+  ShoppingCart, Download, Package, FileText, Building2, MapPin, Archive, Eye, Trash2, Calendar,
   AlertTriangle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -119,7 +119,7 @@ export default function SalesPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
   const [selectedSaleType, setSelectedSaleType] = useState<VenteTypeFilter>("all");
   const [archives, setArchives] = useState<ArchivedReport[]>([]);
-  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [view, setView] = useState<'sales' | 'archives'>('sales');
 
   const isHostess = user?.role === "Hotesse";
   const isAdmin = user?.role === "Administrateur";
@@ -593,8 +593,31 @@ export default function SalesPage() {
             </div>
           </div>
 
+          {/* Tabs */}
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+            <button
+              onClick={() => setView('sales')}
+              className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+                view === 'sales' ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            >
+              <span className="flex items-center gap-2"><ShoppingCart className="w-4 h-4" />Ventes</span>
+            </button>
+            <button
+              onClick={() => setView('archives')}
+              className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all relative",
+                view === 'archives' ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            >
+              <span className="flex items-center gap-2">
+                <Archive className="w-4 h-4" />Rapports archivés
+                {archives.length > 0 && (
+                  <span className="bg-violet-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">{archives.length}</span>
+                )}
+              </span>
+            </button>
+          </div>
+
           {/* Filter + export */}
-          <div className="flex items-center gap-3 flex-wrap">
+          {view === 'sales' && <div className="flex items-center gap-3 flex-wrap">
             <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
               <SelectTrigger className="w-56 rounded-xl border-slate-200">
                 <SelectValue placeholder="Toutes les campagnes" />
@@ -618,9 +641,9 @@ export default function SalesPage() {
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-semibold transition-colors">
               <Download className="w-4 h-4" />Exporter tout (XLSX)
             </button>
-          </div>
+          </div>}
 
-          {missingPriceCount > 0 && (
+          {view === 'sales' && missingPriceCount > 0 && (
             <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
@@ -634,8 +657,70 @@ export default function SalesPage() {
             </div>
           )}
 
+          {/* Archives view */}
+          {view === 'archives' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">Rapports archivés</h2>
+                  <p className="text-sm text-muted-foreground">{archives.length} rapport{archives.length !== 1 ? 's' : ''} — cliquez sur une carte pour consulter</p>
+                </div>
+              </div>
+              {archives.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-100 p-16 text-center">
+                  <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <Archive className="w-8 h-8 text-violet-300" />
+                  </div>
+                  <p className="font-semibold text-foreground mb-1">Aucun rapport archivé</p>
+                  <p className="text-sm text-muted-foreground">Les rapports des jours précédents sont archivés automatiquement lors du clic sur "PDF / Impression".</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {archives.map(archive => (
+                    <div
+                      key={archive.id}
+                      onClick={() => {
+                        const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const win = window.open(url, "_blank");
+                        if (win) win.document.title = `Rapport — ${archive.entrepriseNom} — ${archive.label}`;
+                        setTimeout(() => URL.revokeObjectURL(url), 15000);
+                      }}
+                      className="group relative bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-violet-200 transition-all cursor-pointer p-5 space-y-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="w-11 h-11 bg-violet-100 rounded-xl flex items-center justify-center shrink-0 group-hover:bg-violet-200 transition-colors">
+                          <FileText className="w-5 h-5 text-violet-700" />
+                        </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteArchive(archive.id); setArchives(loadArchives()); }}
+                          className="p-1.5 rounded-lg border border-transparent hover:border-red-100 hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors"
+                          title="Supprimer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-bold text-foreground text-sm truncate">{archive.entrepriseNom}</p>
+                        <p className="text-violet-700 font-semibold text-xs truncate">{archive.label}</p>
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <Calendar className="w-3 h-3" />
+                          <p className="text-xs">Archivé le {new Date(archive.generatedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 text-violet-600 text-xs font-semibold group-hover:gap-2 transition-all">
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Consulter le rapport</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Company sections */}
-          {loading ? (
+          {view === 'sales' && (loading ? (
             <div className="space-y-4">
               {[...Array(2)].map((_, i) => <div key={i} className="h-48 bg-slate-50 rounded-2xl animate-pulse" />)}
             </div>
@@ -742,99 +827,9 @@ export default function SalesPage() {
                 </div>
               ))}
             </div>
+          )
           )}
 
-          {/* ── Rapports archivés ── */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <button
-              onClick={() => setArchiveOpen(o => !o)}
-              className="w-full flex items-center justify-between gap-3 px-5 py-4 hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-violet-100 rounded-xl flex items-center justify-center shrink-0">
-                  <Archive className="w-4 h-4 text-violet-700" />
-                </div>
-                <div className="text-left">
-                  <p className="font-bold text-sm text-foreground">Rapports archivés</p>
-                  <p className="text-xs text-muted-foreground">
-                    {archives.length} rapport{archives.length !== 1 ? "s" : ""} — jours précédents consultables &amp; téléchargeables
-                  </p>
-                </div>
-              </div>
-              {archiveOpen
-                ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
-                : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
-            </button>
-
-            {archiveOpen && (
-              <div className="border-t border-slate-100">
-                {archives.length === 0 ? (
-                  <div className="px-5 py-10 text-center">
-                    <Archive className="w-10 h-10 text-slate-200 mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">Aucun rapport archivé pour le moment.</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Les rapports des jours précédents seront archivés automatiquement lors du prochain clic sur "PDF / Impression".
-                    </p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-50">
-                    {archives.map(archive => (
-                      <div key={archive.id} className="flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-slate-50/60 transition-colors">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 bg-violet-50 rounded-lg flex items-center justify-center shrink-0">
-                            <FileText className="w-3.5 h-3.5 text-violet-600" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-foreground truncate">{archive.entrepriseNom}</p>
-                            <p className="text-xs text-violet-700 font-medium truncate">{archive.label}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Archivé le {new Date(archive.generatedAt).toLocaleString("fr-FR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            onClick={() => {
-                              const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
-                              const url = URL.createObjectURL(blob);
-                              const win = window.open(url, "_blank");
-                              if (win) win.document.title = `Rapport — ${archive.entrepriseNom} — ${archive.label}`;
-                              setTimeout(() => URL.revokeObjectURL(url), 15000);
-                            }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold transition-colors"
-                          >
-                            <Eye className="w-3 h-3" />Consulter
-                          </button>
-                          <button
-                            onClick={() => {
-                              const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
-                              const url = URL.createObjectURL(blob);
-                              const a = document.createElement("a");
-                              a.href = url;
-                              a.download = `Rapport_${archive.entrepriseNom.replace(/\s+/g, "_")}_${archive.generatedAt.slice(0, 10)}.html`;
-                              a.click();
-                              setTimeout(() => URL.revokeObjectURL(url), 5000);
-                              toast.success("Téléchargement lancé");
-                            }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold transition-colors"
-                          >
-                            <Download className="w-3 h-3" />Télécharger
-                          </button>
-                          <button
-                            onClick={() => { deleteArchive(archive.id); setArchives(loadArchives()); }}
-                            className="p-1.5 rounded-lg border border-red-100 bg-red-50 hover:bg-red-100 text-red-500 transition-colors"
-                            title="Supprimer de l'archive"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
         </>
       ) : (
         /* ── Non-admin (Hôtesse / Superviseur / Entreprise) ── */
