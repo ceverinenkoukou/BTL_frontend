@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type { Vente, CampagneList, CampagneRapportSites } from "@/lib/types/backend";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -516,7 +516,20 @@ export default function SalesPage() {
   };
 
   const exportCompanyPDF = async (entrepriseNom: string) => {
-    const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
+    let latestSales = sales;
+    try {
+      invalidateCache("/ventes/");
+      const res = await api.get<VenteEnrichie[]>("/ventes/");
+      const fresh = Array.isArray(res.data)
+        ? res.data
+        : ((res.data as { results?: VenteEnrichie[] }).results ?? []);
+      setSales(fresh);
+      latestSales = fresh;
+    } catch {
+      // Utilise les données en mémoire en fallback
+    }
+
+    const companySales = latestSales.filter(s => s.entreprise_nom === entrepriseNom);
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const firstSale = companySales[0];
