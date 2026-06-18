@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, Goodie, SiteList, Promotion } from "@/lib/types/backend";
+import type { CampagneList, Goodie, MonSiteInfo, SiteList } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,9 +45,51 @@ type WheelPrize = {
   quantity_available: number; 
   quantity_won: number; 
   is_active: boolean;
-  isGoodie: boolean;
-  promotionId?: string;
+  isGoodie: boolean;  // Pour identifier si c'est un goodie réel
 };
+
+type GainGoodieItem = {
+  id: string;
+  goodie_nom: string;
+  site_nom: string;
+  campagne?: string;
+  campagne_nom?: string;
+  hotesse_nom?: string | null;
+  produit_nom?: string | null;
+  quantite_produit: number;
+  nom_client?: string | null;
+  created_at: string;
+};
+
+function normalizeWheelDegrees(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function getPrizeAtPointer<T extends WheelPrize>(prizes: T[], rotationDegrees: number): T | null {
+  if (prizes.length === 0) return null;
+  const anglePerSlice = 360 / prizes.length;
+  const pointerAngleOnWheel = normalizeWheelDegrees(-rotationDegrees);
+  const index = Math.floor(pointerAngleOnWheel / anglePerSlice) % prizes.length;
+  return prizes[index] ?? null;
+}
+
+function fitCanvasLabel(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let shortened = text;
+  while (shortened.length > 3 && ctx.measureText(`${shortened}...`).width > maxWidth) {
+    shortened = shortened.slice(0, -1);
+  }
+  return `${shortened}...`;
+}
+
+function formatGainDate(value: string) {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
 
 export default function WheelPage() {
   const { user } = useAuth();
@@ -58,7 +100,7 @@ export default function WheelPage() {
   const [selectedSite, setSelectedSite] = useState<string>("");
   const [prizes, setPrizes] = useState<WheelPrize[]>([]);
   const [goodies, setGoodies] = useState<Goodie[]>([]);
-  const [activePromotion, setActivePromotion] = useState<Promotion | null>(null);
+  const [recentGains, setRecentGains] = useState<GainGoodieItem[]>([]);
   const [spinning, setSpinning] = useState(false);
   const [savingGain, setSavingGain] = useState(false);
   const [rotation, setRotation] = useState(0);
@@ -68,7 +110,6 @@ export default function WheelPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cumulativeRotationRef = useRef(0);
-  const prizesRef = useRef<WheelPrize[]>([]);
   
   // Sécurisation : État pour savoir si le composant est monté côté client
   const [isMounted, setIsMounted] = useState(false);
@@ -81,73 +122,92 @@ export default function WheelPage() {
   // 1. DÉCLARATION DES FONCTIONS (Placées avant les useEffect)
   const fetchCampaigns = useCallback(async () => {
     try {
-      const { data } = await api.get<CampagneList[]>("/campagnes/");
-      const now = new Date();
-      const active = data
-        .filter(c => new Date(c.date_debut) <= now && new Date(c.date_fin) >= now)
-        .sort((a, b) => a.nom.localeCompare(b.nom));
-      setCampaigns(active);
-      if (active.length > 0) setSelectedCampaign(active[0].id);
+      const { data } = await api.get<CampagneList[] | { results?: CampagneList[] }>("/campagnes/");
+      const allCampaigns = Array.isArray(data) ? data : (data.results ?? []);
+      const now = Date.now();
+      const visibleCampaigns = allCampaigns
+        .sort((a, b) => {
+          const aActive = new Date(a.date_debut).getTime() <= now && new Date(a.date_fin).getTime() >= now;
+          const bActive = new Date(b.date_debut).getTime() <= now && new Date(b.date_fin).getTime() >= now;
+          if (aActive !== bActive) return aActive ? -1 : 1;
+          return a.nom.localeCompare(b.nom);
+        });
+      setCampaigns(visibleCampaigns);
+      setSelectedCampaign(prev => (
+        prev && visibleCampaigns.some(c => c.id === prev)
+          ? prev
+          : visibleCampaigns[0]?.id ?? ""
+      ));
     } catch {
       // silently ignore — page still renders
     }
   }, []);
 
-  // Charger les goodies via la promotion GAGNE active de la campagne
+  // Charger les goodies de la campagne et construire les prix de la roue
   const fetchPrizes = useCallback(async () => {
     if (!selectedCampaign) {
       setPrizes([]);
       setGoodies([]);
-      setActivePromotion(null);
       return;
     }
-
+    
     try {
-      // Chercher les promotions GAGNE actives de la campagne
-      const { data: promoData } = await api.get<{ results?: Promotion[]; } | Promotion[]>(
-        "/promotions/", { params: { campagne: selectedCampaign } }
-      );
-      const promos: Promotion[] = Array.isArray(promoData)
-        ? promoData
-        : (promoData as { results?: Promotion[] }).results ?? [];
-      const promoGagne = promos.find(
-        p => p.type_promotion === "GAGNE" && p.is_active && p.goodies_details.length > 0
-      ) ?? null;
-      setActivePromotion(promoGagne);
+      let activeGoodies: { id: string; nom: string; quantite_restante: number; quantite_distribuee?: number }[] = [];
 
-      // Goodies à afficher : ceux de la promo GAGNE si elle existe, sinon tous les goodies de la campagne
-      let allGoodies: Goodie[];
-      if (promoGagne && promoGagne.goodies.length > 0) {
-        const campGoodies = await getGoodiesByCampagne(selectedCampaign);
-        allGoodies = campGoodies.filter(g => promoGagne.goodies.includes(g.id));
+      if (selectedSite) {
+        const { data } = await api.get<MonSiteInfo>("/degustations/mon-site/", {
+          params: { site_id: selectedSite },
+        });
+        activeGoodies = (data.goodies_disponibles ?? []).filter(g => g.quantite_restante > 0);
+        setGoodies([]);
       } else {
-        allGoodies = await getGoodiesByCampagne(selectedCampaign);
+        const campGoodies = await getGoodiesByCampagne(selectedCampaign);
+        setGoodies(campGoodies);
+        activeGoodies = campGoodies.filter(g => g.quantite_restante > 0);
       }
-      setGoodies(allGoodies);
-
-      const activeGoodies = allGoodies.filter(g => g.quantite_restante > 0);
+      
       if (activeGoodies.length === 0) {
         setPrizes([]);
         return;
       }
-
+      
+      // Convertir les goodies en prix de roue
       const wheelPrizes: WheelPrize[] = activeGoodies.map(g => ({
         id: g.id,
         name: g.nom,
-        probability: 1,
+        probability: 100 / activeGoodies.length,
         quantity_available: g.quantite_restante,
         quantity_won: g.quantite_distribuee || 0,
         is_active: true,
         isGoodie: true,
-        promotionId: promoGagne?.id,
       }));
-
-      prizesRef.current = wheelPrizes;
+      
       setPrizes(wheelPrizes);
     } catch {
       toast.error("Impossible de charger les goodies de la campagne");
       setPrizes([]);
       setGoodies([]);
+    }
+  }, [selectedCampaign, selectedSite]);
+
+  const fetchRecentGains = useCallback(async () => {
+    if (!selectedCampaign) {
+      setRecentGains([]);
+      return;
+    }
+
+    try {
+      const { data } = await api.get<GainGoodieItem[] | { results?: GainGoodieItem[] }>("/gains-goodies/");
+      const gains = Array.isArray(data) ? data : (data.results ?? []);
+      setRecentGains(
+        gains
+          .filter(gain => gain.campagne === selectedCampaign)
+          .slice()
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 5)
+      );
+    } catch {
+      setRecentGains([]);
     }
   }, [selectedCampaign]);
 
@@ -158,16 +218,22 @@ export default function WheelPage() {
 
   useEffect(() => {
     if (isMounted && selectedCampaign) {
-      fetchPrizes();
       // Charger les sites de la campagne
       api.get<SiteList[]>("/sites/").then(({ data }) => {
         const all = Array.isArray(data) ? data : (data as any).results ?? [];
         const campSites = all.filter((s: SiteList) => s.campagne === selectedCampaign);
         setSites(campSites);
-        setSelectedSite(campSites.length === 1 ? campSites[0].id : "");
+        setSelectedSite(campSites[0]?.id ?? "");
       }).catch(() => setSites([]));
     }
-  }, [selectedCampaign, fetchPrizes, isMounted]);
+  }, [selectedCampaign, isMounted]);
+
+  useEffect(() => {
+    if (isMounted && selectedCampaign) {
+      fetchPrizes();
+      fetchRecentGains();
+    }
+  }, [selectedCampaign, selectedSite, fetchPrizes, fetchRecentGains, isMounted]);
 
   // 3. DESSIN DU CANVAS (Ajout d'une sécurité stricte si canvasRef n'est pas prêt)
   const drawWheel = useCallback(() => {
@@ -179,16 +245,31 @@ export default function WheelPage() {
 
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const radius = Math.min(centerX, centerY) - 10;
+    const radius = Math.min(centerX, centerY) - 32;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const anglePerSlice = (2 * Math.PI) / prizes.length;
     const rotationRad = (((rotation % 360) + 360) % 360) * Math.PI / 180;
 
+    ctx.save();
+    ctx.shadowColor = "rgba(15, 23, 42, 0.24)";
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 14;
+    const rim = ctx.createRadialGradient(centerX, centerY, radius * 0.62, centerX, centerY, radius + 18);
+    rim.addColorStop(0, "#f8fafc");
+    rim.addColorStop(0.72, "#334155");
+    rim.addColorStop(1, "#0f172a");
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + 18, 0, 2 * Math.PI);
+    ctx.fillStyle = rim;
+    ctx.fill();
+    ctx.restore();
+
     prizes.forEach((prize, index) => {
       const startAngle = index * anglePerSlice + rotationRad;
       const endAngle = (index + 1) * anglePerSlice + rotationRad;
+      const middleAngle = startAngle + anglePerSlice / 2;
 
       ctx.beginPath();
       ctx.moveTo(centerX, centerY);
@@ -202,29 +283,60 @@ export default function WheelPage() {
 
       ctx.save();
       ctx.translate(centerX, centerY);
-      ctx.rotate(startAngle + anglePerSlice / 2);
-      ctx.textAlign = "right";
+      ctx.rotate(middleAngle);
+      const flipped = Math.cos(middleAngle) < 0;
+      if (flipped) ctx.rotate(Math.PI);
+      ctx.textAlign = flipped ? "left" : "right";
       ctx.fillStyle = "#fff";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText(prize.name, radius - 20, 5);
+      ctx.font = "700 14px sans-serif";
+      ctx.shadowColor = "rgba(15, 23, 42, 0.42)";
+      ctx.shadowBlur = 4;
+      const label = fitCanvasLabel(ctx, prize.name, Math.max(62, radius * 0.42));
+      ctx.fillText(label, flipped ? -(radius - 22) : radius - 22, 5);
       ctx.restore();
     });
 
+    const innerGlow = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, radius);
+    innerGlow.addColorStop(0, "rgba(255,255,255,0.18)");
+    innerGlow.addColorStop(0.52, "rgba(255,255,255,0.05)");
+    innerGlow.addColorStop(1, "rgba(15,23,42,0.14)");
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 30, 0, 2 * Math.PI);
-    ctx.fillStyle = "#fff";
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = innerGlow;
     ctx.fill();
-    ctx.strokeStyle = "#f97316";
-    ctx.lineWidth = 4;
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + 2, 0, 2 * Math.PI);
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 5;
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.moveTo(centerX + radius + 15, centerY);
-    ctx.lineTo(centerX + radius - 10, centerY - 15);
-    ctx.lineTo(centerX + radius - 10, centerY + 15);
+    ctx.arc(centerX, centerY, 38, 0, 2 * Math.PI);
+    const hub = ctx.createRadialGradient(centerX - 10, centerY - 12, 5, centerX, centerY, 40);
+    hub.addColorStop(0, "#ffffff");
+    hub.addColorStop(0.52, "#f8fafc");
+    hub.addColorStop(1, "#cbd5e1");
+    ctx.fillStyle = hub;
+    ctx.fill();
+    ctx.strokeStyle = "#f97316";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.fillStyle = "#0f172a";
+    ctx.textAlign = "center";
+    ctx.font = "800 11px sans-serif";
+    ctx.fillText("BTL", centerX, centerY + 4);
+
+    ctx.beginPath();
+    ctx.moveTo(centerX + radius + 24, centerY);
+    ctx.lineTo(centerX + radius - 8, centerY - 18);
+    ctx.lineTo(centerX + radius - 8, centerY + 18);
     ctx.closePath();
     ctx.fillStyle = "#f97316";
     ctx.fill();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    ctx.stroke();
   }, [prizes, rotation, isMounted]);
 
   useEffect(() => {
@@ -235,18 +347,24 @@ export default function WheelPage() {
 
   // 4. ANIMATION DE LA ROUE ET CONFETTIS DYNAMIQUES
   const spinWheel = () => {
-    // Utiliser prizesRef pour éviter les closures sur un état périmé
-    const currentPrizes = prizesRef.current;
-    if (spinning || currentPrizes.length === 0 || !isMounted) return;
+    if (spinning || prizes.length === 0 || !isMounted) return;
 
     setSpinning(true);
     setWonPrize(null);
 
-    // Sélection uniforme par index
-    const prizeIndex = Math.floor(Math.random() * currentPrizes.length);
-    const selectedPrize = currentPrizes[prizeIndex];
+    const totalProbability = prizes.reduce((sum, p) => sum + p.probability, 0);
+    let random = Math.random() * totalProbability;
+    let selectedPrize = prizes[0];
 
-    const anglePerSlice = 360 / currentPrizes.length;
+    for (const prize of prizes) {
+      random -= prize.probability;
+      if (random <= 0) {
+        selectedPrize = prize;
+        break;
+      }
+    }
+    const anglePerSlice = 360 / prizes.length;
+    const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
     // Milieu du segment gagnant (0° = droite, sens horaire canvas)
     // const prizeCenter = prizeIndex * anglePerSlice + anglePerSlice / 2;
@@ -255,13 +373,11 @@ export default function WheelPage() {
     // Pour que l'aiguille (droite, 0°) pointe sur prizeCenter,
     // il faut : -rotation ≡ prizeCenter (mod 360)
     // => rotation_finale ≡ -prizeCenter ≡ (360 - prizeCenter) % 360
-    const totalSpins = 5;
     const startCumulative = cumulativeRotationRef.current;
-    const currentRotation = ((startCumulative % 360) + 360) % 360;
+    const currentRotation = normalizeWheelDegrees(startCumulative);
     const targetFinalRot = (360 - prizeAngle + 360) % 360;
-    const rawDelta = (targetFinalRot - currentRotation + 360) % 360;
-    // Si delta est 0 ou trop petit, forcer un tour complet pour éviter que la roue reste immobile
-    const delta = rawDelta < 5 ? rawDelta + 360 : rawDelta;
+    const delta = (targetFinalRot - currentRotation + 360) % 360;
+    const totalSpins = 5 + Math.floor(Math.random() * 3);
     const targetCumulative = startCumulative + 360 * totalSpins + delta;
     const duration = 5000;
     const startTime = Date.now();
@@ -281,15 +397,16 @@ export default function WheelPage() {
         cumulativeRotationRef.current = targetCumulative;
         setRotation(targetCumulative);
         setSpinning(false);
-        setWonPrize(selectedPrize);
+        const finalPrize = getPrizeAtPointer(prizes, targetCumulative) ?? selectedPrize;
+        setWonPrize(finalPrize);
         setShowWinDialog(true);
-        setCustomerName("");
-        setCustomerPhone("");
 
-        import("canvas-confetti").then((module) => {
-          const confetti = module.default;
-          confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
-        });
+        if (finalPrize.isGoodie) {
+          import("canvas-confetti").then((module) => {
+            const confetti = module.default;
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          });
+        }
       }
     };
 
@@ -307,7 +424,6 @@ export default function WheelPage() {
       await api.post("/gains-goodies/enregistrer/", {
         goodie_id: wonPrize.id,
         site_id: selectedSite,
-        promotion_id: wonPrize.promotionId ?? undefined,
         nom_client: customerName.trim() || undefined,
       });
       toast.success(`🎁 Gain enregistré${customerName ? ` pour ${customerName}` : ""} !`);
@@ -316,6 +432,7 @@ export default function WheelPage() {
       setCustomerPhone("");
       // Rafraîchir les goodies pour mettre à jour les stocks
       fetchPrizes();
+      fetchRecentGains();
     } catch (error: any) {
       const msg = error?.response?.data?.detail || "Erreur lors de l'enregistrement du gain.";
       toast.error(msg);
@@ -333,10 +450,8 @@ export default function WheelPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Roue à Cadeaux</h1>
-          <p className="text-muted-foreground mt-1">
-            Faites tourner la roue pour gagner des goodies !
-          </p>
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">Roue à cadeaux</h1>
+          <p className="text-muted-foreground mt-1">Tirage goodies par campagne et par site</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
@@ -368,14 +483,15 @@ export default function WheelPage() {
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <Card>
-            <CardContent className="p-6 flex flex-col items-center">
-              <div className="relative">
+          <Card className="overflow-hidden border-slate-200 shadow-sm">
+            <CardContent className="p-0">
+              <div className="flex flex-col items-center px-4 py-7 sm:p-8 bg-[radial-gradient(circle_at_50%_12%,rgba(249,115,22,0.16),transparent_34%),linear-gradient(180deg,#ffffff,#f8fafc)]">
+              <div className="relative rounded-full p-4 bg-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_24px_60px_rgba(15,23,42,0.14)] border border-white">
                 <canvas
                   ref={canvasRef}
-                  width={350}
-                  height={350}
-                  className="max-w-full"
+                  width={390}
+                  height={390}
+                  className="block max-w-full rounded-full"
                 />
                 {prizes.length === 0 && (
                   <div className="absolute inset-0 flex items-center justify-center bg-muted/80 rounded-full">
@@ -388,7 +504,7 @@ export default function WheelPage() {
 
               <Button
                 size="lg"
-                className="mt-8 h-14 px-12 text-lg"
+                className="mt-8 h-14 px-10 text-base font-semibold text-white shadow-lg shadow-orange-200 bg-gradient-to-r from-orange-500 to-slate-900 hover:from-orange-600 hover:to-slate-800"
                 onClick={spinWheel}
                 disabled={spinning || prizes.length === 0}
               >
@@ -405,100 +521,131 @@ export default function WheelPage() {
                 )}
               </Button>
 
-              <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
+              <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-2.5 w-full max-w-2xl">
                 {prizes.map((prize, index) => (
                   <div
                     key={prize.id}
-                    className="flex items-center gap-2 text-sm"
+                    className="min-w-0 flex items-center gap-2 rounded-md border border-slate-200 bg-white/82 px-3 py-2 text-sm shadow-sm"
                   >
                     <div
                       className="w-4 h-4 rounded-full flex-shrink-0"
                       style={{ backgroundColor: WHEEL_COLORS[index % WHEEL_COLORS.length] }}
                     />
-                    <span className="truncate">{prize.name}</span>
+                    <span className="truncate font-medium text-slate-700">{prize.name}</span>
                   </div>
                 ))}
+              </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <Card>
+        <Card className="border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-primary" />
+              <Trophy className="w-5 h-5 text-orange-500" />
               Derniers gains
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-8">
-              <Gift className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">Aucun gain enregistré</p>
-            </div>
+            {recentGains.length === 0 ? (
+              <div className="text-center py-8">
+                <Gift className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">Aucun gain enregistré</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentGains.map((gain) => (
+                  <div key={gain.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-orange-100 text-orange-600">
+                        <Gift className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-800">{gain.goodie_nom}</p>
+                        <p className="truncate text-xs text-slate-500">{gain.site_nom}</p>
+                        {gain.hotesse_nom && (
+                          <p className="truncate text-xs text-slate-500">Hôtesse : {gain.hotesse_nom}</p>
+                        )}
+                        {gain.nom_client && (
+                          <p className="truncate text-xs text-slate-500">Client : {gain.nom_client}</p>
+                        )}
+                        {gain.produit_nom && (
+                          <p className="truncate text-xs text-slate-500">
+                            Produit offert : {gain.quantite_produit} x {gain.produit_nom}
+                          </p>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-[11px] font-medium text-slate-400">
+                        {formatGainDate(gain.created_at)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
       <Dialog open={showWinDialog} onOpenChange={setShowWinDialog}>
-        <DialogContent className="text-center">
+        <DialogContent className="text-center overflow-hidden border-slate-200">
           <DialogHeader>
             <DialogTitle className="text-2xl flex items-center justify-center gap-2">
-              <Trophy className="w-8 h-8 text-primary" />
+              <Trophy className="w-8 h-8 text-orange-500" />
               Félicitations !
             </DialogTitle>
             <DialogDescription>
-              {wonPrize ? `Vous avez gagné : ${wonPrize.name}` : ""}
+              {`Vous avez gagné : ${wonPrize?.name}`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 mt-4">
-            <div className={cn(
-              "mx-auto w-24 h-24 rounded-full flex items-center justify-center",
-              "bg-gradient-to-br from-primary to-accent"
-            )}>
-              <Gift className="w-12 h-12 text-white" />
-            </div>
-
-            <div className="space-y-3 text-left">
-              <div className="space-y-2">
-                <Label>Nom du client</Label>
-                <Input
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Entrez le nom du gagnant"
-                />
+              <div className={cn(
+                "mx-auto w-24 h-24 rounded-full flex items-center justify-center",
+                "bg-gradient-to-br from-orange-500 to-slate-900 shadow-lg shadow-orange-100"
+              )}>
+                <Gift className="w-12 h-12 text-white" />
               </div>
-              <div className="space-y-2">
-                <Label>Téléphone (optionnel)</Label>
-                <Input
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="Numéro de téléphone"
-                />
-              </div>
-            </div>
 
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => {
-                  setShowWinDialog(false);
-                  setWonPrize(null);
-                  setTimeout(() => spinWheel(), 300);
-                }}
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Rejouer
-              </Button>
-              <Button className="flex-1" onClick={handleSaveSpin} disabled={savingGain}>
-                {savingGain
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</>
-                  : "Enregistrer le gain"
-                }
+              <div className="space-y-3 text-left">
+                <div className="space-y-2">
+                  <Label>Nom du client</Label>
+                  <Input
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Entrez le nom du gagnant"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Téléphone (optionnel)</Label>
+                  <Input
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    placeholder="Numéro de téléphone"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowWinDialog(false)}
+                >
+                  Annuler
+                </Button>
+                <Button className="flex-1" onClick={handleSaveSpin} disabled={savingGain}>
+                  {savingGain
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</>
+                    : "Enregistrer le gain"
+                  }
+                </Button>
+              </div>
+              <Button variant="outline" className="w-full" onClick={() => { setShowWinDialog(false); setWonPrize(null); spinWheel(); }}>
+                <RotateCcw className="w-4 h-4 mr-2" />Relancer la roue
               </Button>
             </div>
-          </div>
         </DialogContent>
       </Dialog>
     </div>
