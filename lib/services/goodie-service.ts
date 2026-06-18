@@ -32,6 +32,8 @@ export interface GainGoodieResponse {
     goodie_nom: string;
     site: string;
     site_nom: string;
+    hotesse?: string | null;
+    hotesse_nom?: string | null;
     produit_associe?: string;
     produit_nom?: string;
     quantite_produit: number;

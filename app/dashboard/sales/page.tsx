@@ -53,6 +53,7 @@ interface GainGoodieReport {
   id: string;
   goodie_nom: string;
   site_nom: string;
+  hotesse_nom?: string | null;
   produit_nom: string | null;
   quantite_produit: number;
   nom_client: string | null;
@@ -299,7 +300,8 @@ export default function SalesPage() {
       const mb = Math.floor(date.getTime() / 60000);
       const client = normalizeClientName(gain.nom_client);
       const product = gain.produit_nom || "Lot";
-      const match = findTriggeringSale(date.getTime(), undefined, gain.site_nom, client);
+      const hotesse = gain.hotesse_nom || "Non renseignée";
+      const match = findTriggeringSale(date.getTime(), gain.hotesse_nom || undefined, gain.site_nom, client);
       const alreadyCountedByFreeSale = reportSales.some(s =>
         s.type_vente === "GRATUIT" &&
         s.site_nom === gain.site_nom &&
@@ -315,10 +317,11 @@ export default function SalesPage() {
       } else {
         const hasSale = [...tMap.values()].some(row =>
           row.site === gain.site_nom &&
+          (!gain.hotesse_nom || row.hotesse === gain.hotesse_nom) &&
           (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
           Math.abs(row.time - date.getTime()) <= OFFER_WINDOW
         );
-        if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+        if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse, site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
       }
     });
     const transactionRowsHtml = tMap.size === 0

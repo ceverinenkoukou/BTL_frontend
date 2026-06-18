@@ -54,6 +54,7 @@ type GainGoodieItem = {
   site_nom: string;
   campagne?: string;
   campagne_nom?: string;
+  hotesse_nom?: string | null;
   produit_nom?: string | null;
   quantite_produit: number;
   nom_client?: string | null;
@@ -574,6 +575,9 @@ export default function WheelPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-slate-800">{gain.goodie_nom}</p>
                         <p className="truncate text-xs text-slate-500">{gain.site_nom}</p>
+                        {gain.hotesse_nom && (
+                          <p className="truncate text-xs text-slate-500">Hôtesse : {gain.hotesse_nom}</p>
+                        )}
                         {gain.nom_client && (
                           <p className="truncate text-xs text-slate-500">Client : {gain.nom_client}</p>
                         )}
