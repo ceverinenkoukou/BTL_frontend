@@ -45,8 +45,7 @@ type WheelPrize = {
   quantity_available: number; 
   quantity_won: number; 
   is_active: boolean;
-  isGoodie: boolean;
-  promotionId?: string;
+  isGoodie: boolean;  // Pour identifier si c'est un goodie réel
 };
 
 type GainGoodieItem = {
@@ -111,7 +110,6 @@ export default function WheelPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cumulativeRotationRef = useRef(0);
-  const prizesRef = useRef<WheelPrize[]>([]);
   
   // Sécurisation : État pour savoir si le composant est monté côté client
   const [isMounted, setIsMounted] = useState(false);
@@ -145,15 +143,14 @@ export default function WheelPage() {
     }
   }, []);
 
-  // Charger les goodies via la promotion GAGNE active de la campagne
+  // Charger les goodies de la campagne et construire les prix de la roue
   const fetchPrizes = useCallback(async () => {
     if (!selectedCampaign) {
       setPrizes([]);
       setGoodies([]);
-      setActivePromotion(null);
       return;
     }
-
+    
     try {
       let activeGoodies: { id: string; nom: string; quantite_restante: number; quantite_distribuee?: number }[] = [];
 
@@ -173,7 +170,8 @@ export default function WheelPage() {
         setPrizes([]);
         return;
       }
-
+      
+      // Convertir les goodies en prix de roue
       const wheelPrizes: WheelPrize[] = activeGoodies.map(g => ({
         id: g.id,
         name: g.nom,
@@ -182,7 +180,6 @@ export default function WheelPage() {
         quantity_won: g.quantite_distribuee || 0,
         is_active: true,
         isGoodie: true,
-        promotionId: promoGagne?.id,
       }));
       
       setPrizes(wheelPrizes);
@@ -350,18 +347,24 @@ export default function WheelPage() {
 
   // 4. ANIMATION DE LA ROUE ET CONFETTIS DYNAMIQUES
   const spinWheel = () => {
-    // Utiliser prizesRef pour éviter les closures sur un état périmé
-    const currentPrizes = prizesRef.current;
-    if (spinning || currentPrizes.length === 0 || !isMounted) return;
+    if (spinning || prizes.length === 0 || !isMounted) return;
 
     setSpinning(true);
     setWonPrize(null);
 
-    // Sélection uniforme par index
-    const prizeIndex = Math.floor(Math.random() * currentPrizes.length);
-    const selectedPrize = currentPrizes[prizeIndex];
+    const totalProbability = prizes.reduce((sum, p) => sum + p.probability, 0);
+    let random = Math.random() * totalProbability;
+    let selectedPrize = prizes[0];
 
-    const anglePerSlice = 360 / currentPrizes.length;
+    for (const prize of prizes) {
+      random -= prize.probability;
+      if (random <= 0) {
+        selectedPrize = prize;
+        break;
+      }
+    }
+    const anglePerSlice = 360 / prizes.length;
+    const prizeIndex = prizes.findIndex((p) => p.id === selectedPrize.id);
     const prizeAngle = prizeIndex * anglePerSlice + anglePerSlice / 2;
     // Milieu du segment gagnant (0° = droite, sens horaire canvas)
     // const prizeCenter = prizeIndex * anglePerSlice + anglePerSlice / 2;
@@ -397,8 +400,6 @@ export default function WheelPage() {
         const finalPrize = getPrizeAtPointer(prizes, targetCumulative) ?? selectedPrize;
         setWonPrize(finalPrize);
         setShowWinDialog(true);
-        setCustomerName("");
-        setCustomerPhone("");
 
         if (finalPrize.isGoodie) {
           import("canvas-confetti").then((module) => {
@@ -423,7 +424,6 @@ export default function WheelPage() {
       await api.post("/gains-goodies/enregistrer/", {
         goodie_id: wonPrize.id,
         site_id: selectedSite,
-        promotion_id: wonPrize.promotionId ?? undefined,
         nom_client: customerName.trim() || undefined,
       });
       toast.success(`🎁 Gain enregistré${customerName ? ` pour ${customerName}` : ""} !`);
@@ -608,22 +608,39 @@ export default function WheelPage() {
                 <Gift className="w-12 h-12 text-white" />
               </div>
 
-            <div className="space-y-3 text-left">
-              <div className="space-y-2">
-                <Label>Nom du client</Label>
-                <Input
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Entrez le nom du gagnant"
-                />
+              <div className="space-y-3 text-left">
+                <div className="space-y-2">
+                  <Label>Nom du client</Label>
+                  <Input
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Entrez le nom du gagnant"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Téléphone (optionnel)</Label>
+                  <Input
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    placeholder="Numéro de téléphone"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Téléphone (optionnel)</Label>
-                <Input
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="Numéro de téléphone"
-                />
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowWinDialog(false)}
+                >
+                  Annuler
+                </Button>
+                <Button className="flex-1" onClick={handleSaveSpin} disabled={savingGain}>
+                  {savingGain
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</>
+                    : "Enregistrer le gain"
+                  }
+                </Button>
               </div>
               <Button variant="outline" className="w-full" onClick={() => { setShowWinDialog(false); setWonPrize(null); spinWheel(); }}>
                 <RotateCcw className="w-4 h-4 mr-2" />Relancer la roue
