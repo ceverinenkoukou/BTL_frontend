@@ -57,6 +57,9 @@ interface GainGoodieReport {
   produit_nom: string | null;
   quantite_produit: number;
   nom_client: string | null;
+  promotion_nom: string | null;
+  promotion_quantite_requise: number | null;
+  promotion_quantite_offerte: number | null;
   created_at: string;
 }
 
@@ -213,7 +216,15 @@ export default function SalesPage() {
 
     const totalVendu = reportSales.reduce((sum, s) => sum + (s.type_vente === "NORMAL" ? s.quantite : 0), 0);
     const totalOfferts = reportSales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0);
-    const totalGoodies = [...goodiesTotalsBySite.values()].reduce((sum, c) => sum + c, 0);
+    const totalGoodies = gainGoodies.length;
+    const periodGoodiesSiteMap = new Map<string, Map<string, number>>();
+    gainGoodies.forEach(gain => {
+      if (!periodGoodiesSiteMap.has(gain.site_nom)) {
+        periodGoodiesSiteMap.set(gain.site_nom, new Map<string, number>());
+      }
+      const siteGoodies = periodGoodiesSiteMap.get(gain.site_nom)!;
+      siteGoodies.set(gain.goodie_nom, (siteGoodies.get(gain.goodie_nom) ?? 0) + 1);
+    });
 
     const hostMap = new Map<string, { hotesse: string; site: string; actes: number; vendu: number; offert: number; goodies: number }>();
     reportSales.forEach(s => {
@@ -223,9 +234,23 @@ export default function SalesPage() {
       if (s.type_vente === "NORMAL") { row.actes += 1; row.vendu += s.quantite; }
       else row.offert += s.quantite;
     });
-    goodiesTotalsBySite.forEach((count, siteNom) => {
-      const hs = [...hostMap.values()].filter(r => r.site === siteNom);
-      if (hs.length === 1) hs[0].goodies = count;
+    gainGoodies.forEach(gain => {
+      const hotesse = gain.hotesse_nom || "";
+      const exactKey = `${hotesse}__${gain.site_nom}`;
+      if (hotesse && hostMap.has(exactKey)) {
+        hostMap.get(exactKey)!.goodies += 1;
+        return;
+      }
+      const siteRows = [...hostMap.values()].filter(r => r.site === gain.site_nom);
+      if (siteRows.length === 1) {
+        siteRows[0].goodies += 1;
+        return;
+      }
+      const fallbackKey = `${hotesse || "Non renseignée"}__${gain.site_nom}`;
+      if (!hostMap.has(fallbackKey)) {
+        hostMap.set(fallbackKey, { hotesse: hotesse || "Non renseignée", site: gain.site_nom, actes: 0, vendu: 0, offert: 0, goodies: 0 });
+      }
+      hostMap.get(fallbackKey)!.goodies += 1;
     });
     const hostesseRows = [...hostMap.values()]
       .sort((a, b) => b.vendu - a.vendu || b.offert - a.offert || a.hotesse.localeCompare(b.hotesse))
@@ -236,10 +261,10 @@ export default function SalesPage() {
       </tr>`).join("");
 
     let goodiesRowsHtml = "";
-    if (goodiesSiteMap.size === 0) {
+    if (periodGoodiesSiteMap.size === 0) {
       goodiesRowsHtml = `<tr><td colspan="4" class="muted-row">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
     } else {
-      goodiesRowsHtml = [...goodiesSiteMap.entries()].map(([siteNom, dist]) => {
+      goodiesRowsHtml = [...periodGoodiesSiteMap.entries()].map(([siteNom, dist]) => {
         const itemsHtml = [...dist.entries()].map(([gNom, qty]) => `<div class="goodie-detail-item"><span class="goodie-label">${esc(gNom)}</span><span class="goodie-qty">x${qty}</span></div>`).join("");
         const total = [...dist.values()].reduce((a, b) => a + b, 0);
         const hotesses = [...hostMap.values()].filter(r => r.site === siteNom).map(r => r.hotesse).filter((v, i, a) => a.indexOf(v) === i).join(", ");
@@ -247,7 +272,7 @@ export default function SalesPage() {
       }).join("");
     }
 
-    type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string };
+    type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string; promo: string; qRequise: number; qOfferte: number };
     const OFFER_WINDOW = 10 * 60 * 1000;
     const isPlaceholder = (c: string) => c === "Client";
     const mergeGoodieLabel = (current: string, addition: string) => {
@@ -289,7 +314,7 @@ export default function SalesPage() {
         const match = findTriggeringSale(saleTime, s.hotesse_nom || "Non renseignée", s.site_nom, client);
         if (match) key = match[0];
       }
-      if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-" });
+      if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-", promo: "-", qRequise: 0, qOfferte: 0 });
       const row = tMap.get(key)!;
       if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
       if (row.goodie === "-" && goodies?.length) row.goodie = goodies.join(", ");
@@ -321,11 +346,43 @@ export default function SalesPage() {
           (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
           Math.abs(row.time - date.getTime()) <= OFFER_WINDOW
         );
-        if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse, site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+        if (!hasSale) tMap.set(`goodie__${gain.id}`, {
+          time: date.getTime(),
+          heure: formatTime(gain.created_at),
+          hotesse,
+          site: gain.site_nom,
+          client,
+          produit: product,
+          vendu: 0,
+          offert: gain.quantite_produit || 0,
+          goodie: gain.goodie_nom,
+          promo: gain.promotion_nom || "-",
+          qRequise: gain.promotion_quantite_requise || 0,
+          qOfferte: gain.promotion_quantite_offerte || 0,
+        });
       }
     });
+    // Goodie section 2 : rebuild from gainGoodies directly (source of truth)
+    const goodiesBySite2 = new Map<string, { goodieNom: string; qty: number; promo: string; qReq: number; qOff: number }[]>();
+    gainGoodies.forEach(gain => {
+      if (!goodiesBySite2.has(gain.site_nom)) goodiesBySite2.set(gain.site_nom, []);
+      const arr = goodiesBySite2.get(gain.site_nom)!;
+      const existing = arr.find(r => r.goodieNom === gain.goodie_nom && r.promo === (gain.promotion_nom || "-"));
+      if (existing) { existing.qty += 1; }
+      else arr.push({ goodieNom: gain.goodie_nom, qty: 1, promo: gain.promotion_nom || "-", qReq: gain.promotion_quantite_requise || 0, qOff: gain.promotion_quantite_offerte || 0 });
+    });
+    const goodiesRowsHtml2 = gainGoodies.length === 0
+      ? `<tr><td colspan="5" class="muted-row">Aucun goodie enregistré pour cette période.</td></tr>`
+      : [...goodiesBySite2.entries()].map(([siteNom, items]) => {
+          const hotesses = [...hostMap.values()].filter(r => r.site === siteNom).map(r => r.hotesse).filter((v, i, a) => a.indexOf(v) === i).join(", ");
+          const total = items.reduce((s, i) => s + i.qty, 0);
+          const itemsHtml = items.map(item => `<div class="goodie-detail-item"><span class="goodie-label">${esc(item.goodieNom)}</span><span class="goodie-qty">x${item.qty}</span></div>`).join("");
+          const promoLabel = items[0]?.promo !== "-" ? `<div style="font-size:11px;color:#6d28d9;margin-top:4px">${esc(items[0].promo)} (achat ${items[0].qReq}, offre ${items[0].qOff})</div>` : "";
+          return `<tr><td class="b">${esc(hotesses || "-")}</td><td class="b site-name">${esc(siteNom)}</td><td><div class="goodies-grid-cell">${itemsHtml}</div>${promoLabel}</td><td class="r b text-star" style="font-size:13px;">${total} lot(s)</td></tr>`;
+        }).join("");
+
     const transactionRowsHtml = tMap.size === 0
-      ? `<tr><td colspan="8" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`
+      ? `<tr><td colspan="9" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`
       : [...tMap.values()].sort((a, b) => b.time - a.time).map(row => `<tr>
           <td class="time">${esc(row.heure)}</td><td class="b">${esc(row.hotesse)}</td>
           <td class="site-name">${esc(row.site)}</td><td class="b">${esc(row.client)}</td>
@@ -333,6 +390,7 @@ export default function SalesPage() {
           <td class="r b">${row.vendu ? `${row.vendu} u.` : "-"}</td>
           <td class="r b text-gift">${row.offert ? `+${row.offert} u.` : "-"}</td>
           <td>${esc(row.goodie)}</td>
+          <td style="font-size:11px;color:#6d28d9">${row.promo !== "-" ? `${esc(row.promo)}<br/><span style="color:#94a3b8">${row.qRequise} → ${row.qOfferte} offert(s)</span>` : "-"}</td>
         </tr>`).join("");
 
     const safeNom = entrepriseNom.replace(/\s+/g, "_");
@@ -430,13 +488,13 @@ export default function SalesPage() {
   </tbody></table>
   <h2 class="section-title">2. Répartition des goodies distribués</h2>
   <table><thead><tr>
-    <th>Hôtesse</th><th>Site d'activité</th><th>Détail des Dotations / Lots distribués</th><th class="r">Volume total</th>
-  </tr></thead><tbody>${goodiesRowsHtml}</tbody></table>
+    <th>Hôtesse</th><th>Site d'activité</th><th>Détail des Dotations / Offre déclenchée</th><th class="r">Volume total</th>
+  </tr></thead><tbody>${goodiesRowsHtml2}</tbody></table>
   <div class="page-break">
     <h2 class="section-title">3. Journal des transactions</h2>
     <table><thead><tr>
       <th>Heure</th><th>Hôtesse</th><th>Site</th><th>Client</th>
-      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th>
+      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th><th>Offre promotionnelle</th>
     </tr></thead><tbody>${transactionRowsHtml}</tbody></table>
   </div>
   <div class="foot">Rapport généré automatiquement depuis MHedia BTL</div>

@@ -141,6 +141,8 @@ export interface Promotion {
   produit_cible: string | null;
   produit_cible_nom: string | null;
   is_active: boolean;
+  goodies: string[];
+  goodies_details: { id: string; nom: string }[];
   created_at: string;
 }
 

@@ -349,7 +349,7 @@ export default function CampaignDetailPage() {
       ctx.font = "12px sans-serif";
       ctx.fillStyle = "#94a3b8";
       ctx.fillText("configuré", cx, cy + 8);
-      ctx.fillText("pour cette campagne", cx, cy + 24);
+      ctx.fillText("ou disponible", cx, cy + 24);
       return;
     }
 
@@ -448,7 +448,6 @@ export default function CampaignDetailPage() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      wheelRotationRef.current = (startRot + (targetRot - startRot) * eased) % 360;
       wheelRotationRef.current = normalizedStart + (targetRot - normalizedStart) * eased;
       drawWheelImmediate(wheelRotationRef.current);
       if (progress < 1) {
@@ -503,19 +502,19 @@ export default function CampaignDetailPage() {
   };
 
   useEffect(() => {
-    if (activeWheelPromoId) {
+    if (activeWheelPromoId || wheelOpen) {
       wheelRotationRef.current = 0;
       const t = setTimeout(() => drawWheelImmediate(0), 80);
       return () => clearTimeout(t);
     }
-  }, [activeWheelPromoId]);
+  }, [activeWheelPromoId, wheelOpen]);
 
   useEffect(() => {
-    if (activeWheelPromoId && !wheelSpinning) {
+    if ((activeWheelPromoId || wheelOpen) && !wheelSpinning) {
       const t = setTimeout(() => drawWheelImmediate(wheelRotationRef.current), 50);
       return () => clearTimeout(t);
     }
-  }, [siteInfo, goodies, activeWheelPromoId, wheelSpinning]);
+  }, [siteInfo, goodies, activeWheelPromoId, wheelOpen, wheelSpinning]);
 
   useEffect(() => {
     if (isHostess && campaignSites.length === 1 && !degForm.site) {
@@ -1202,25 +1201,25 @@ export default function CampaignDetailPage() {
               )}
             </div>
           )}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: p1 }} /></div>
-                Performance par site
-              </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={siteRapport!.sites.map(s => ({ nom: s.nom, degustations: s.degustations, ventes: s.ventes }))} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barSize={18}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                    <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 9 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
-                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{ fill: "rgba(0,0,0,0.03)" }} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                    {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />}
-                    {showVente && <Bar dataKey="ventes" name="Ventes" fill={p2} radius={[4, 4, 0, 0]} />}
-                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+            <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-4">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p1, 0.12) }}><BarChart3 className="w-3.5 h-3.5" style={{ color: p1 }} /></div>
+              Performance par site
+            </h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={siteRapport!.sites.map(s => ({ nom: s.nom, degustations: s.degustations, ventes: s.ventes }))} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barSize={18}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                  <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 9 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{ fill: "rgba(0,0,0,0.03)" }} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                  {showTasting && <Bar dataKey="degustations" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />}
+                  {showVente && <Bar dataKey="ventes" name="Ventes" fill={p2} radius={[4, 4, 0, 0]} />}
+                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
+          </div>
 
           {/* Affiche le graphique des dégustations/ventes par jour par quantité */}
           {(tastings.length > 0 || ventes.length > 0) && (
@@ -1578,8 +1577,6 @@ export default function CampaignDetailPage() {
             </div>
           </div>
 
-          
-
           {/* Formulaire principal */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50/60">
@@ -1744,116 +1741,40 @@ export default function CampaignDetailPage() {
           </div>
         </div>
       )}
-      {/* Dégustations récentes */}
-          {tastings.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(p2, 0.12) }}><UtensilsCrossed className="w-3.5 h-3.5" style={{ color: p2 }} /></div>
-                Mes activités récentes
-              </h3>
-              <div className="space-y-2">
-                {tastings.slice(0, 5).map((t, i) => (
-                  <div key={t.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl text-sm">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: brandGrad }}>{i+1}</div>
-                    <div className="flex-1 min-w-0"><span className="font-medium text-foreground">{t.produit_nom}</span>{t.nom_client && <span className="text-muted-foreground ml-2 text-xs">· {t.nom_client}</span>}<span className="text-muted-foreground ml-2 text-xs">{t.tranche_age_display}</span></div>
-                    <div className="flex items-center gap-1 text-xs text-amber-500"><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{t.note_gout}/5</div>
-                    {t.a_achete && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">✓</span>}
-                  </div>
-                ))}
-                {tastings.length > 5 && <p className="text-xs text-center text-muted-foreground">+{tastings.length - 5} autres</p>}
-              </div>
-            </div>
-          )}
+
     </div>
 
-    {/* Dialog gestion equipe */}
+    {/* Team management modal */}
     <Dialog open={teamDialogOpen} onOpenChange={setTeamDialogOpen}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UserPlus className="w-4 h-4" style={{ color: p1 }} />
-            Gérer l&apos;équipe &mdash; {campaign?.nom}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex-1 overflow-y-auto space-y-5 pr-1 mt-2">
-          {/* Superviseurs */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
-              Superviseurs ({teamSel.superviseurs_ids.length} sélectionné{teamSel.superviseurs_ids.length > 1 ? "s" : ""})
-            </p>
-            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
-              {allStaff.filter(m => m.role === "Superviseur").length === 0 && (
-                <p className="text-xs text-muted-foreground p-3 italic">Aucun superviseur disponible</p>
-              )}
-              {allStaff.filter(m => m.role === "Superviseur").map(m => (
-                <label key={m.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
-                  <Checkbox
-                    checked={teamSel.superviseurs_ids.includes(m.id)}
-                    onCheckedChange={() => toggleTeamMember("superviseurs_ids", m.id)}
-                    className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
-                  />
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
-                    <p className="text-xs text-muted-foreground">Superviseur</p>
-                  </div>
-                  {teamSel.superviseurs_ids.includes(m.id) && (
-                    <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />
-                  )}
-                </label>
+      <DialogContent className="max-w-md rounded-2xl">
+        <DialogHeader><DialogTitle className="text-base font-bold flex items-center gap-2"><Users className="w-5 h-5 text-indigo-500" /> Gérer l'équipe de terrain</DialogTitle></DialogHeader>
+        <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
+          <div>
+            <h4 className="text-xs font-bold uppercase text-rose-500 tracking-wider mb-2">Hôtesses disponibles</h4>
+            <div className="space-y-1.5">
+              {allStaff.filter(s => s.role === "Hotesse").map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2.5 rounded-xl border bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold">{initials(s.name)}</div><span className="text-sm font-medium">{s.name}</span></div>
+                  <Checkbox checked={teamSel.hotesses_ids.includes(s.id)} onCheckedChange={() => toggleTeamMember("hotesses_ids", s.id)} />
+                </div>
               ))}
             </div>
           </div>
-
-          {/* Hôtesses */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
-              Hôtesses ({teamSel.hotesses_ids.length} sélectionnée{teamSel.hotesses_ids.length > 1 ? "s" : ""})
-            </p>
-            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
-              {allStaff.filter(m => m.role === "Hotesse").length === 0 && (
-                <p className="text-xs text-muted-foreground p-3 italic">Aucune hôtesse disponible</p>
-              )}
-              {allStaff.filter(m => m.role === "Hotesse").map(m => (
-                <label key={m.id} className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
-                  <Checkbox
-                    checked={teamSel.hotesses_ids.includes(m.id)}
-                    onCheckedChange={() => toggleTeamMember("hotesses_ids", m.id)}
-                    className="data-[state=checked]:bg-rose-500 data-[state=checked]:border-rose-500"
-                  />
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {m.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
-                    <p className="text-xs text-muted-foreground">Hôtesse</p>
-                  </div>
-                  {teamSel.hotesses_ids.includes(m.id) && (
-                    <CheckCircle2 className="w-4 h-4 text-rose-400 shrink-0" />
-                  )}
-                </label>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-indigo-500 tracking-wider mb-2">Superviseurs disponibles</h4>
+            <div className="space-y-1.5">
+              {allStaff.filter(s => s.role === "Superviseur").map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2.5 rounded-xl border bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold">{initials(s.name)}</div><span className="text-sm font-medium">{s.name}</span></div>
+                  <Checkbox checked={teamSel.superviseurs_ids.includes(s.id)} onCheckedChange={() => toggleTeamMember("superviseurs_ids", s.id)} />
+                </div>
               ))}
             </div>
           </div>
         </div>
-
-        <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
-            {teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length} membre{teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length > 1 ? "s" : ""} sélectionné{teamSel.superviseurs_ids.length + teamSel.hotesses_ids.length > 1 ? "s" : ""}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setTeamDialogOpen(false)}>
-              Annuler
-            </Button>
-            <Button size="sm" className="rounded-xl text-white" style={{ background: p1 }}
-              onClick={handleSaveTeam} disabled={savingTeam}>
-              {savingTeam ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Enregistrement…</> : "Enregistrer l'équipe"}
-            </Button>
-          </div>
+        <div className="flex gap-2 justify-end pt-2 border-t border-slate-100">
+          <Button variant="ghost" onClick={() => setTeamDialogOpen(false)}>Annuler</Button>
+          <Button onClick={handleSaveTeam} disabled={savingTeam} className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium">{savingTeam ? "Enregistrement..." : "Enregistrer"}</Button>
         </div>
       </DialogContent>
     </Dialog>
