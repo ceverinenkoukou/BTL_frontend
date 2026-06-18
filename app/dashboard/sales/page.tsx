@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   ShoppingCart, Download, Package, FileText, Building2, MapPin, Archive, Eye, Trash2, ChevronDown, ChevronUp,
+  AlertTriangle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -52,6 +53,7 @@ interface GainGoodieReport {
   id: string;
   goodie_nom: string;
   site_nom: string;
+  hotesse_nom?: string | null;
   produit_nom: string | null;
   quantite_produit: number;
   nom_client: string | null;
@@ -97,6 +99,21 @@ function VenteTypeBadge({ type }: { type: Vente["type_vente"] }) {
 const fmt = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
 
+const getSaleRevenueAmount = (sale: VenteEnrichie): number | null => {
+  if (sale.type_vente !== "NORMAL") return 0;
+  if (sale.prix_total === null || sale.prix_total === undefined) return null;
+  const amount = Number(sale.prix_total);
+  return Number.isFinite(amount) ? amount : null;
+};
+
+const sumSaleRevenue = (items: VenteEnrichie[]) =>
+  items.reduce((sum, sale) => sum + (getSaleRevenueAmount(sale) ?? 0), 0);
+
+const formatSaleTotal = (sale: VenteEnrichie) => {
+  const amount = getSaleRevenueAmount(sale);
+  return amount === null ? "Prix manquant" : fmt(amount);
+};
+
 export default function SalesPage() {
   const { user } = useAuth();
   const [sales, setSales] = useState<VenteEnrichie[]>([]);
@@ -137,9 +154,10 @@ export default function SalesPage() {
 
   const stats = {
     total: filtered.length,
-    revenue: filtered.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0),
+    revenue: sumSaleRevenue(filtered),
     unites: filtered.reduce((sum, s) => sum + s.quantite, 0),
   };
+  const missingPriceCount = filtered.filter(s => getSaleRevenueAmount(s) === null).length;
 
   const handleExport = () => {
     const data = filtered.map(s => ({
@@ -153,7 +171,7 @@ export default function SalesPage() {
       Hôtesse: s.hotesse_nom,
       Conditionnement: s.conditionnement_display,
       Quantité: s.quantite,
-      Total: s.prix_total ?? 0,
+      Total: getSaleRevenueAmount(s) ?? "Prix manquant",
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -173,7 +191,7 @@ export default function SalesPage() {
     return [...map.values()].map(cg => ({
       name: cg.name,
       campaigns: [...cg.campMap.values()],
-      totalRevenue: [...cg.campMap.values()].flatMap(c => c.sales).reduce((s, v) => s + Number(v.prix_total ?? 0), 0),
+      totalRevenue: sumSaleRevenue([...cg.campMap.values()].flatMap(c => c.sales)),
       totalSales: [...cg.campMap.values()].flatMap(c => c.sales).length,
     }));
   }, [filtered]);
@@ -235,6 +253,25 @@ export default function SalesPage() {
     type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string; promo: string; qRequise: number; qOfferte: number };
     const OFFER_WINDOW = 10 * 60 * 1000;
     const isPlaceholder = (c: string) => c === "Client";
+    const mergeGoodieLabel = (current: string, addition: string) => {
+      if (!addition || addition === "-") return current || "-";
+      if (!current || current === "-") return addition;
+      const parts = new Set(current.split(", ").filter(Boolean));
+      addition.split(", ").filter(Boolean).forEach(part => parts.add(part));
+      return [...parts].join(", ");
+    };
+    const findTriggeringSale = (
+      saleTime: number,
+      hotesse: string | undefined,
+      site: string,
+      client: string,
+    ) => [...tMap.entries()].filter(([, row]) =>
+      row.vendu > 0 &&
+      row.site === site &&
+      row.hotesse === (hotesse || row.hotesse) &&
+      (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
+      Math.abs(row.time - saleTime) <= OFFER_WINDOW
+    ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
     const goodieLookup = new Map<string, string[]>();
     gainGoodies.forEach(gain => {
       const mb = Math.floor(new Date(gain.created_at).getTime() / 60000);
@@ -252,10 +289,7 @@ export default function SalesPage() {
       let key = `${mb}__${s.hotesse_nom}__${s.site_nom}__${client}__${s.produit_nom}`;
       const goodies = goodieLookup.get(`${mb}__${s.site_nom}__${client}__${s.produit_nom}`) ?? goodieLookup.get(`${mb}__${s.site_nom}__${client}__`);
       if (s.type_vente !== "NORMAL") {
-        const match = [...tMap.entries()].filter(([, row]) =>
-          row.vendu > 0 && row.hotesse === (s.hotesse_nom || "Non renseignée") && row.site === s.site_nom && row.produit === s.produit_nom &&
-          (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) && Math.abs(row.time - saleTime) <= OFFER_WINDOW
-        ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
+        const match = findTriggeringSale(saleTime, s.hotesse_nom || "Non renseignée", s.site_nom, client);
         if (match) key = match[0];
       }
       if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-", promo: "-", qRequise: 0, qOfferte: 0 });
@@ -269,8 +303,29 @@ export default function SalesPage() {
       const mb = Math.floor(date.getTime() / 60000);
       const client = normalizeClientName(gain.nom_client);
       const product = gain.produit_nom || "Lot";
-      const hasSale = [...tMap.values()].some(row => row.site === gain.site_nom && row.client === client && row.produit === product && Math.floor(row.time / 60000) === mb);
-      if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom, promo: gain.promotion_nom || "-", qRequise: gain.promotion_quantite_requise || 0, qOfferte: gain.promotion_quantite_offerte || 0 });
+      const hotesse = gain.hotesse_nom || "Non renseignée";
+      const match = findTriggeringSale(date.getTime(), gain.hotesse_nom || undefined, gain.site_nom, client);
+      const alreadyCountedByFreeSale = reportSales.some(s =>
+        s.type_vente === "GRATUIT" &&
+        s.site_nom === gain.site_nom &&
+        (!gain.produit_nom || s.produit_nom === gain.produit_nom) &&
+        (normalizeClientName(s.nom_client) === client || isPlaceholder(normalizeClientName(s.nom_client)) || isPlaceholder(client)) &&
+        Math.abs(new Date(s.created_at).getTime() - date.getTime()) <= OFFER_WINDOW
+      );
+      if (match) {
+        const row = match[1];
+        if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
+        if (!alreadyCountedByFreeSale) row.offert += gain.quantite_produit || 0;
+        row.goodie = mergeGoodieLabel(row.goodie, gain.goodie_nom);
+      } else {
+        const hasSale = [...tMap.values()].some(row =>
+          row.site === gain.site_nom &&
+          (!gain.hotesse_nom || row.hotesse === gain.hotesse_nom) &&
+          (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
+          Math.abs(row.time - date.getTime()) <= OFFER_WINDOW
+        );
+        if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse, site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+      }
     });
     // Goodie section 2 : rebuild from gainGoodies directly (source of truth)
     const goodiesBySite2 = new Map<string, { goodieNom: string; qty: number; promo: string; qReq: number; qOff: number }[]>();
@@ -588,6 +643,20 @@ export default function SalesPage() {
             </button>
           </div>
 
+          {missingPriceCount > 0 && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {missingPriceCount} vente{missingPriceCount > 1 ? "s" : ""} normale{missingPriceCount > 1 ? "s" : ""} sans prix configuré.
+                </p>
+                <p className="text-xs text-amber-800">
+                  Renseigne un prix indicatif produit ou un prix par site pour les inclure dans le chiffre d'affaires.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Company sections */}
           {loading ? (
             <div className="space-y-4">
@@ -629,7 +698,7 @@ export default function SalesPage() {
                   </div>
                   <div className="divide-y divide-slate-50">
                     {compCamps.map(({ name: campName, sales: campSales }) => {
-                      const campRevenue = campSales.reduce((sum, s) => sum + Number(s.prix_total ?? 0), 0);
+                      const campRevenue = sumSaleRevenue(campSales);
                       return (
                         <div key={campName} className="p-4">
                           <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
@@ -678,8 +747,11 @@ export default function SalesPage() {
                                     </td>
                                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{sale.hotesse_nom}</td>
                                     <td className="px-3 py-2.5 text-right font-medium">{sale.quantite}</td>
-                                    <td className="px-3 py-2.5 text-right font-bold text-emerald-700 text-xs">
-                                      {fmt(Number(sale.prix_total ?? 0))}
+                                    <td className={cn(
+                                      "px-3 py-2.5 text-right font-bold text-xs",
+                                      getSaleRevenueAmount(sale) === null ? "text-amber-700" : "text-emerald-700"
+                                    )}>
+                                      {formatSaleTotal(sale)}
                                     </td>
                                   </tr>
                                 ))}
@@ -839,6 +911,20 @@ export default function SalesPage() {
             </Select>
           </div>
 
+          {missingPriceCount > 0 && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {missingPriceCount} vente{missingPriceCount > 1 ? "s" : ""} normale{missingPriceCount > 1 ? "s" : ""} sans prix configuré.
+                </p>
+                <p className="text-xs text-amber-800">
+                  Le chiffre d'affaires ignore ces lignes tant qu'un prix produit ou site n'est pas renseigné.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
@@ -885,7 +971,12 @@ export default function SalesPage() {
                     </div>
                     <div className="flex items-end justify-between">
                       <div>
-                        <p className="text-xl font-bold text-foreground">{fmt(Number(sale.prix_total ?? 0))}</p>
+                        <p className={cn(
+                          "text-xl font-bold",
+                          getSaleRevenueAmount(sale) === null ? "text-amber-700" : "text-foreground"
+                        )}>
+                          {formatSaleTotal(sale)}
+                        </p>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           <MapPin className="w-3 h-3" />{sale.site_nom}
                         </p>
