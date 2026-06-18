@@ -31,116 +31,12 @@ import {
   Menu,
   X,
   ChevronDown,
-  ChevronUp,
-  Archive,
-  Eye,
-  Trash2,
-  Download,
   Tag,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import type { CampagneList } from "@/lib/types/backend";
 
-interface ArchivedReport {
-  id: string;
-  entrepriseNom: string;
-  generatedAt: string;
-  label: string;
-  htmlContent: string;
-}
-
-const ARCHIVE_KEY = "btl_rapport_archives";
-
-function loadArchives(): ArchivedReport[] {
-  if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) ?? "[]"); }
-  catch { return []; }
-}
-
-function deleteArchive(id: string) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(ARCHIVE_KEY, JSON.stringify(loadArchives().filter(a => a.id !== id)));
-}
-
-function ArchivePanel() {
-  const [open, setOpen] = useState(false);
-  const [archives, setArchives] = useState<ArchivedReport[]>([]);
-
-  useEffect(() => {
-    if (open) setArchives(loadArchives());
-  }, [open]);
-
-  return (
-    <div className="mt-1">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-      >
-        <Archive className="w-5 h-5 shrink-0" />
-        <span className="flex-1 text-left">Rapports archivés</span>
-        {archives.length > 0 && !open && (
-          <span className="text-[10px] font-bold bg-violet-500 text-white rounded-full px-1.5 py-0.5 leading-none">{archives.length}</span>
-        )}
-        {open ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
-      </button>
-
-      {open && (
-        <div className="mt-1 ml-3 pl-3 border-l border-sidebar-border space-y-0.5 max-h-72 overflow-y-auto">
-          {archives.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-sidebar-foreground/40 italic">Aucun rapport archivé.</p>
-          ) : (
-            archives.map(archive => (
-              <div key={archive.id} className="group flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-sidebar-accent/60 transition-colors">
-                <FileText className="w-3.5 h-3.5 text-violet-400 shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-sidebar-foreground truncate">{archive.entrepriseNom}</p>
-                  <p className="text-[11px] text-violet-300 truncate">{archive.label}</p>
-                </div>
-                <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    title="Consulter"
-                    onClick={() => {
-                      const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
-                      const url = URL.createObjectURL(blob);
-                      window.open(url, "_blank");
-                      setTimeout(() => URL.revokeObjectURL(url), 15000);
-                    }}
-                    className="p-1 rounded hover:bg-violet-500/20 text-violet-300 hover:text-violet-200 transition-colors"
-                  >
-                    <Eye className="w-3 h-3" />
-                  </button>
-                  <button
-                    title="Télécharger"
-                    onClick={() => {
-                      const blob = new Blob([archive.htmlContent], { type: "text/html;charset=utf-8" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `Rapport_${archive.entrepriseNom.replace(/\s+/g, "_")}_${archive.generatedAt.slice(0, 10)}.html`;
-                      a.click();
-                      setTimeout(() => URL.revokeObjectURL(url), 5000);
-                    }}
-                    className="p-1 rounded hover:bg-slate-500/20 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
-                  >
-                    <Download className="w-3 h-3" />
-                  </button>
-                  <button
-                    title="Supprimer"
-                    onClick={() => { deleteArchive(archive.id); setArchives(loadArchives()); }}
-                    className="p-1 rounded hover:bg-red-500/20 text-sidebar-foreground/30 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface NavItem {
   href: string;
@@ -161,7 +57,6 @@ const navItems: NavItem[] = [
   { href: "/dashboard/sites", label: "Sites", icon: <MapPin className="w-5 h-5" />, roles: ["Administrateur"] },
   { href: "/dashboard/objectifs", label: "Objectifs", icon: <Target className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/rapports", label: "Rapports journaliers", icon: <FileText className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
-  { href: "__archive_panel__", label: "__archive_panel__", icon: null, roles: ["Administrateur"] },
 ];
 
 const adminNavItems: NavItem[] = [
@@ -212,7 +107,6 @@ export function DashboardSidebar() {
           Menu principal
         </p>
         {navItems.filter(item => !item.roles || item.roles.includes(userRole)).map((item) => {
-          if (item.href === "__archive_panel__") return <ArchivePanel key="archive-panel" />;
           return (
             <Link
               key={item.href}
