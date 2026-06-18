@@ -216,7 +216,15 @@ export default function SalesPage() {
 
     const totalVendu = reportSales.reduce((sum, s) => sum + (s.type_vente === "NORMAL" ? s.quantite : 0), 0);
     const totalOfferts = reportSales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0);
-    const totalGoodies = [...goodiesTotalsBySite.values()].reduce((sum, c) => sum + c, 0);
+    const totalGoodies = gainGoodies.length;
+    const periodGoodiesSiteMap = new Map<string, Map<string, number>>();
+    gainGoodies.forEach(gain => {
+      if (!periodGoodiesSiteMap.has(gain.site_nom)) {
+        periodGoodiesSiteMap.set(gain.site_nom, new Map<string, number>());
+      }
+      const siteGoodies = periodGoodiesSiteMap.get(gain.site_nom)!;
+      siteGoodies.set(gain.goodie_nom, (siteGoodies.get(gain.goodie_nom) ?? 0) + 1);
+    });
 
     const hostMap = new Map<string, { hotesse: string; site: string; actes: number; vendu: number; offert: number; goodies: number }>();
     reportSales.forEach(s => {
@@ -226,9 +234,23 @@ export default function SalesPage() {
       if (s.type_vente === "NORMAL") { row.actes += 1; row.vendu += s.quantite; }
       else row.offert += s.quantite;
     });
-    goodiesTotalsBySite.forEach((count, siteNom) => {
-      const hs = [...hostMap.values()].filter(r => r.site === siteNom);
-      if (hs.length === 1) hs[0].goodies = count;
+    gainGoodies.forEach(gain => {
+      const hotesse = gain.hotesse_nom || "";
+      const exactKey = `${hotesse}__${gain.site_nom}`;
+      if (hotesse && hostMap.has(exactKey)) {
+        hostMap.get(exactKey)!.goodies += 1;
+        return;
+      }
+      const siteRows = [...hostMap.values()].filter(r => r.site === gain.site_nom);
+      if (siteRows.length === 1) {
+        siteRows[0].goodies += 1;
+        return;
+      }
+      const fallbackKey = `${hotesse || "Non renseignée"}__${gain.site_nom}`;
+      if (!hostMap.has(fallbackKey)) {
+        hostMap.set(fallbackKey, { hotesse: hotesse || "Non renseignée", site: gain.site_nom, actes: 0, vendu: 0, offert: 0, goodies: 0 });
+      }
+      hostMap.get(fallbackKey)!.goodies += 1;
     });
     const hostesseRows = [...hostMap.values()]
       .sort((a, b) => b.vendu - a.vendu || b.offert - a.offert || a.hotesse.localeCompare(b.hotesse))
@@ -239,10 +261,10 @@ export default function SalesPage() {
       </tr>`).join("");
 
     let goodiesRowsHtml = "";
-    if (goodiesSiteMap.size === 0) {
+    if (periodGoodiesSiteMap.size === 0) {
       goodiesRowsHtml = `<tr><td colspan="4" class="muted-row">Aucun détail de goodies enregistré pour cette période.</td></tr>`;
     } else {
-      goodiesRowsHtml = [...goodiesSiteMap.entries()].map(([siteNom, dist]) => {
+      goodiesRowsHtml = [...periodGoodiesSiteMap.entries()].map(([siteNom, dist]) => {
         const itemsHtml = [...dist.entries()].map(([gNom, qty]) => `<div class="goodie-detail-item"><span class="goodie-label">${esc(gNom)}</span><span class="goodie-qty">x${qty}</span></div>`).join("");
         const total = [...dist.values()].reduce((a, b) => a + b, 0);
         const hotesses = [...hostMap.values()].filter(r => r.site === siteNom).map(r => r.hotesse).filter((v, i, a) => a.indexOf(v) === i).join(", ");
@@ -324,7 +346,20 @@ export default function SalesPage() {
           (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
           Math.abs(row.time - date.getTime()) <= OFFER_WINDOW
         );
-        if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse, site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+        if (!hasSale) tMap.set(`goodie__${gain.id}`, {
+          time: date.getTime(),
+          heure: formatTime(gain.created_at),
+          hotesse,
+          site: gain.site_nom,
+          client,
+          produit: product,
+          vendu: 0,
+          offert: gain.quantite_produit || 0,
+          goodie: gain.goodie_nom,
+          promo: gain.promotion_nom || "-",
+          qRequise: gain.promotion_quantite_requise || 0,
+          qOfferte: gain.promotion_quantite_offerte || 0,
+        });
       }
     });
     // Goodie section 2 : rebuild from gainGoodies directly (source of truth)
