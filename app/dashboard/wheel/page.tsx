@@ -174,23 +174,12 @@ export default function WheelPage() {
       const wheelPrizes: WheelPrize[] = activeGoodies.map(g => ({
         id: g.id,
         name: g.nom,
-        probability: 100 / (activeGoodies.length + 1),  // Distribution équitable
+        probability: 100 / activeGoodies.length,
         quantity_available: g.quantite_restante,
         quantity_won: g.quantite_distribuee || 0,
         is_active: true,
         isGoodie: true,
       }));
-      
-      // Ajouter l'option "Réessayez"
-      wheelPrizes.push({
-        id: "retry",
-        name: "Réessayez",
-        probability: 100 / (activeGoodies.length + 1),
-        quantity_available: 9999,
-        quantity_won: 0,
-        is_active: true,
-        isGoodie: false,
-      });
       
       setPrizes(wheelPrizes);
     } catch {
@@ -600,17 +589,14 @@ export default function WheelPage() {
           <DialogHeader>
             <DialogTitle className="text-2xl flex items-center justify-center gap-2">
               <Trophy className="w-8 h-8 text-orange-500" />
-              {wonPrize?.name === "Réessayez" ? "Pas de chance !" : "Félicitations !"}
+              Félicitations !
             </DialogTitle>
             <DialogDescription>
-              {wonPrize?.name === "Réessayez"
-                ? "Vous pouvez retenter votre chance !"
-                : `Vous avez gagné : ${wonPrize?.name}`}
+              {`Vous avez gagné : ${wonPrize?.name}`}
             </DialogDescription>
           </DialogHeader>
 
-          {wonPrize?.name !== "Réessayez" && (
-            <div className="space-y-4 mt-4">
+          <div className="space-y-4 mt-4">
               <div className={cn(
                 "mx-auto w-24 h-24 rounded-full flex items-center justify-center",
                 "bg-gradient-to-br from-orange-500 to-slate-900 shadow-lg shadow-orange-100"
@@ -652,20 +638,10 @@ export default function WheelPage() {
                   }
                 </Button>
               </div>
+              <Button variant="outline" className="w-full" onClick={() => { setShowWinDialog(false); setWonPrize(null); spinWheel(); }}>
+                <RotateCcw className="w-4 h-4 mr-2" />Relancer la roue
+              </Button>
             </div>
-          )}
-
-          {wonPrize?.name === "Réessayez" && (
-            <Button
-              className="mt-4"
-              onClick={() => {
-                setShowWinDialog(false);
-                spinWheel();
-              }}
-            >
-              Réessayer
-            </Button>
-          )}
         </DialogContent>
       </Dialog>
     </div>

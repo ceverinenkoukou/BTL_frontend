@@ -312,10 +312,7 @@ export default function CampaignDetailPage() {
         .map(g => ({ id: g.id, name: g.nom }));
     }
     if (activeGoodies.length === 0) return [];
-    return [
-      ...activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true })),
-      { id: "retry", name: "Réessayez", isGoodie: false },
-    ];
+    return activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true }));
   }, [goodies, siteInfo]);
 
   const drawWheelImmediate = (rot: number) => {
@@ -1685,14 +1682,14 @@ export default function CampaignDetailPage() {
       {/* Modale roue pour les promotions */}
       {activeWheelPromoId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-white shadow-2xl">
-            <div className="flex flex-col items-center gap-3">
-              <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /><span className="text-lg font-bold text-amber-700">Roue de fortune</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
-              <div className="rounded-full p-3 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_44px_rgba(15,23,42,0.16)] border border-slate-100">
-                <canvas ref={wheelCanvasRef} width={300} height={300} className="block max-w-full rounded-full" />
+          <div className="bg-white rounded-2xl max-w-md w-full p-4 space-y-3 border border-white shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /><span className="text-base font-bold text-amber-700">Roue de fortune</span></div><div className="flex items-center gap-2 px-2 py-1 rounded-full border text-xs font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
+              <div className="rounded-full p-2 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_44px_rgba(15,23,42,0.16)] border border-slate-100">
+                <canvas ref={wheelCanvasRef} width={240} height={240} className="block max-w-full rounded-full" />
               </div>
-              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", !wonPrize.isGoodie ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-amber-50 border-amber-200 text-amber-700")}>{!wonPrize.isGoodie ? "😔 Réessayez" : `🎁 ${wonPrize.name}`}</div>)}
-              {getWheelPrizes().length > 0 && (
+              {wonPrize && (<div className="w-full rounded-2xl p-3 text-center font-bold text-base border bg-amber-50 border-amber-200 text-amber-700">🎁 {wonPrize.name}</div>)}
+              {!wonPrize && getWheelPrizes().length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 w-full pt-2 border-t border-slate-100">
                   {getWheelPrizes().map((prize, i) => (<div key={prize.id} className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-3 h-3 rounded-full shrink-0" style={{ background: WHEEL_COLORS[i % WHEEL_COLORS.length] }} />{prize.name}</div>))}
                 </div>
@@ -1701,13 +1698,14 @@ export default function CampaignDetailPage() {
                 <Button size="lg" className="w-full text-white" style={{ background: brandGrad }} onClick={spinWheel} disabled={wheelSpinning}>
                   {wheelSpinning ? <><RotateCcw className="w-5 h-5 mr-2 animate-spin" />En cours…</> : <><Sparkles className="w-5 h-5 mr-2" />Lancer la roue !</>}
                 </Button>
-              ) : !wonPrize.isGoodie ? (
-                <div className="flex gap-3 w-full">
-                  <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Réessayer</Button>
-                  <Button variant="outline" className="flex-1" onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); }}>Fermer</Button>
-                </div>
               ) : (
-                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setActiveWheelPromoId(null))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
+                <div className="flex flex-col gap-2 w-full">
+                  <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setActiveWheelPromoId(null))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
+                  <div className="flex gap-2 w-full">
+                    <Button variant="outline" className="flex-1" onClick={() => spinWheel()}><RotateCcw className="w-4 h-4 mr-2" />Relancer</Button>
+                    <Button variant="outline" className="flex-1" onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); }}>Fermer</Button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -1717,14 +1715,14 @@ export default function CampaignDetailPage() {
       {/* Modale roue pour les goodies */}
       {wheelOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-white shadow-2xl">
-            <div className="flex flex-col items-center gap-3">
-              <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Gift className="w-5 h-5 text-emerald-600" /><span className="text-lg font-bold text-emerald-700">Roue des goodies</span></div><div className="flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
-              <div className="rounded-full p-3 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_44px_rgba(15,23,42,0.16)] border border-slate-100">
-                <canvas ref={wheelCanvasRef} width={300} height={300} className="block max-w-full rounded-full" />
+          <div className="bg-white rounded-2xl max-w-md w-full p-4 space-y-3 border border-white shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center justify-between w-full"><div className="flex items-center gap-2"><Gift className="w-5 h-5 text-emerald-600" /><span className="text-base font-bold text-emerald-700">Roue des goodies</span></div><div className="flex items-center gap-2 px-2 py-1 rounded-full border text-xs font-semibold" style={{ background: hex(p1, 0.1), borderColor: hex(p1, 0.3), color: p1 }}>👤 {wheelClientName}</div></div>
+              <div className="rounded-full p-2 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_44px_rgba(15,23,42,0.16)] border border-slate-100">
+                <canvas ref={wheelCanvasRef} width={240} height={240} className="block max-w-full rounded-full" />
               </div>
-              {wonPrize && (<div className={cn("w-full rounded-2xl p-3.5 text-center font-bold text-base border", !wonPrize.isGoodie ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-emerald-50 border-emerald-200 text-emerald-700")}>{!wonPrize.isGoodie ? "😔 Réessayez" : `🎁 ${wonPrize.name}`}</div>)}
-              {getWheelPrizes().length > 0 && (
+              {wonPrize && (<div className="w-full rounded-2xl p-3 text-center font-bold text-base border bg-emerald-50 border-emerald-200 text-emerald-700">🎁 {wonPrize.name}</div>)}
+              {!wonPrize && getWheelPrizes().length > 0 && (
                 <div className="grid grid-cols-2 gap-1.5 w-full pt-2 border-t border-slate-100">
                   {getWheelPrizes().map((prize, i) => (<div key={prize.id} className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-3 h-3 rounded-full shrink-0" style={{ background: WHEEL_COLORS[i % WHEEL_COLORS.length] }} />{prize.name}</div>))}
                 </div>
@@ -1733,13 +1731,14 @@ export default function CampaignDetailPage() {
                 <Button size="lg" className="w-full text-white" style={{ background: brandGrad }} onClick={spinWheel} disabled={wheelSpinning}>
                   {wheelSpinning ? <><RotateCcw className="w-5 h-5 mr-2 animate-spin" />En cours…</> : <><Sparkles className="w-5 h-5 mr-2" />Lancer la roue !</>}
                 </Button>
-              ) : !wonPrize.isGoodie ? (
-                <div className="flex gap-3 w-full">
-                  <Button variant="outline" className="flex-1" onClick={() => { setWonPrize(null); wheelRotationRef.current = 0; setTimeout(() => drawWheelImmediate(0), 20); }}><RotateCcw className="w-4 h-4 mr-2" />Réessayer</Button>
-                  <Button variant="outline" className="flex-1" onClick={() => { setWheelOpen(false); setWonPrize(null); }}>Fermer</Button>
-                </div>
               ) : (
-                <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setWheelOpen(false))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
+                <div className="flex flex-col gap-2 w-full">
+                  <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setWheelOpen(false))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
+                  <div className="flex gap-2 w-full">
+                    <Button variant="outline" className="flex-1" onClick={() => spinWheel()}><RotateCcw className="w-4 h-4 mr-2" />Relancer</Button>
+                    <Button variant="outline" className="flex-1" onClick={() => { setWheelOpen(false); setWonPrize(null); }}>Fermer</Button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
