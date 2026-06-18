@@ -261,25 +261,13 @@ export default function SalesPage() {
       hotesse: string | undefined,
       site: string,
       client: string,
-    ) => {
-      const matchesTriggerContext = (row: TRow) =>
-        row.vendu > 0 &&
-        row.site === site &&
-        row.hotesse === (hotesse || row.hotesse) &&
-        (row.client === client || isPlaceholder(row.client) || isPlaceholder(client));
-
-      const closeMatch = [...tMap.entries()].filter(([, row]) =>
-        matchesTriggerContext(row) && Math.abs(row.time - saleTime) <= OFFER_WINDOW
-      ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
-
-      if (closeMatch) return closeMatch;
-
-      return [...tMap.entries()].filter(([, row]) =>
-        matchesTriggerContext(row) &&
-        row.time <= saleTime &&
-        new Date(row.time).toDateString() === new Date(saleTime).toDateString()
-      ).sort(([, a], [, b]) => b.time - a.time)[0];
-    };
+    ) => [...tMap.entries()].filter(([, row]) =>
+      row.vendu > 0 &&
+      row.site === site &&
+      row.hotesse === (hotesse || row.hotesse) &&
+      (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
+      Math.abs(row.time - saleTime) <= OFFER_WINDOW
+    ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
     const goodieLookup = new Map<string, string[]>();
     gainGoodies.forEach(gain => {
       const mb = Math.floor(new Date(gain.created_at).getTime() / 60000);
