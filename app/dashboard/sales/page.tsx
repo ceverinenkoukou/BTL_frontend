@@ -249,6 +249,37 @@ export default function SalesPage() {
     type TRow = { time: number; heure: string; hotesse: string; site: string; client: string; produit: string; vendu: number; offert: number; goodie: string };
     const OFFER_WINDOW = 10 * 60 * 1000;
     const isPlaceholder = (c: string) => c === "Client";
+    const mergeGoodieLabel = (current: string, addition: string) => {
+      if (!addition || addition === "-") return current || "-";
+      if (!current || current === "-") return addition;
+      const parts = new Set(current.split(", ").filter(Boolean));
+      addition.split(", ").filter(Boolean).forEach(part => parts.add(part));
+      return [...parts].join(", ");
+    };
+    const findTriggeringSale = (
+      saleTime: number,
+      hotesse: string | undefined,
+      site: string,
+      client: string,
+    ) => {
+      const matchesTriggerContext = (row: TRow) =>
+        row.vendu > 0 &&
+        row.site === site &&
+        row.hotesse === (hotesse || row.hotesse) &&
+        (row.client === client || isPlaceholder(row.client) || isPlaceholder(client));
+
+      const closeMatch = [...tMap.entries()].filter(([, row]) =>
+        matchesTriggerContext(row) && Math.abs(row.time - saleTime) <= OFFER_WINDOW
+      ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
+
+      if (closeMatch) return closeMatch;
+
+      return [...tMap.entries()].filter(([, row]) =>
+        matchesTriggerContext(row) &&
+        row.time <= saleTime &&
+        new Date(row.time).toDateString() === new Date(saleTime).toDateString()
+      ).sort(([, a], [, b]) => b.time - a.time)[0];
+    };
     const goodieLookup = new Map<string, string[]>();
     gainGoodies.forEach(gain => {
       const mb = Math.floor(new Date(gain.created_at).getTime() / 60000);
@@ -266,10 +297,7 @@ export default function SalesPage() {
       let key = `${mb}__${s.hotesse_nom}__${s.site_nom}__${client}__${s.produit_nom}`;
       const goodies = goodieLookup.get(`${mb}__${s.site_nom}__${client}__${s.produit_nom}`) ?? goodieLookup.get(`${mb}__${s.site_nom}__${client}__`);
       if (s.type_vente !== "NORMAL") {
-        const match = [...tMap.entries()].filter(([, row]) =>
-          row.vendu > 0 && row.hotesse === (s.hotesse_nom || "Non renseignée") && row.site === s.site_nom && row.produit === s.produit_nom &&
-          (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) && Math.abs(row.time - saleTime) <= OFFER_WINDOW
-        ).sort(([, a], [, b]) => Math.abs(a.time - saleTime) - Math.abs(b.time - saleTime))[0];
+        const match = findTriggeringSale(saleTime, s.hotesse_nom || "Non renseignée", s.site_nom, client);
         if (match) key = match[0];
       }
       if (!tMap.has(key)) tMap.set(key, { time: saleTime, heure: formatTime(s.created_at), hotesse: s.hotesse_nom || "Non renseignée", site: s.site_nom, client, produit: s.produit_nom, vendu: 0, offert: 0, goodie: goodies?.join(", ") || "-" });
@@ -283,8 +311,27 @@ export default function SalesPage() {
       const mb = Math.floor(date.getTime() / 60000);
       const client = normalizeClientName(gain.nom_client);
       const product = gain.produit_nom || "Lot";
-      const hasSale = [...tMap.values()].some(row => row.site === gain.site_nom && row.client === client && row.produit === product && Math.floor(row.time / 60000) === mb);
-      if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+      const match = findTriggeringSale(date.getTime(), undefined, gain.site_nom, client);
+      const alreadyCountedByFreeSale = reportSales.some(s =>
+        s.type_vente === "GRATUIT" &&
+        s.site_nom === gain.site_nom &&
+        (!gain.produit_nom || s.produit_nom === gain.produit_nom) &&
+        (normalizeClientName(s.nom_client) === client || isPlaceholder(normalizeClientName(s.nom_client)) || isPlaceholder(client)) &&
+        Math.abs(new Date(s.created_at).getTime() - date.getTime()) <= OFFER_WINDOW
+      );
+      if (match) {
+        const row = match[1];
+        if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
+        if (!alreadyCountedByFreeSale) row.offert += gain.quantite_produit || 0;
+        row.goodie = mergeGoodieLabel(row.goodie, gain.goodie_nom);
+      } else {
+        const hasSale = [...tMap.values()].some(row =>
+          row.site === gain.site_nom &&
+          (row.client === client || isPlaceholder(row.client) || isPlaceholder(client)) &&
+          Math.abs(row.time - date.getTime()) <= OFFER_WINDOW
+        );
+        if (!hasSale) tMap.set(`goodie__${gain.id}`, { time: date.getTime(), heure: formatTime(gain.created_at), hotesse: "-", site: gain.site_nom, client, produit: product, vendu: 0, offert: gain.quantite_produit || 0, goodie: gain.goodie_nom });
+      }
     });
     const transactionRowsHtml = tMap.size === 0
       ? `<tr><td colspan="8" class="muted-row">Aucune transaction enregistrée pour cette période.</td></tr>`
