@@ -3,7 +3,7 @@
  * Strategy: Cache-first for static assets, Network-first for API/pages
  */
 
-const CACHE_NAME = "mhedia-btl-v2";
+const CACHE_NAME = "mhedia-btl-v3";
 const OFFLINE_URL = "/offline";
 
 const STATIC_ASSETS = [

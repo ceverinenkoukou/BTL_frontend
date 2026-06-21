@@ -15,18 +15,20 @@ const iconsDir = join(root, "public", "icons");
 if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true });
 
 const SIZES = [72, 96, 128, 144, 152, 192, 384, 512];
-const BG = { r: 16, g: 80, b: 98, alpha: 1 }; // #105062
+// White background so the original logo colors (#066877 teal + #333 dark) are fully visible
+const BG = { r: 255, g: 255, b: 255, alpha: 1 };
 
-const svgPath = join(root, "public", "LOGO-MHEDIA-03.svg"); // White logo — visible on dark background
+// Use LOGO-MHEDIA-01 — original brand colors (teal + dark gray) on white background
+const svgPath = join(root, "public", "LOGO-MHEDIA-01.svg");
 
 async function generate() {
   for (const size of SIZES) {
-    const padding = Math.round(size * 0.15);
+    const padding = Math.round(size * 0.1);
     const inner = size - padding * 2;
 
     // Regular icon
     await sharp(svgPath)
-      .resize(inner, inner, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .resize(inner, inner, { fit: "contain", background: BG })
       .extend({ top: padding, bottom: padding, left: padding, right: padding, background: BG })
       .png()
       .toFile(join(iconsDir, `icon-${size}x${size}.png`));
@@ -36,11 +38,11 @@ async function generate() {
 
   // Maskable (more padding = safe zone ~20%)
   for (const size of [192, 512]) {
-    const padding = Math.round(size * 0.2);
+    const padding = Math.round(size * 0.15);
     const inner = size - padding * 2;
 
     await sharp(svgPath)
-      .resize(inner, inner, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .resize(inner, inner, { fit: "contain", background: BG })
       .extend({ top: padding, bottom: padding, left: padding, right: padding, background: BG })
       .png()
       .toFile(join(iconsDir, `icon-maskable-${size}x${size}.png`));
