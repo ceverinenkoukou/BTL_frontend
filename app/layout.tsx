@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Montserrat, Open_Sans } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from 'sonner'
+import { ServiceWorkerProvider } from '@/components/providers/sw-provider'
 import './globals.css'
 
 const montserrat = Montserrat({
@@ -65,9 +66,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="fr" className={`${montserrat.variable} ${openSans.variable} bg-background`}>
+    <html lang="fr" data-scroll-behavior="smooth" className={`${montserrat.variable} ${openSans.variable} bg-background`}>
       {/* bg-puzzle applique le fond via globals.css avec pseudo-élément ::before */}
       <body className="font-sans antialiased bg-puzzle">
+        <ServiceWorkerProvider />
         {children}
         <Toaster richColors position="top-center" />
         {process.env.NODE_ENV === 'production' && <Analytics />}

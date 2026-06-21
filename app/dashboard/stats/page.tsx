@@ -104,8 +104,9 @@ export default function StatsPage() {
       const totalSales = ventes.length;
       const totalRevenue = ventes.reduce((sum, v) => sum + Number(v.prix_total ?? 0), 0);
       const conversionRate = totalTastings > 0 ? (totalSales / totalTastings) * 100 : 0;
-      const avgRating = tastings.length > 0
-        ? tastings.reduce((sum, t) => sum + t.note_gout, 0) / tastings.length
+      const ratedTastings = tastings.filter(t => t.note_gout !== null);
+      const avgRating = ratedTastings.length > 0
+        ? ratedTastings.reduce((sum, t) => sum + (t.note_gout ?? 0), 0) / ratedTastings.length
         : 0;
 
       setStats({
@@ -138,7 +139,7 @@ export default function StatsPage() {
 
       // Rating distribution (note_gout 1-5)
       const ratingMap: Record<number, number> = {};
-      tastings.forEach(t => { ratingMap[t.note_gout] = (ratingMap[t.note_gout] ?? 0) + 1; });
+      tastings.forEach(t => { if (t.note_gout !== null) { ratingMap[t.note_gout] = (ratingMap[t.note_gout] ?? 0) + 1; } });
       const ratingLabels: Record<number, string> = { 1: "Mauvais", 2: "Bof", 3: "Correct", 4: "Bon", 5: "Excellent" };
       setRatingData([1, 2, 3, 4, 5].map(r => ({ name: ratingLabels[r], value: ratingMap[r] ?? 0 })));
 

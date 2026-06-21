@@ -17,7 +17,7 @@ if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true });
 const SIZES = [72, 96, 128, 144, 152, 192, 384, 512];
 const BG = { r: 16, g: 80, b: 98, alpha: 1 }; // #105062
 
-const svgPath = join(root, "public", "LOGO-MHEDIA-01.svg");
+const svgPath = join(root, "public", "LOGO-MHEDIA-03.svg"); // White logo — visible on dark background
 
 async function generate() {
   for (const size of SIZES) {

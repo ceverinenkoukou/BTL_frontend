@@ -122,6 +122,10 @@ export interface CampagneList {
   description: string | null;
   objectif_degustations: number | null;
   objectif_ventes: number | null;
+  note_gout_active: boolean;
+  note_gout_max: 5 | 10;
+  note_ambiance_active: boolean;
+  note_ambiance_max: 5 | 10;
   nb_sites: number;
   nb_hotesses: number;
   nb_superviseurs: number;
@@ -227,6 +231,10 @@ export interface CreateCampagnePayload {
   description?: string;
   type_campagne?: TypeCampagne;
   type_recompense?: TypeRecompense;
+  note_gout_active?: boolean;
+  note_gout_max?: 5 | 10;
+  note_ambiance_active?: boolean;
+  note_ambiance_max?: 5 | 10;
   objectif_degustations?: number | null;
   objectif_ventes?: number | null;
 }
@@ -300,7 +308,8 @@ export interface Degustation {
   nom_client: string | null;
   tranche_age: TrancheAge;
   tranche_age_display: string;
-  note_gout: number;
+  note_gout: number | null;
+  note_ambiance: number | null;
   intention_achat: IntentionAchat;
   intention_achat_display: string;
   a_achete: boolean;
@@ -313,7 +322,8 @@ export interface CreateDegustationPayload {
   produit: string;
   nom_client?: string;
   tranche_age: TrancheAge;
-  note_gout: number;
+  note_gout?: number | null;
+  note_ambiance?: number | null;
   intention_achat: IntentionAchat;
   a_achete: boolean;
   conditionnement?: TypeConditionnement;
@@ -328,6 +338,10 @@ export interface MonSiteInfo {
   entreprise_nom: string;
   type_recompense: TypeRecompense;
   type_recompense_display: string;
+  note_gout_active: boolean;
+  note_gout_max: 5 | 10;
+  note_ambiance_active: boolean;
+  note_ambiance_max: 5 | 10;
   auto_select_produit: boolean;
   produits: { id: string; nom: string; prix_indicatif: string | null }[];
   goodies_disponibles: { id: string; nom: string; quantite_restante: number }[];

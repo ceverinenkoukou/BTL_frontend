@@ -193,8 +193,9 @@ export default function CompanyCampaignDetailPage() {
     const totalVentes = ventes.length;
     const totalRevenue = ventes.reduce((s, v) => s + Number(v.prix_total ?? 0), 0);
     const conversionRate = totalTastings > 0 ? Math.round((totalVentes / totalTastings) * 100) : 0;
-    const avgRating = totalTastings > 0
-      ? Math.round((tastings.reduce((s, t) => s + t.note_gout, 0) / totalTastings) * 10) / 10
+    const ratedTastings = tastings.filter(t => t.note_gout !== null);
+    const avgRating = ratedTastings.length > 0
+      ? Math.round((ratedTastings.reduce((s, t) => s + (t.note_gout ?? 0), 0) / ratedTastings.length) * 10) / 10
       : 0;
     const goodiesDistribues = rapport?.totaux?.goodies_distribues ?? 0;
     const totalGoodiesAlloues = rapport?.sites?.reduce((sum, site) =>

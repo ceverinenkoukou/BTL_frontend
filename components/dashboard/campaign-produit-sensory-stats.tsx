@@ -29,7 +29,7 @@ export function computeProduitSensoryStats(tastings: Degustation[]): ProduitSens
       });
     }
     const entry = map.get(key)!;
-    entry.notes.push(t.note_gout);
+    if (t.note_gout !== null) entry.notes.push(t.note_gout);
     if (t.intention_achat in entry.intentions) {
       entry.intentions[t.intention_achat as IntentionAchat]++;
     }

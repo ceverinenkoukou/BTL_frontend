@@ -494,7 +494,7 @@ export default function SalesPage() {
     <h2 class="section-title">3. Journal des transactions</h2>
     <table><thead><tr>
       <th>Heure</th><th>Hôtesse</th><th>Site</th><th>Client</th>
-      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th><th>Offre promotionnelle</th>
+      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th>
     </tr></thead><tbody>${transactionRowsHtml}</tbody></table>
   </div>
   <div class="foot">Rapport généré automatiquement depuis MHedia BTL</div>

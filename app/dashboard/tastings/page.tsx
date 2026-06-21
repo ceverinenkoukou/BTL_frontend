@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type {
   Degustation, CreateDegustationPayload, SiteList, MonSiteInfo,
   TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion,
@@ -48,7 +48,7 @@ const INTENT_OPTIONS: { value: IntentionAchat; label: string; color: string }[] 
   { value: "ELEVEE",  label: "Élevée",  color: "bg-green-100 text-green-700 border-green-200" },
 ];
 
-const RATING_ICONS: { rating: number; icon: React.ReactNode; label: string }[] = [
+const RATING_ICONS_5: { rating: number; icon: React.ReactNode; label: string }[] = [
   { rating: 1, icon: <Frown className="w-8 h-8" />,  label: "Mauvais"  },
   { rating: 2, icon: <Meh className="w-8 h-8" />,    label: "Bof"      },
   { rating: 3, icon: <Smile className="w-8 h-8" />,  label: "Correct"  },
@@ -61,6 +61,7 @@ const EMPTY_FORM = {
   produit: "",
   tranche_age: "" as TrancheAge | "",
   note_gout: 0,
+  note_ambiance: 0,
   intention_achat: "" as IntentionAchat | "",
   a_achete: false,
   conditionnement: "UNITE" as TypeConditionnement,
@@ -99,6 +100,7 @@ export default function TastingsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTasting, setSelectedTasting] = useState<Degustation | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const activeSiteRef = useRef<string>("");
 
   const isHostess = user?.role === "Hotesse";
   const isAdmin = user?.role === "Administrateur";
@@ -121,7 +123,30 @@ export default function TastingsPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  const refreshSiteInfo = useCallback(async () => {
+    const siteId = activeSiteRef.current;
+    if (!siteId) return;
+    try {
+      invalidateCache("/degustations/mon-site");
+      const { data } = await api.get<MonSiteInfo>(`/degustations/mon-site/?site_id=${siteId}`);
+      setSiteInfo(data);
+    } catch { /* silencieux */ }
+  }, []);
+
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) refreshSiteInfo(); };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(refreshSiteInfo, 60_000);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(timer);
+    };
+  }, [refreshSiteInfo]);
+
   const handleSiteChange = async (siteId: string) => {
+    activeSiteRef.current = siteId;
     setForm(f => ({ ...f, site: siteId, produit: "" }));
     setSiteInfo(null);
     if (!siteId) return;
@@ -141,7 +166,9 @@ export default function TastingsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.site || !form.produit || !form.tranche_age || !form.note_gout || !form.intention_achat) {
+    const needsNote     = siteInfo?.note_gout_active;
+  const needsAmbiance = siteInfo?.note_ambiance_active;
+  if (!form.site || !form.produit || !form.tranche_age || (needsNote && !form.note_gout) || (needsAmbiance && !form.note_ambiance) || !form.intention_achat) {
       toast.error("Veuillez remplir tous les champs obligatoires.");
       return;
     }
@@ -152,7 +179,8 @@ export default function TastingsPage() {
         site: form.site,
         produit: form.produit,
         tranche_age: form.tranche_age as TrancheAge,
-        note_gout: form.note_gout,
+        ...(siteInfo?.note_gout_active     ? { note_gout:     form.note_gout     || null } : {}),
+        ...(siteInfo?.note_ambiance_active ? { note_ambiance: form.note_ambiance || null } : {}),
         intention_achat: form.intention_achat as IntentionAchat,
         a_achete: form.a_achete,
         nom_client: form.nom_client.trim() || undefined,
@@ -202,9 +230,12 @@ export default function TastingsPage() {
     conversionRate: tastings.length > 0
       ? Math.round((tastings.filter(t => t.a_achete).length / tastings.length) * 100)
       : 0,
-    avgRating: tastings.length > 0
-      ? (tastings.reduce((s, t) => s + t.note_gout, 0) / tastings.length).toFixed(1)
-      : "—",
+    avgRating: (() => {
+      const rated = tastings.filter(t => t.note_gout !== null);
+      return rated.length > 0
+        ? (rated.reduce((s, t) => s + (t.note_gout ?? 0), 0) / rated.length).toFixed(1)
+        : "—";
+    })(),
   };
 
   const downloadCSV = () => {
@@ -355,7 +386,7 @@ export default function TastingsPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map(t => {
               const intent = INTENT_OPTIONS.find(i => i.value === t.intention_achat);
-              const rating = RATING_ICONS.find(r => r.rating === t.note_gout);
+              const rating = RATING_ICONS_5.find(r => r.rating === t.note_gout);
               const stripColor = t.intention_achat === "ELEVEE" ? "bg-emerald-400"
                 : t.intention_achat === "MOYENNE" ? "bg-amber-400" : "bg-rose-400";
               return (
@@ -389,8 +420,8 @@ export default function TastingsPage() {
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1 text-amber-400 text-xs">
-                        {"⭐".repeat(t.note_gout)}
-                        <span className="text-muted-foreground ml-1">{rating?.label}</span>
+                        {t.note_gout !== null ? "⭐".repeat(Math.min(t.note_gout, 5)) : null}
+                        <span className="text-muted-foreground ml-1">{t.note_gout !== null ? rating?.label : "—"}</span>
                       </div>
                       <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium border", intent?.color)}>
                         {intent?.label}
@@ -448,18 +479,59 @@ export default function TastingsPage() {
                 </Select>
               </div>
 
-              <div className="space-y-3">
-                <Label>Note du goût *</Label>
-                <div className="flex justify-between gap-2">
-                  {RATING_ICONS.map(r => (
-                    <button key={r.rating} type="button" onClick={() => setForm(f => ({ ...f, note_gout: r.rating }))}
-                      className={cn("flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all flex-1",
-                        form.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
-                      {r.icon}<span className="text-xs font-medium">{r.label}</span>
-                    </button>
-                  ))}
+              {siteInfo?.note_ambiance_active && (
+                <div className="space-y-3">
+                  <Label>Note d&apos;ambiance *</Label>
+                  {(siteInfo.note_ambiance_max ?? 5) <= 5 ? (
+                    <div className="flex justify-between gap-2">
+                      {RATING_ICONS_5.map(r => (
+                        <button key={r.rating} type="button" onClick={() => setForm(f => ({ ...f, note_ambiance: r.rating }))}
+                          className={cn("flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all flex-1",
+                            form.note_ambiance === r.rating ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
+                          {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-5 gap-2">
+                      {Array.from({ length: siteInfo.note_ambiance_max }, (_, i) => i + 1).map(n => (
+                        <button key={n} type="button" onClick={() => setForm(f => ({ ...f, note_ambiance: n }))}
+                          className={cn("py-3 rounded-xl border-2 text-sm font-bold transition-all",
+                            form.note_ambiance === n ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
+
+              {siteInfo?.note_gout_active && (
+                <div className="space-y-3">
+                  <Label>Note du goût *</Label>
+                  {(siteInfo.note_gout_max ?? 5) <= 5 ? (
+                    <div className="flex justify-between gap-2">
+                      {RATING_ICONS_5.map(r => (
+                        <button key={r.rating} type="button" onClick={() => setForm(f => ({ ...f, note_gout: r.rating }))}
+                          className={cn("flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all flex-1",
+                            form.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                          {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-5 gap-2">
+                      {Array.from({ length: siteInfo.note_gout_max }, (_, i) => i + 1).map(n => (
+                        <button key={n} type="button" onClick={() => setForm(f => ({ ...f, note_gout: n }))}
+                          className={cn("py-3 rounded-xl border-2 text-sm font-bold transition-all",
+                            form.note_gout === n ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-3">
                 <Label>Intention d&apos;achat *</Label>
@@ -639,12 +711,12 @@ export default function TastingsPage() {
       {selectedTasting && (() => {
         const campTastings = tastings.filter(t => t.campagne_nom === selectedTasting.campagne_nom);
         const avgRating = campTastings.length > 0
-          ? (campTastings.reduce((s, t) => s + t.note_gout, 0) / campTastings.length).toFixed(1)
+          ? (campTastings.filter(t => t.note_gout !== null).reduce((s, t) => s + (t.note_gout ?? 0), 0) / campTastings.filter(t => t.note_gout !== null).length).toFixed(1)
           : "—";
         const convRate = campTastings.length > 0
           ? Math.round((campTastings.filter(t => t.a_achete).length / campTastings.length) * 100)
           : 0;
-        const rating = RATING_ICONS.find(r => r.rating === selectedTasting.note_gout);
+        const rating = RATING_ICONS_5.find(r => r.rating === selectedTasting.note_gout);
         const intent = INTENT_OPTIONS.find(i => i.value === selectedTasting.intention_achat);
         const intentSteps = [
           { value: "FAIBLE",  label: "Faible",  dotColor: "bg-rose-400",    textColor: "text-rose-600"    },
