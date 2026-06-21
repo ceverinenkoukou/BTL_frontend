@@ -521,6 +521,7 @@ export default function CampaignsPage() {
                         value={regle.quantite_requise}
                         onChange={e => updateRegle(idx, { quantite_requise: e.target.value })}
                       />
+                      
                     </div>
                     <div className="col-span-1 text-center text-xs text-muted-foreground">→</div>
                     <div className="col-span-8">
