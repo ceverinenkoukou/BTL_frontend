@@ -69,7 +69,7 @@ const INTENT_OPTIONS: { value: IntentionAchat; label: string; color: string }[] 
   { value: "ELEVEE",  label: "Élevée",  color: "bg-green-100 text-green-700 border-green-200" },
 ];
 
-const RATING_ICONS: { rating: number; icon: React.ReactNode; label: string }[] = [
+const RATING_ICONS_5: { rating: number; icon: React.ReactNode; label: string }[] = [
   { rating: 1, icon: <Frown className="w-7 h-7" />,  label: "Mauvais"   },
   { rating: 2, icon: <Meh className="w-7 h-7" />,    label: "Bof"       },
   { rating: 3, icon: <Smile className="w-7 h-7" />,  label: "Correct"   },
@@ -111,6 +111,7 @@ const EMPTY_DEG_FORM = {
   produit:         "",
   tranche_age:     "" as TrancheAge | "",
   note_gout:       0,
+  note_ambiance:   0,
   intention_achat: "" as IntentionAchat | "",
   nom_client:      "",
   promotion_selectionnee: "" as string | "",
@@ -152,6 +153,7 @@ export default function CampaignDetailPage() {
   const [savingDeg, setSavingDeg] = useState(false);
   const [loadingSite, setLoadingSite] = useState(false);
   const [siteInfo, setSiteInfo] = useState<MonSiteInfo | null>(null);
+  const activeSiteRef = useRef<string>("");
   const [campaignSites, setCampaignSites] = useState<SiteList[]>([]);
   const [siteRapport, setSiteRapport] = useState<CampagneRapportSites | null>(null);
 
@@ -282,7 +284,30 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const refreshSiteInfo = useCallback(async () => {
+    const siteId = activeSiteRef.current;
+    if (!siteId) return;
+    try {
+      invalidateCache("/degustations/mon-site");
+      const { data } = await api.get<MonSiteInfo>(`/degustations/mon-site/?site_id=${siteId}`);
+      setSiteInfo(data);
+    } catch { /* silencieux */ }
+  }, []);
+
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) refreshSiteInfo(); };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(refreshSiteInfo, 60_000);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(timer);
+    };
+  }, [refreshSiteInfo]);
+
   const handleSiteChange = async (siteId: string) => {
+    activeSiteRef.current = siteId;
     setDegForm(f => ({ ...f, site: siteId, produit: "" }));
     setSiteInfo(null);
     if (!siteId) return;
@@ -556,7 +581,11 @@ export default function CampaignDetailPage() {
     e.preventDefault();
     const isPromoMode = campaign?.type_recompense === "PROMOTIONS";
     const baseValid = degForm.site && degForm.produit && degForm.tranche_age;
-    const promoValid = isPromoMode ? baseValid : baseValid && (showTasting ? (degForm.note_gout && degForm.intention_achat) : true);
+    const noteRequired     = !!campaign?.note_gout_active;
+    const ambianceRequired = !!campaign?.note_ambiance_active;
+    const promoValid = isPromoMode
+      ? baseValid && (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance)
+      : baseValid && (showTasting ? ((noteRequired ? degForm.note_gout : true) && (ambianceRequired ? degForm.note_ambiance : true) && degForm.intention_achat) : (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance));
     if (!promoValid) {
       toast.error("Veuillez remplir tous les champs obligatoires.");
       return;
@@ -568,7 +597,8 @@ export default function CampaignDetailPage() {
         site: degForm.site,
         produit: degForm.produit,
         tranche_age: degForm.tranche_age as TrancheAge,
-        note_gout: isPromoMode ? 1 : (showTasting ? degForm.note_gout : 1),
+        note_gout:     campaign?.note_gout_active     ? (degForm.note_gout     || null) : null,
+        note_ambiance: campaign?.note_ambiance_active ? (degForm.note_ambiance || null) : null,
         intention_achat: isPromoMode ? "ELEVEE" : (showTasting ? degForm.intention_achat as IntentionAchat : "MOYENNE"),
         a_achete,
         nom_client: degForm.nom_client.trim() || undefined,
@@ -623,9 +653,10 @@ export default function CampaignDetailPage() {
   const purchasedCount = tastings.filter(t => t.a_achete).length;
   const totalRevenue   = ventes.reduce((sum, v) => sum + Number(v.prix_total ?? 0), 0);
   const convRate       = tastings.length > 0 ? Math.round((purchasedCount / tastings.length) * 100) : 0;
-  const avgRating      = tastings.length > 0
-    ? Math.round((tastings.reduce((s, t) => s + t.note_gout, 0) / tastings.length) * 10) / 10
-    : 0;
+  const ratedTastings  = tastings.filter(t => t.note_gout !== null);
+  const avgRating      = ratedTastings.length > 0
+    ? Math.round((ratedTastings.reduce((s, t) => s + (t.note_gout ?? 0), 0) / ratedTastings.length) * 10) / 10
+    : null;
 
   const produitSensoryStats = useMemo(
     () => computeProduitSensoryStats(tastings),
@@ -720,7 +751,7 @@ export default function CampaignDetailPage() {
               {[
                 showTasting && { label: "Dégustations", value: tastings.length, sub: `/ ${campaign.objectif_degustations ?? 0}`, icon: "🍷" },
                 showTasting && { label: "Acheteurs", value: purchasedCount, sub: `conv. ${convRate}%`, icon: "🛒" },
-                showTasting && { label: "Note moy.", value: `${avgRating}/5`, sub: "satisfaction", icon: "⭐" },
+                showTasting && campaign.note_gout_active && avgRating !== null && { label: "Note moy.", value: `${avgRating}/${campaign.note_gout_max}`, sub: "satisfaction", icon: "⭐" },
                 showVente && { label: "Chiffre d'aff.", value: fmtXOF(totalRevenue), sub: `${ventes.length} ventes`, icon: "💰" },
               ].filter(Boolean).map((s, i) => (
                 <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
@@ -858,7 +889,7 @@ export default function CampaignDetailPage() {
                           <span className="text-xs text-muted-foreground">{t.tranche_age_display}</span>
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">
-                          <span className="text-xs text-amber-500 flex items-center gap-0.5"><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{t.note_gout}/5</span>
+                          {t.note_gout !== null && <span className="text-xs text-amber-500 flex items-center gap-0.5"><Star className="w-3 h-3 fill-amber-400 text-amber-400" />{t.note_gout}/{campaign?.note_gout_max ?? 5}</span>}
                           <span className="text-xs text-muted-foreground">{t.intention_achat_display}</span>
                           <span className="text-xs text-muted-foreground">{t.site_nom}</span>
                         </div>
@@ -1597,12 +1628,65 @@ export default function CampaignDetailPage() {
               </div>
               <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Tranche d'âge *</Label><Select value={degForm.tranche_age} onValueChange={v => setDegForm(f => ({ ...f, tranche_age: v as TrancheAge }))}><SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger><SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
 
-              {/* Note et intention (uniquement si showTasting et pas de promo) */}
+              {/* Note d'ambiance — visible si activé, quel que soit le type */}
+              {campaign?.note_ambiance_active && (
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground text-xs uppercase tracking-wide">Note d&apos;ambiance *</Label>
+                  {(campaign.note_ambiance_max ?? 5) <= 5 ? (
+                    <div className="flex justify-between gap-2">
+                      {RATING_ICONS_5.map(r => (
+                        <button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_ambiance: r.rating }))}
+                          className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1",
+                            degForm.note_ambiance === r.rating ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
+                          {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-5 gap-2">
+                      {Array.from({ length: campaign.note_ambiance_max }, (_, i) => i + 1).map(n => (
+                        <button key={n} type="button" onClick={() => setDegForm(f => ({ ...f, note_ambiance: n }))}
+                          className={cn("py-2.5 rounded-xl border-2 text-sm font-bold transition-all",
+                            degForm.note_ambiance === n ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Note du goût — visible si activé, quel que soit le type */}
+              {campaign?.note_gout_active && (
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground text-xs uppercase tracking-wide">Note du goût *</Label>
+                  {(campaign.note_gout_max ?? 5) <= 5 ? (
+                    <div className="flex justify-between gap-2">
+                      {RATING_ICONS_5.map(r => (
+                        <button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: r.rating }))}
+                          className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1",
+                            degForm.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                          {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-5 gap-2">
+                      {Array.from({ length: campaign.note_gout_max }, (_, i) => i + 1).map(n => (
+                        <button key={n} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: n }))}
+                          className={cn("py-2.5 rounded-xl border-2 text-sm font-bold transition-all",
+                            degForm.note_gout === n ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Intention d'achat (uniquement si showTasting et pas de promo) */}
               {showTasting && !showPromos && (
-                <>
-                  <div className="space-y-2"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Note du goût *</Label><div className="flex justify-between gap-2">{RATING_ICONS.map(r => (<button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: r.rating }))} className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1", degForm.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>{r.icon}<span className="text-xs font-medium">{r.label}</span></button>))}</div></div>
-                  <div className="space-y-2"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Intention d'achat *</Label><div className="grid grid-cols-3 gap-2">{INTENT_OPTIONS.map(o => (<button key={o.value} type="button" onClick={() => setDegForm(f => ({ ...f, intention_achat: o.value }))} className={cn("py-3 px-2 rounded-lg border-2 font-medium transition-all text-sm", degForm.intention_achat === o.value ? o.color + " border-current" : "border-border hover:border-indigo-300")}>{o.label}</button>))}</div></div>
-                </>
+                <div className="space-y-2"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Intention d'achat *</Label><div className="grid grid-cols-3 gap-2">{INTENT_OPTIONS.map(o => (<button key={o.value} type="button" onClick={() => setDegForm(f => ({ ...f, intention_achat: o.value }))} className={cn("py-3 px-2 rounded-lg border-2 font-medium transition-all text-sm", degForm.intention_achat === o.value ? o.color + " border-current" : "border-border hover:border-indigo-300")}>{o.label}</button>))}</div></div>
               )}
 
               {/* Promotions : checkboxes */}

@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Building2, Plus, Package, Mail, Phone, MapPin,
   Trash2, Edit2, ChevronRight, ChevronLeft, X, Check,
-  Palette, Upload, Loader2, Send, KeyRound,
+  Palette, Upload, Loader2, Send, KeyRound, AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -56,6 +56,8 @@ export default function CompaniesPage() {
   const [sendNewPassword, setSendNewPassword] = useState(false);
   const [resendingId, setResendingId]     = useState<string | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Entreprise | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Step-1 fields
   const [cName,     setCName]     = useState("");
@@ -175,15 +177,23 @@ export default function CompaniesPage() {
   };
 
   // ── Actions ──────────────────────────────────────────────────
-  const handleDelete = async (id: string) => {
-    if (!confirm("Supprimer cette entreprise et son compte utilisateur ?")) return;
+  const handleDelete = (company: Entreprise) => {
+    setDeleteTarget(company);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.delete(`/entreprises/${id}/`);
-      setCompanies(prev => prev.filter(c => c.id !== id));
+      await api.delete(`/entreprises/${deleteTarget.id}/`);
+      setCompanies(prev => prev.filter(c => c.id !== deleteTarget.id));
       invalidateCache("/entreprises");
-      toast.success("Entreprise supprimée");
+      toast.success(`Entreprise "${deleteTarget.nom_commercial}" supprimée définitivement.`);
+      setDeleteTarget(null);
     } catch {
       toast.error("Erreur lors de la suppression.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -435,7 +445,7 @@ export default function CompaniesPage() {
                       <button onClick={() => openEdit(company)} className="w-7 h-7 bg-white/20 hover:bg-white/35 rounded-lg flex items-center justify-center transition-colors">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDelete(company.id)} className="w-7 h-7 bg-white/20 hover:bg-red-500/80 rounded-lg flex items-center justify-center transition-colors">
+                      <button onClick={() => handleDelete(company)} className="w-7 h-7 bg-white/20 hover:bg-red-500/80 rounded-lg flex items-center justify-center transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -897,6 +907,65 @@ export default function CompaniesPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation dialog ── */}
+      <Dialog open={!!deleteTarget} onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md p-0 overflow-hidden">
+          <div className="bg-gradient-to-br from-rose-600 to-red-700 p-6 text-white relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
+            <div className="relative z-10 flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-white text-base font-bold">Supprimer définitivement</DialogTitle>
+                <p className="text-white/70 text-xs mt-0.5">Cette action est irréversible</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-4">
+            <p className="text-sm text-foreground font-medium">
+              Voulez-vous supprimer l&apos;entreprise{" "}
+              <span className="font-bold text-rose-600">{deleteTarget?.nom_commercial}</span> ?
+            </p>
+
+            <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 space-y-2">
+              <p className="text-xs font-bold text-rose-700 uppercase tracking-wide mb-2">Données supprimées :</p>
+              {[
+                "Toutes les campagnes et sites",
+                "Toutes les dégustations, ventes et rapports",
+                "Tous les goodies et stocks",
+                "Tous les produits",
+                "Le compte utilisateur de l'entreprise",
+              ].map((item, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-rose-800">
+                  <X className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  {item}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm font-semibold text-muted-foreground transition-colors disabled:opacity-50"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-bold transition-colors shadow-md shadow-rose-200"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Supprimer définitivement
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

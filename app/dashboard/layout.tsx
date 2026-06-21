@@ -13,7 +13,7 @@ export default function DashboardLayout({
         <div className="min-h-screen bg-background">
           <DashboardSidebar />
           <main className="lg:pl-64 pt-14 lg:pt-0">
-            <div className="p-4 md:p-6 lg:p-8">{children}</div>
+            <div className="p-4 md:p-6 lg:p-8 page-enter">{children}</div>
           </main>
         </div>
       </BrandingProvider>

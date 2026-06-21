@@ -102,41 +102,42 @@ export function DashboardSidebar() {
 
   const NavLinks = () => (
     <>
-      <div className="space-y-1">
-        <p className="px-3 text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2">
+      <div className="space-y-0.5">
+        <p className="px-3 text-[10px] font-bold text-sidebar-foreground/35 uppercase tracking-widest mb-3">
           Menu principal
         </p>
         {navItems.filter(item => !item.roles || item.roles.includes(userRole)).map((item) => {
+          const isActive = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
               onClick={() => setMobileMenuOpen(false)}
               className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
-                pathname === item.href
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md shadow-sidebar-primary/30"
-                  : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group relative overflow-hidden",
+                isActive
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-lg shadow-sidebar-primary/25"
+                  : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
+              {isActive && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-white/60 rounded-full" />
+              )}
               <span className={cn(
-                "transition-transform duration-200",
-                pathname === item.href ? "" : "group-hover:scale-110"
+                "transition-all duration-150 shrink-0",
+                isActive ? "opacity-100" : "opacity-60 group-hover:opacity-100 group-hover:scale-110"
               )}>
                 {item.icon}
               </span>
-              {item.label}
-              {pathname === item.href && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70" />
-              )}
+              <span className="truncate">{item.label}</span>
             </Link>
           );
         })}
       </div>
 
       {isEntreprise && entrepriseCampaigns.length > 0 && (
-        <div className="space-y-1 mt-6">
-          <p className="px-3 text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider mb-2">
+        <div className="space-y-0.5 mt-6">
+          <p className="px-3 text-[10px] font-bold text-sidebar-foreground/35 uppercase tracking-widest mb-3">
             Mes Campagnes
           </p>
           {entrepriseCampaigns.map((camp) => {
@@ -148,22 +149,22 @@ export function DashboardSidebar() {
                 href={campHref}
                 onClick={() => setMobileMenuOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group relative overflow-hidden",
                   isActive
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md shadow-sidebar-primary/30"
-                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-lg shadow-sidebar-primary/25"
+                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
               >
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-white/60 rounded-full" />
+                )}
                 <span className={cn(
-                  "transition-transform duration-200",
-                  isActive ? "" : "group-hover:scale-110"
+                  "transition-all duration-150 shrink-0",
+                  isActive ? "opacity-100" : "opacity-60 group-hover:opacity-100 group-hover:scale-110"
                 )}>
                   <Target className="w-5 h-5" />
                 </span>
                 <span className="truncate">{camp.nom}</span>
-                {isActive && (
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70" />
-                )}
               </Link>
             );
           })}
@@ -171,34 +172,38 @@ export function DashboardSidebar() {
       )}
 
       {filteredAdminItems.length > 0 && (
-        <div className="space-y-1 mt-6">
-          <p className="px-3 text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider mb-2">
+        <div className="space-y-0.5 mt-6">
+          <div className="mx-3 mb-3 h-px bg-sidebar-border/60" />
+          <p className="px-3 text-[10px] font-bold text-sidebar-foreground/35 uppercase tracking-widest mb-3">
             Administration
           </p>
-          {filteredAdminItems.map((item) => (
+          {filteredAdminItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
             <Link
               key={item.href}
               href={item.href}
               onClick={() => setMobileMenuOpen(false)}
               className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
-                pathname === item.href
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md shadow-sidebar-primary/30"
-                  : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group relative overflow-hidden",
+                isActive
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-lg shadow-sidebar-primary/25"
+                  : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
+              {isActive && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-white/60 rounded-full" />
+              )}
               <span className={cn(
-                "transition-transform duration-200",
-                pathname === item.href ? "" : "group-hover:scale-110"
+                "transition-all duration-150 shrink-0",
+                isActive ? "opacity-100" : "opacity-60 group-hover:opacity-100 group-hover:scale-110"
               )}>
                 {item.icon}
               </span>
-              {item.label}
-              {pathname === item.href && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70" />
-              )}
+              <span className="truncate">{item.label}</span>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
@@ -249,8 +254,8 @@ export function DashboardSidebar() {
 
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-sidebar border-r border-sidebar-border">
-        <div className="flex items-center px-6 py-5 border-b border-sidebar-border">
-          <img src="/LOGO-MHEDIA-01.svg" alt="Mhedia BTL" className="h-12 w-auto" style={{ filter: 'brightness(0) invert(1)' }} />
+        <div className="flex items-center px-6 py-5 border-b border-sidebar-border/60">
+          <img src="/LOGO-MHEDIA-01.svg" alt="Mhedia BTL" className="h-10 w-auto" style={{ filter: 'brightness(0) invert(1)', opacity: 0.92 }} />
         </div>
 
         <nav className="flex-1 overflow-y-auto p-4">

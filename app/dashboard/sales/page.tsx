@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type { Vente, CampagneList, CampagneRapportSites } from "@/lib/types/backend";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -494,7 +494,7 @@ export default function SalesPage() {
     <h2 class="section-title">3. Journal des transactions</h2>
     <table><thead><tr>
       <th>Heure</th><th>Hôtesse</th><th>Site</th><th>Client</th>
-      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th><th>Offre promotionnelle</th>
+      <th>Produit ciblé</th><th class="r">Vol. vendu</th><th class="r">Vol. offert</th><th>Goodie / lot gagné</th>
     </tr></thead><tbody>${transactionRowsHtml}</tbody></table>
   </div>
   <div class="foot">Rapport généré automatiquement depuis MHedia BTL</div>
@@ -516,7 +516,20 @@ export default function SalesPage() {
   };
 
   const exportCompanyPDF = async (entrepriseNom: string) => {
-    const companySales = sales.filter(s => s.entreprise_nom === entrepriseNom);
+    let latestSales = sales;
+    try {
+      invalidateCache("/ventes/");
+      const res = await api.get<VenteEnrichie[]>("/ventes/");
+      const fresh = Array.isArray(res.data)
+        ? res.data
+        : ((res.data as { results?: VenteEnrichie[] }).results ?? []);
+      setSales(fresh);
+      latestSales = fresh;
+    } catch {
+      // Utilise les données en mémoire en fallback
+    }
+
+    const companySales = latestSales.filter(s => s.entreprise_nom === entrepriseNom);
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const firstSale = companySales[0];
