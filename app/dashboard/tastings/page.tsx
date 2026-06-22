@@ -86,6 +86,13 @@ const PROMO_TYPE_STYLES: Record<TypePromotion, { bg: string; border: string; tex
     icon: "🎲",
     label: "À gagner",
   },
+  TIRAGE: {
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+    icon: "🎡",
+    label: "Tirage à la roue",
+  },
 };
 
 export default function TastingsPage() {

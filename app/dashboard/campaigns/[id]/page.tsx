@@ -132,6 +132,13 @@ const PROMO_TYPE_STYLES: Record<TypePromotion, { bg: string; border: string; tex
     icon: "🎲",
     label: "À gagner",
   },
+  TIRAGE: {
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+    icon: "🎡",
+    label: "Tirage à la roue",
+  },
 };
 
 export default function CampaignDetailPage() {
@@ -173,6 +180,7 @@ export default function CampaignDetailPage() {
   const wheelCanvasRef = useRef<HTMLCanvasElement>(null);
   const wheelRotationRef = useRef(0);
   const [activeWheelPromoId, setActiveWheelPromoId] = useState<string | null>(null);
+  const [tirageGoodiesOverride, setTirageGoodiesOverride] = useState<{ id: string; nom: string }[] | null>(null);
 
   // Statistiques de l'entreprise
   const [entrepriseStats, setEntrepriseStats] = useState<any>(null);
@@ -326,6 +334,18 @@ export default function CampaignDetailPage() {
   };
 
   const getWheelPrizes = useCallback((): WheelPrize[] => {
+    // TIRAGE promo with specific goodies linked to the promotion
+    if (tirageGoodiesOverride !== null) {
+      if (tirageGoodiesOverride.length === 0) return [];
+      return tirageGoodiesOverride.map(g => ({ id: g.id, name: g.nom, isGoodie: true }));
+    }
+    // TIRAGE promo without specific goodies: use all campaign-level goodies
+    // (no per-site stock required — TIRAGE bypasses StockGoodieSite)
+    if (activeWheelPromoId) {
+      if (goodies.length === 0) return [];
+      return goodies.map(g => ({ id: g.id, name: g.nom, isGoodie: true }));
+    }
+    // Standard GOODIES wheel: requires per-site stock
     let activeGoodies: { id: string; name: string }[] = [];
     if (siteInfo?.goodies_disponibles && siteInfo.goodies_disponibles.length > 0) {
       activeGoodies = siteInfo.goodies_disponibles
@@ -338,7 +358,7 @@ export default function CampaignDetailPage() {
     }
     if (activeGoodies.length === 0) return [];
     return activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true }));
-  }, [goodies, siteInfo]);
+  }, [goodies, siteInfo, tirageGoodiesOverride, activeWheelPromoId]);
 
   const drawWheelImmediate = (rot: number) => {
     const canvas = wheelCanvasRef.current;
@@ -510,6 +530,7 @@ export default function CampaignDetailPage() {
         goodie_id: wonPrize.id,
         site_id: siteId,
         nom_client: wheelClientName.trim() || undefined,
+        promotion_id: activeWheelPromoId || undefined,
       });
       invalidateCache("/gains-goodies");
       invalidateCache("/goodies");
@@ -551,7 +572,10 @@ export default function CampaignDetailPage() {
     if (!siteId) { toast.error("Sélectionnez d'abord un site."); return; }
     setSavingGain(promoId);
     try {
-      await api.post(`/promotions/${promoId}/enregistrer-gain/`, {
+      const { data: gainRes } = await api.post<{
+        tirage_disponible: boolean;
+        goodies_roue: { id: string; nom: string }[];
+      }>(`/promotions/${promoId}/enregistrer-gain/`, {
         site_id: siteId,
         produit_id: degForm.produit || undefined,
         nom_client: gainClientName.trim() || undefined,
@@ -562,11 +586,16 @@ export default function CampaignDetailPage() {
 
       const promo = campaign?.promotions?.find(p => p.id === promoId);
       const chosenAction = promoAction[promoId] ?? promo?.type_promotion ?? "OFFERT";
-      if (chosenAction === "GAGNE") {
+      if (chosenAction === "GAGNE" || gainRes.tirage_disponible) {
         setWheelClientName(gainClientName.trim() || "Client");
         setWonPrize(null);
         wheelRotationRef.current = 0;
         setWheelSpinning(false);
+        if (gainRes.tirage_disponible && gainRes.goodies_roue.length > 0) {
+          setTirageGoodiesOverride(gainRes.goodies_roue);
+        } else {
+          setTirageGoodiesOverride(null);
+        }
         setActiveWheelPromoId(promoId);
       }
     } catch (err: unknown) {
@@ -635,11 +664,16 @@ export default function CampaignDetailPage() {
         wheelRotationRef.current = 0;
         setWheelSpinning(false);
         setWheelOpen(true);
-      } else if (isPromoMode && selectedPromo?.type_promotion === "GAGNE") {
+      } else if (isPromoMode && (selectedPromo?.type_promotion === "GAGNE" || selectedPromo?.type_promotion === "TIRAGE")) {
         setWheelClientName(clientName || "Client");
         setWonPrize(null);
         wheelRotationRef.current = 0;
         setWheelSpinning(false);
+        if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
+          setTirageGoodiesOverride(selectedPromo.goodies_details.map(g => ({ id: g.id, nom: g.nom })));
+        } else {
+          setTirageGoodiesOverride(null);
+        }
         setActiveWheelPromoId(selectedPromo.id);
       }
     } catch (err: unknown) {
@@ -1697,10 +1731,11 @@ export default function CampaignDetailPage() {
                     {(campaign?.promotions ?? []).filter(p => p.is_active).map((promo) => {
                       const styles = PROMO_TYPE_STYLES[promo.type_promotion];
                       const isChecked = degForm.promotion_selectionnee === promo.id;
+                      const willOpenWheel = promo.type_promotion === "TIRAGE" || promo.type_promotion === "GAGNE";
                       return (
                         <label key={promo.id} className={cn("flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all", isChecked ? `${styles.bg} ${styles.border} ${styles.text}` : "border-slate-200 bg-white hover:border-slate-300")}>
                           <input type="checkbox" className="mt-1 w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked={isChecked} onChange={(e) => { if (e.target.checked) setDegForm(f => ({ ...f, promotion_selectionnee: promo.id })); else setDegForm(f => ({ ...f, promotion_selectionnee: "" })); }} />
-                          <div className="flex-1 flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center shrink-0"><span className="text-xl">{styles.icon}</span></div><div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}</span><span className="text-xs font-medium text-slate-500">→ {styles.label}</span></div><p className="font-semibold text-sm mt-1">{promo.recompense_description}</p></div></div>
+                          <div className="flex-1 flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center shrink-0"><span className="text-xl">{styles.icon}</span></div><div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}</span><span className="text-xs font-medium text-slate-500">→ {styles.label}</span>{willOpenWheel && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎡 Lance la roue</span>}</div><p className="font-semibold text-sm mt-1">{promo.recompense_description}</p></div></div>
                           {isChecked && <CheckCircle2 className={cn("w-5 h-5 shrink-0", styles.text)} />}
                         </label>
                       );
@@ -1714,7 +1749,7 @@ export default function CampaignDetailPage() {
               )}
 
               <Button type="submit" disabled={savingDeg} className="w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white h-12 text-base font-semibold">
-                {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : <><UtensilsCrossed className="w-4 h-4 mr-2" />{showPromos ? "Enregistrer le client" : showWheel ? "Enregistrer & lancer la roue 🎡" : "Enregistrer la dégustation"}</>}
+                {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : (() => { const sel = (campaign?.promotions ?? []).find(p => p.id === degForm.promotion_selectionnee); const promoLancesRoue = sel?.type_promotion === "TIRAGE" || sel?.type_promotion === "GAGNE"; return <><UtensilsCrossed className="w-4 h-4 mr-2" />{(showPromos && promoLancesRoue) || showWheel ? "Enregistrer & lancer la roue 🎡" : showPromos ? "Enregistrer le client" : "Enregistrer la dégustation"}</>; })()}
               </Button>
             </form>
           </div>
@@ -1784,7 +1819,7 @@ export default function CampaignDetailPage() {
                   <Button className="w-full text-white" style={{ background: brandGrad }} onClick={() => handleConfirmWheelGain(() => setActiveWheelPromoId(null))} disabled={savingWheelGain}><Gift className="w-4 h-4 mr-2" />{savingWheelGain ? "Enregistrement..." : "Confirmer le gain"}</Button>
                   <div className="flex gap-2 w-full">
                     <Button variant="outline" className="flex-1" onClick={() => spinWheel()}><RotateCcw className="w-4 h-4 mr-2" />Relancer</Button>
-                    <Button variant="outline" className="flex-1" onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); }}>Fermer</Button>
+                    <Button variant="outline" className="flex-1" onClick={() => { setActiveWheelPromoId(null); setWonPrize(null); setTirageGoodiesOverride(null); }}>Fermer</Button>
                   </div>
                 </div>
               )}

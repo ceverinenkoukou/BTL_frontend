@@ -19,7 +19,7 @@ export type TypeConditionnement = "UNITE" | "PACK";
 
 export type TypeCampagne = "DEGUSTATION" | "VENTE" | "DEGUSTATION_VENTE";
 export type TypeRecompense = "AUCUNE" | "GOODIES" | "PROMOTIONS";
-export type TypePromotion = "OFFERT" | "GAGNE";
+export type TypePromotion = "OFFERT" | "GAGNE" | "TIRAGE";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -139,6 +139,8 @@ export interface Promotion {
   sites_noms: string[];
   type_promotion: TypePromotion;
   type_promotion_display: string;
+  conditionnement: TypeConditionnement;
+  conditionnement_display: string;
   quantite_requise: number;
   quantite_offerte: number;
   recompense_description: string;
@@ -243,10 +245,12 @@ export interface CreatePromotionPayload {
   campagne: string;
   sites?: string[];
   type_promotion: TypePromotion;
+  conditionnement?: TypeConditionnement;
   quantite_requise: number;
   quantite_offerte: number;
   recompense_description: string;
   produit_cible?: string | null;
+  goodies?: string[];
   is_active?: boolean;
 }
 

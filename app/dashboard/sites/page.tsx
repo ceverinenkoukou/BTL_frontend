@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import type { CampagneList, CreatePromotionPayload, Entreprise, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypePromotion } from "@/lib/types/backend";
+import type { CampagneList, CreatePromotionPayload, Entreprise, Goodie, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -71,18 +71,22 @@ const emptyCreateForm: CreateSiteForm = {
 
 type PromoForm = {
   type_promotion: TypePromotion;
+  conditionnement: TypeConditionnement;
   quantite_requise: string;
   quantite_offerte: string;
   recompense_description: string;
   produit_cible: string;
+  goodies: string[];
 };
 
 const emptyPromoForm: PromoForm = {
   type_promotion: "OFFERT",
+  conditionnement: "UNITE",
   quantite_requise: "3",
   quantite_offerte: "1",
   recompense_description: "",
   produit_cible: "",
+  goodies: [],
 };
 
 type EditPromoForm = PromoForm & { id: string };
@@ -112,6 +116,7 @@ export default function SitesPage() {
   const [offersSite, setOffersSite] = useState<SiteList | null>(null);
   const [siteForm, setSiteForm] = useState<SiteForm>(emptySiteForm);
   const [campagneProduits, setCampagneProduits] = useState<Produit[]>([]);
+  const [campagneGoodies, setCampagneGoodies] = useState<Goodie[]>([]);
 
   // --- Hôtesses ---
   const [hotelSite, setHotelSite] = useState<SiteList | null>(null);
@@ -287,17 +292,20 @@ export default function SitesPage() {
     setShowPromoForm(false);
     setPromoForm(emptyPromoForm);
     setCampagneProduits([]);
+    setCampagneGoodies([]);
     setLoadingOffers(true);
 
     try {
       const campagne = campaigns.find(c => c.id === site.campagne);
       const entrepriseId = campagne?.entreprise;
-      const [promoRes, produitsRes] = await Promise.all([
+      const [promoRes, produitsRes, goodiesRes] = await Promise.all([
         api.get(`/promotions/?campagne=${site.campagne}`),
         entrepriseId ? api.get(`/entreprises/${entrepriseId}/`) : Promise.resolve({ data: { produits: [] } }),
+        api.get(`/goodies/?campagne=${site.campagne}`),
       ]);
       setPromotions(unwrapList<Promotion>(promoRes.data));
       setCampagneProduits(produitsRes.data.produits ?? []);
+      setCampagneGoodies(unwrapList<Goodie>(goodiesRes.data));
     } catch {
       toast.error("Erreur lors du chargement des offres.");
     } finally {
@@ -323,10 +331,12 @@ export default function SitesPage() {
     setEditingPromo({
       id: promotion.id,
       type_promotion: promotion.type_promotion,
+      conditionnement: promotion.conditionnement ?? "UNITE",
       quantite_requise: String(promotion.quantite_requise),
       quantite_offerte: String(promotion.quantite_offerte ?? 1),
       recompense_description: promotion.recompense_description,
       produit_cible: promotion.produit_cible ?? "",
+      goodies: promotion.goodies ?? [],
     });
   };
 
@@ -340,10 +350,12 @@ export default function SitesPage() {
     try {
       const { data } = await api.patch<Promotion>(`/promotions/${editingPromo.id}/`, {
         type_promotion: editingPromo.type_promotion,
+        conditionnement: editingPromo.conditionnement,
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: editingPromo.recompense_description.trim(),
         produit_cible: editingPromo.produit_cible || null,
+        goodies: editingPromo.type_promotion === "TIRAGE" ? editingPromo.goodies : [],
       });
       setPromotions(current => current.map(p => (p.id === data.id ? data : p)));
       setEditingPromo(null);
@@ -367,10 +379,12 @@ export default function SitesPage() {
         campagne: offersSite.campagne,
         sites: [offersSite.id],
         type_promotion: promoForm.type_promotion,
+        conditionnement: promoForm.conditionnement,
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: promoForm.recompense_description.trim(),
         produit_cible: promoForm.produit_cible || null,
+        goodies: promoForm.type_promotion === "TIRAGE" ? promoForm.goodies : [],
         is_active: true,
       };
       const { data } = await api.post<Promotion>("/promotions/", payload);
@@ -786,9 +800,25 @@ export default function SitesPage() {
                         <SelectContent>
                           <SelectItem value="OFFERT">Produit offert</SelectItem>
                           <SelectItem value="GAGNE">À gagner / Bon cadeau</SelectItem>
+                          <SelectItem value="TIRAGE">Tirage à la roue</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Conditionnement</Label>
+                      <Select
+                        value={promoForm.conditionnement}
+                        onValueChange={v => setPromoForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
                       <Select
@@ -823,15 +853,44 @@ export default function SitesPage() {
                         onChange={e => setPromoForm(f => ({ ...f, quantite_requise: e.target.value }))}
                       />
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Qté offerte (Vol. offert dans le journal)</Label>
-                      <Input
-                        type="number" min={1} className="h-9"
-                        value={promoForm.quantite_offerte}
-                        onChange={e => setPromoForm(f => ({ ...f, quantite_offerte: e.target.value }))}
-                      />
-                    </div>
+                    {promoForm.type_promotion !== "TIRAGE" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Qté offerte (Vol. offert dans le journal)</Label>
+                        <Input
+                          type="number" min={1} className="h-9"
+                          value={promoForm.quantite_offerte}
+                          onChange={e => setPromoForm(f => ({ ...f, quantite_offerte: e.target.value }))}
+                        />
+                      </div>
+                    )}
                   </div>
+                  {promoForm.type_promotion === "TIRAGE" && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Goodies sur la roue <span className="text-muted-foreground">(optionnel)</span></Label>
+                      {campagneGoodies.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Aucun goodie disponible pour cette campagne.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-x-4 gap-y-2">
+                          {campagneGoodies.map(g => (
+                            <label key={g.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <Checkbox
+                                checked={promoForm.goodies.includes(g.id)}
+                                onCheckedChange={checked =>
+                                  setPromoForm(f => ({
+                                    ...f,
+                                    goodies: checked
+                                      ? [...f.goodies, g.id]
+                                      : f.goodies.filter(id => id !== g.id),
+                                  }))
+                                }
+                              />
+                              {g.nom}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2">
                     <Button type="button" size="sm" variant="ghost"
                       onClick={() => { setShowPromoForm(false); setPromoForm(emptyPromoForm); }}
@@ -872,9 +931,25 @@ export default function SitesPage() {
                                   <SelectContent>
                                     <SelectItem value="OFFERT">Produit offert</SelectItem>
                                     <SelectItem value="GAGNE">À gagner / Bon cadeau</SelectItem>
+                                    <SelectItem value="TIRAGE">Tirage à la roue</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Conditionnement</Label>
+                                <Select
+                                  value={editingPromo.conditionnement}
+                                  onValueChange={v => setEditingPromo(f => f ? { ...f, conditionnement: v as TypeConditionnement } : f)}
+                                >
+                                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                                    <SelectItem value="PACK">En pack</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
                                 <Select
@@ -917,6 +992,33 @@ export default function SitesPage() {
                                 />
                               </div>
                             </div>
+                            {editingPromo.type_promotion === "TIRAGE" && (
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Goodies sur la roue <span className="text-muted-foreground">(optionnel)</span></Label>
+                                {campagneGoodies.length === 0 ? (
+                                  <p className="text-xs text-muted-foreground italic">Aucun goodie disponible pour cette campagne.</p>
+                                ) : (
+                                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                    {campagneGoodies.map(g => (
+                                      <label key={g.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <Checkbox
+                                          checked={editingPromo.goodies.includes(g.id)}
+                                          onCheckedChange={checked =>
+                                            setEditingPromo(f => f ? ({
+                                              ...f,
+                                              goodies: checked
+                                                ? [...f.goodies, g.id]
+                                                : f.goodies.filter(id => id !== g.id),
+                                            }) : f)
+                                          }
+                                        />
+                                        {g.nom}
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div className="flex justify-end gap-2">
                               <Button type="button" size="sm" variant="ghost" onClick={() => setEditingPromo(null)}>Annuler</Button>
                               <Button type="submit" size="sm" disabled={saving || !editingPromo.recompense_description.trim()}>
@@ -930,7 +1032,7 @@ export default function SitesPage() {
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className="font-semibold">
-                                  Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
+                                  Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;<span className="text-xs font-normal text-muted-foreground">({promotion.conditionnement_display ?? (promotion.conditionnement === "PACK" ? "Pack" : "Unité")})</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
                                 </p>
                                 {promotion.produit_cible_nom && (
                                   <Badge variant="outline" className="text-xs">{promotion.produit_cible_nom}</Badge>
@@ -940,7 +1042,14 @@ export default function SitesPage() {
                                 </Badge>
                                 {isGlobal && <Badge variant="outline">Tous les sites</Badge>}
                               </div>
-                              <p className="text-xs text-muted-foreground mt-1">{promotion.type_promotion_display}</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                  {promotion.type_promotion_display}
+                                  {promotion.type_promotion === "TIRAGE" && promotion.goodies_details.length > 0 && (
+                                    <span className="ml-2 text-purple-600 font-medium">
+                                      — Roue : {promotion.goodies_details.map(g => g.nom).join(", ")}
+                                    </span>
+                                  )}
+                                </p>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <Button

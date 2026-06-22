@@ -75,7 +75,14 @@ const PROMO_TYPE_COLORS: Record<TypePromoRule, { bg: string; border: string; tex
     border: "border-amber-200",
     text: "text-amber-700",
     dot: "bg-amber-500",
-    label: "À gagner (tirage)",
+    label: "À gagner / Bon cadeau",
+  },
+  TIRAGE: {
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+    dot: "bg-purple-500",
+    label: "Tirage à la roue",
   },
 };
 
@@ -90,7 +97,7 @@ const STATUS_CFG: Record<string, { label: string; badge: string; strip: string }
 const DEFAULT_STATUS_CFG = { label: "—", badge: "bg-slate-100 text-slate-500 border border-slate-200", strip: "from-slate-300 to-slate-200" };
 
 type SiteEntry  = { nom: string; ville: string; emplacement_precis: string; superviseurs_ids: string[]; hotesses_ids: string[] };
-type TypePromoRule = "OFFERT" | "GAGNE";
+type TypePromoRule = "OFFERT" | "GAGNE" | "TIRAGE";
 type ReglePromo = { quantite_requise: string; recompense_description: string; type_promotion: TypePromoRule };
 
 const EMPTY_SITE:  SiteEntry  = { nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [] };
@@ -497,6 +504,12 @@ export default function CampaignsPage() {
                               {PROMO_TYPE_COLORS.GAGNE.label}
                             </span>
                           </SelectItem>
+                          <SelectItem value="TIRAGE">
+                            <span className="flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${PROMO_TYPE_COLORS.TIRAGE.dot}`} />
+                              {PROMO_TYPE_COLORS.TIRAGE.label}
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <button
@@ -544,10 +557,15 @@ export default function CampaignsPage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                         Le client reçoit immédiatement la récompense
                       </span>
+                    ) : regle.type_promotion === "TIRAGE" ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                        Le client tourne la roue pour gagner un goodie
+                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        Le client participe au tirage pour gagner un goodie + 1 produit
+                        Le client reçoit un bon cadeau / récompense à gagner
                       </span>
                     )}
                   </div>
@@ -573,7 +591,11 @@ export default function CampaignsPage() {
                   </span>
                   {" • "}
                   <span style={{ color: PROMO_TYPE_COLORS.GAGNE.text }}>
-                    {form.regles_promotions.filter(r => r.type_promotion === "GAGNE").length} tirage(s)
+                    {form.regles_promotions.filter(r => r.type_promotion === "GAGNE").length} bon(s) cadeau
+                  </span>
+                  {" • "}
+                  <span style={{ color: PROMO_TYPE_COLORS.TIRAGE.text }}>
+                    {form.regles_promotions.filter(r => r.type_promotion === "TIRAGE").length} tirage(s) roue
                   </span>
                 </p>
               )}
