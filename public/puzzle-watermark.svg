@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280" viewBox="0 0 280 280">
+  <defs>
+    <pattern id="puzzle" width="140" height="140" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#8C8C8C" stroke-width="2.5">
+        <path d="M0,35 H45 C45,25 53,18 63,18 C73,18 81,25 81,35 H140" />
+        <path d="M0,105 H45 C45,95 53,88 63,88 C73,88 81,95 81,105 H140" />
+        <path d="M35,0 V45 C25,45 18,53 18,63 C18,73 25,81 35,81 V140" />
+        <path d="M105,0 V45 C95,45 88,53 88,63 C88,73 95,81 105,81 V140" />
+      </g>
+    </pattern>
+  </defs>
+  <rect width="280" height="280" fill="url(#puzzle)" />
+</svg>

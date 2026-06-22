@@ -15,9 +15,10 @@ import {
 import { toast } from "sonner";
 import {
   Plus, Search, Users, UserCheck, UserX, Mail, ShieldCheck,
-  Clock, Edit2, Trash2, X, Loader2, Sparkles, SendHorizonal,
+  Clock, Edit2, Trash2, X, Loader2, SendHorizonal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 type RoleFilter = "all" | "Hotesse" | "Superviseur";
 
@@ -166,35 +167,28 @@ export default function TeamPage() {
   return (
     <div className="space-y-6">
 
-      {/* ── Hero ── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#006776] via-teal-600 to-[#00899b] p-6 md:p-8 text-white shadow-2xl shadow-teal-200">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_60%)]" />
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="w-4 h-4 text-yellow-200" />
-              <span className="text-white/70 text-xs font-medium uppercase tracking-wider">Administration</span>
-            </div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Équipe terrain</h1>
-            <p className="text-white/70 mt-1 text-sm">Gérez vos hôtesses et superviseurs</p>
-          </div>
+      {/* ── Header ── */}
+      <PageHeader
+        title="Équipe terrain"
+        description="Gérez vos hôtesses et superviseurs"
+        icon={<Users className="w-5 h-5" />}
+        ctaSlot={
           <Button
             onClick={openCreate}
             className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm w-fit shrink-0"
           >
             <Plus className="w-4 h-4 mr-2" />Nouveau membre
           </Button>
-        </div>
-        <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
-          {kpis.map((k, i) => (
-            <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
-              <div className="text-base mb-0.5">{k.icon}</div>
-              <div className="text-xl font-bold">{k.value}</div>
-              <div className="text-xs text-white/65">{k.label}</div>
-            </div>
-          ))}
-        </div>
+        }
+      />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {kpis.map((k, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 text-center">
+            <div className="text-base mb-0.5">{k.icon}</div>
+            <div className="text-xl font-bold text-foreground">{k.value}</div>
+            <div className="text-xs text-muted-foreground">{k.label}</div>
+          </div>
+        ))}
       </div>
 
       {/* ── Filters ── */}

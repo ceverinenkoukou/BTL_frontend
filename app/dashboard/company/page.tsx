@@ -13,8 +13,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Target, Trophy, ShoppingCart, TrendingUp, Users,
   CalendarDays, MapPin, ArrowUp, Beer, Gift, Box, Clock, CheckCircle2, AlertCircle,
-  Download, FileText, RefreshCw, Tag, Activity, Gauge,
+  Download, FileText, RefreshCw, Tag, Activity, Gauge, Building2,
 } from "lucide-react";
+import { PageHeader } from "@/components/dashboard/page-header";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -30,18 +31,6 @@ function fmt(n: number) {
 }
 function fmtXOF(n: number) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
-}
-
-function initials(name: string) {
-  return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
-}
-
-function hex(color: string, alpha: number) {
-  const c = (color || "#006776").replace("#", "");
-  const r = parseInt(c.slice(0, 2), 16);
-  const g = parseInt(c.slice(2, 4), 16);
-  const b = parseInt(c.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) {
@@ -237,68 +226,45 @@ export default function CompanyDashboardPage() {
 
   const p1 = entreprise?.couleur_primaire ?? "#006776";
   const p2 = entreprise?.couleur_secondaire ?? "#00899b";
-  const brandGrad = `linear-gradient(135deg, ${p1} 0%, ${p2} 100%)`;
   const companyName = entreprise?.nom_commercial ?? user?.name ?? "Mon Entreprise";
 
   return (
     <div className="space-y-6">
 
-      {/* ── Hero ── */}
-      <div
-        className="relative overflow-hidden rounded-2xl p-6 md:p-8 text-white shadow-2xl animate-fade-up"
-        style={{ background: brandGrad, boxShadow: `0 25px 50px -12px ${hex(p1, 0.35)}` }}
-      >
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[url('/mediapuzzle.jpg')] bg-cover opacity-5" />
-        <div className="absolute -right-8 -top-8 w-56 h-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute right-20 -bottom-10 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="flex items-center gap-4">
-            {entreprise?.logo_url ? (
-              <img
-                src={entreprise.logo_url}
-                alt={companyName}
-                className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-contain bg-white p-2 border border-white/30 shadow-xl shrink-0"
-              />
-            ) : (
-              <div className="w-16 h-16 md:w-20 md:h-20 bg-white rounded-2xl flex items-center justify-center shadow-xl shrink-0">
-                <span className="font-black text-xl leading-none text-center px-1" style={{ color: p1 }}>
-                  {initials(companyName)}
-                </span>
-              </div>
+      {/* ── Header ── */}
+      <PageHeader
+        title={companyName}
+        description="Tableau de bord entreprise"
+        brandColor={p1}
+        brandSecondary={p2}
+        logoUrl={entreprise?.logo_url}
+        icon={!entreprise?.logo_url ? <Building2 className="w-5 h-5" /> : undefined}
+        ctaSlot={
+          <div className="flex items-center gap-2">
+            <Badge className="bg-white/25 text-white border-white/40 text-xs backdrop-blur-sm">
+              Entreprise
+            </Badge>
+            {campaigns.length > 0 && (
+              <Badge className="bg-green-400/30 text-white border-green-300/40 text-xs backdrop-blur-sm">
+                {campaigns.length} campagne{campaigns.length > 1 ? "s" : ""}
+              </Badge>
             )}
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Badge className="bg-white/25 text-white border-white/40 text-xs backdrop-blur-sm">
-                  Entreprise
-                </Badge>
-                {campaigns.length > 0 && (
-                  <Badge className="bg-green-400/30 text-white border-green-300/40 text-xs backdrop-blur-sm">
-                    {campaigns.length} campagne{campaigns.length > 1 ? "s" : ""}
-                  </Badge>
-                )}
-              </div>
-              <h1 className="text-xl md:text-3xl font-black tracking-tight leading-tight">{companyName}</h1>
-              <p className="text-white/80 text-sm mt-0.5">Tableau de bord entreprise</p>
-            </div>
           </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {[
-              { icon: <Clock className="w-4 h-4 text-white/60" />, value: campJoursEcoules, label: "Jours écoulés" },
-              { icon: <CalendarDays className="w-4 h-4 text-white/60" />, value: campJoursRestants, label: "Jours restants" },
-              { icon: <MapPin className="w-4 h-4 text-white/60" />, value: sites.length, label: "Sites actifs" },
-              { icon: <Target className="w-4 h-4 text-white/60" />, value: campaigns.length, label: "Campagnes" },
-            ].map((s, i) => (
-              <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl px-3 py-3 text-center border border-white/10">
-                <div className="flex justify-center mb-1">{s.icon}</div>
-                <p className="font-black text-xl tabular-nums">{s.value}</p>
-                <p className="text-white/65 text-[11px] font-medium mt-0.5">{s.label}</p>
-              </div>
-            ))}
+        }
+      />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { icon: <Clock className="w-4 h-4 text-muted-foreground" />, value: campJoursEcoules, label: "Jours écoulés" },
+          { icon: <CalendarDays className="w-4 h-4 text-muted-foreground" />, value: campJoursRestants, label: "Jours restants" },
+          { icon: <MapPin className="w-4 h-4 text-muted-foreground" />, value: sites.length, label: "Sites actifs" },
+          { icon: <Target className="w-4 h-4 text-muted-foreground" />, value: campaigns.length, label: "Campagnes" },
+        ].map((s, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3 py-3 text-center">
+            <div className="flex justify-center mb-1">{s.icon}</div>
+            <p className="font-black text-xl tabular-nums text-foreground">{s.value}</p>
+            <p className="text-muted-foreground text-[11px] font-medium mt-0.5">{s.label}</p>
           </div>
-        </div>
+        ))}
       </div>
 
       {/* ── Mes campagnes ── */}
