@@ -32,11 +32,17 @@ import {
   X,
   ChevronDown,
   Tag,
+  Download,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import type { CampagneList } from "@/lib/types/backend";
 
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
 
 interface NavItem {
   href: string;
@@ -73,6 +79,23 @@ export function DashboardSidebar() {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [entrepriseCampaigns, setEntrepriseCampaigns] = useState<CampagneList[]>([]);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") setInstallPrompt(null);
+  };
 
   const userRole = user?.role || "Non defini";
   const isEntreprise = userRole === "Entreprise";
@@ -248,6 +271,12 @@ export function DashboardSidebar() {
           <NavLinks />
         </div>
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-sidebar-border">
+          {installPrompt && (
+            <button onClick={handleInstall} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-all duration-150 mb-2">
+              <Download className="w-5 h-5 opacity-60 shrink-0" />
+              <span>Installer l&apos;application</span>
+            </button>
+          )}
           <UserMenu user={user} signOut={signOut} getInitials={getInitials} />
         </div>
       </aside>
@@ -263,6 +292,12 @@ export function DashboardSidebar() {
         </nav>
 
         <div className="p-4 border-t border-sidebar-border">
+          {installPrompt && (
+            <button onClick={handleInstall} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-all duration-150 mb-2">
+              <Download className="w-5 h-5 opacity-60 shrink-0" />
+              <span>Installer l&apos;application</span>
+            </button>
+          )}
           <UserMenu user={user} signOut={signOut} getInitials={getInitials} />
         </div>
       </aside>
