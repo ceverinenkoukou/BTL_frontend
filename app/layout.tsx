@@ -45,14 +45,14 @@ export const metadata: Metadata = {
   },
   other: {
     'mobile-web-app-capable': 'yes',
-    'msapplication-TileColor': '#105062',
+    'msapplication-TileColor': '#1B4F5C',
     'msapplication-TileImage': '/icons/icon-144x144.png',
     'msapplication-config': 'none',
   },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#105062',
+  themeColor: '#1B4F5C',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,

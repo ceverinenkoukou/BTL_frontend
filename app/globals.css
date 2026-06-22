@@ -4,41 +4,41 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* ── Mhedia BTL – Light mode ───────────────────────────────────────── */
-  --background: #f2f2f2;         /* Gris clair */
-  --foreground: #333333;         /* Gris foncé */
+  /* ── Mhedia BTL – Light mode (palette officielle MHédia) ─────────────── */
+  --background: #EAF7F8;         /* Bleu très clair */
+  --foreground: #1A3A40;         /* Teal très foncé */
   --card: #ffffff;
-  --card-foreground: #333333;
+  --card-foreground: #1A3A40;
   --popover: #ffffff;
-  --popover-foreground: #333333;
-  --primary: #006776;            /* Bleu pétrole */
+  --popover-foreground: #1A3A40;
+  --primary: #2E7A8C;            /* Teal/bleu canard */
   --primary-foreground: #ffffff;
-  --secondary: #e8f4f6;          /* Teal très clair */
-  --secondary-foreground: #006776;
-  --muted: #f2f2f2;
-  --muted-foreground: #7a7a7a;
-  --accent: #00899b;             /* Teal secondaire */
-  --accent-foreground: #ffffff;
+  --secondary: #CDEEF0;          /* Turquoise clair éclairci */
+  --secondary-foreground: #1B4F5C;
+  --muted: #E8EFF0;
+  --muted-foreground: #8C8C8C;   /* Gris moyen */
+  --accent: #00C9D4;             /* Cyan vif */
+  --accent-foreground: #1A3A40;
   --destructive: oklch(0.57 0.24 25);
   --destructive-foreground: #ffffff;
-  --border: #dde0e0;
-  --input: #e6e9ea;
-  --ring: #006776;
-  --chart-1: #006776;
-  --chart-2: #00899b;
-  --chart-3: #4db8c8;
-  --chart-4: #333333;
-  --chart-5: #7a7a7a;
+  --border: #CFE3E5;
+  --input: #D7E8EA;
+  --ring: #2E7A8C;
+  --chart-1: #2E7A8C;
+  --chart-2: #00C9D4;
+  --chart-3: #7FD4D9;
+  --chart-4: #1A3A40;
+  --chart-5: #8C8C8C;
   --radius: 0.75rem;
   /* Sidebar – fond foncé teal profond */
-  --sidebar: #0d2d33;
-  --sidebar-foreground: #f2f2f2;
-  --sidebar-primary: #006776;
+  --sidebar: #1B4F5C;            /* Teal foncé */
+  --sidebar-foreground: #EAF7F8;
+  --sidebar-primary: #2E7A8C;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #193f47;
-  --sidebar-accent-foreground: #f2f2f2;
-  --sidebar-border: #1f4d57;
-  --sidebar-ring: #006776;
+  --sidebar-accent: #276370;
+  --sidebar-accent-foreground: #EAF7F8;
+  --sidebar-border: #2D6F80;
+  --sidebar-ring: #2E7A8C;
   --success: oklch(0.62 0.2 145);
   --success-foreground: #ffffff;
   --warning: oklch(0.78 0.2 80);
@@ -46,39 +46,39 @@
 }
 
 .dark {
-  /* ── Mhedia BTL – Dark mode ────────────────────────────────────────── */
-  --background: #1a1a1a;
-  --foreground: #f2f2f2;
-  --card: #242424;
-  --card-foreground: #f2f2f2;
-  --popover: #242424;
-  --popover-foreground: #f2f2f2;
-  --primary: #00899b;            /* Teal un peu plus clair en dark */
-  --primary-foreground: #ffffff;
-  --secondary: #1f3d42;
-  --secondary-foreground: #f2f2f2;
-  --muted: #2a2a2a;
-  --muted-foreground: #9a9a9a;
-  --accent: #006776;
+  /* ── Mhedia BTL – Dark mode (transposition cohérente de la palette) ── */
+  --background: #15282D;
+  --foreground: #EAF7F8;
+  --card: #1D3338;
+  --card-foreground: #EAF7F8;
+  --popover: #1D3338;
+  --popover-foreground: #EAF7F8;
+  --primary: #00C9D4;            /* Cyan vif, plus visible en dark */
+  --primary-foreground: #1A3A40;
+  --secondary: #1B4F5C;
+  --secondary-foreground: #7FD4D9;
+  --muted: #1E363B;
+  --muted-foreground: #A9BDC0;
+  --accent: #2E7A8C;
   --accent-foreground: #ffffff;
   --destructive: oklch(0.5 0.2 25);
   --destructive-foreground: #f2f2f2;
-  --border: #2e2e2e;
-  --input: #2a2a2a;
-  --ring: #00899b;
-  --chart-1: #00899b;
-  --chart-2: #4db8c8;
-  --chart-3: #006776;
-  --chart-4: #f2f2f2;
-  --chart-5: #9a9a9a;
-  --sidebar: #091e22;
-  --sidebar-foreground: #f2f2f2;
-  --sidebar-primary: #00899b;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #142d33;
-  --sidebar-accent-foreground: #f2f2f2;
-  --sidebar-border: #1a3a40;
-  --sidebar-ring: #00899b;
+  --border: #234A52;
+  --input: #1E3D44;
+  --ring: #00C9D4;
+  --chart-1: #00C9D4;
+  --chart-2: #7FD4D9;
+  --chart-3: #2E7A8C;
+  --chart-4: #EAF7F8;
+  --chart-5: #A9BDC0;
+  --sidebar: #0E1F24;
+  --sidebar-foreground: #EAF7F8;
+  --sidebar-primary: #00C9D4;
+  --sidebar-primary-foreground: #1A3A40;
+  --sidebar-accent: #16323A;
+  --sidebar-accent-foreground: #EAF7F8;
+  --sidebar-border: #1C3D45;
+  --sidebar-ring: #00C9D4;
   --success: oklch(0.65 0.18 150);
   --success-foreground: #ffffff;
   --warning: oklch(0.8 0.18 80);
@@ -180,15 +180,14 @@
 .bg-puzzle { position: relative; }
 .bg-puzzle::before {
   content: "";
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: -1;
-  background-image: url('/mediapuzzle.jpg');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-attachment: fixed;
-  opacity: 0.055;
+  background-image: url('/puzzle-watermark.svg');
+  background-size: 280px 280px;
+  background-position: top left;
+  background-repeat: repeat;
+  opacity: 0.06;
   pointer-events: none;
 }
 

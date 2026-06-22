@@ -55,6 +55,20 @@ const emptySiteForm: SiteForm = {
   emplacement_precis: "",
 };
 
+type CreateSiteForm = {
+  nom: string;
+  ville: string;
+  emplacement_precis: string;
+  campagne: string;
+};
+
+const emptyCreateForm: CreateSiteForm = {
+  nom: "",
+  ville: "Libreville",
+  emplacement_precis: "",
+  campagne: "",
+};
+
 type PromoForm = {
   type_promotion: TypePromotion;
   quantite_requise: string;
@@ -107,6 +121,10 @@ export default function SitesPage() {
   const [showHotesseForm, setShowHotesseForm] = useState(false);
   const [hotesseForm, setHotesseForm] = useState<HotesseForm>(emptyHotesseForm);
   const [savingTeam, setSavingTeam] = useState(false);
+
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateSiteForm>(emptyCreateForm);
+  const [savingCreate, setSavingCreate] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -170,6 +188,53 @@ export default function SitesPage() {
 
     return [...groups.values()];
   }, [filteredSites]);
+
+  const openCreateDialog = () => {
+    setCreateForm({
+      ...emptyCreateForm,
+      campagne: filterCampaign !== "all" ? filterCampaign : "",
+    });
+    setShowCreateDialog(true);
+  };
+
+  const handleCreateSite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createForm.nom.trim() || !createForm.campagne) return;
+    setSavingCreate(true);
+    try {
+      const { data } = await api.post<{ id: string; nom: string; ville: string; emplacement_precis: string | null; campagne: string; created_at: string }>("/sites/", {
+        nom: createForm.nom.trim(),
+        ville: createForm.ville.trim() || "Libreville",
+        emplacement_precis: createForm.emplacement_precis.trim() || null,
+        campagne: createForm.campagne,
+      });
+      toast.success(`Site "${data.nom}" créé avec succès.`);
+      setShowCreateDialog(false);
+      setCreateForm(emptyCreateForm);
+      await fetchAll();
+      const campaign = campaigns.find(c => c.id === createForm.campagne);
+      if (campaign?.type_recompense === "PROMOTIONS") {
+        const entreprise = entreprises.find(e => e.id === campaign.entreprise);
+        const newSite: SiteList = {
+          id: data.id,
+          nom: data.nom,
+          ville: data.ville,
+          emplacement_precis: data.emplacement_precis,
+          campagne: data.campagne,
+          campagne_nom: campaign.nom,
+          entreprise_nom: entreprise?.nom_commercial ?? "",
+          nb_hotesses: 0,
+          nb_superviseurs: 0,
+          created_at: data.created_at,
+        };
+        openOffersDialog(newSite);
+      }
+    } catch {
+      toast.error("Erreur lors de la création du site.");
+    } finally {
+      setSavingCreate(false);
+    }
+  };
 
   const openEditDialog = (site: SiteList) => {
     setEditingSite(site);
@@ -435,9 +500,17 @@ export default function SitesPage() {
                 </div>
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Gestion des sites</h1>
               </div>
-              <p className="text-white/70 text-sm ml-12">
+              <div className="text-white/70 text-sm ml-12 mb-3">
                 Modifier les sites des campagnes et cibler les offres par site.
-              </p>
+              </div>
+              <button
+                type="button"
+                onClick={openCreateDialog}
+                className="mt-1 ml-12 inline-flex items-center gap-2 rounded-lg border border-white/40 bg-white/15 px-4 py-2 text-sm font-medium text-white hover:bg-white/25 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Nouveau site
+              </button>
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
@@ -578,6 +651,67 @@ export default function SitesPage() {
           ))}
         </div>
       )}
+
+      <Dialog open={showCreateDialog} onOpenChange={open => { if (!open) { setShowCreateDialog(false); setCreateForm(emptyCreateForm); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Créer un nouveau site</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateSite} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Campagne *</Label>
+              <Select value={createForm.campagne} onValueChange={v => setCreateForm(f => ({ ...f, campagne: v }))}>
+                <SelectTrigger><SelectValue placeholder="Sélectionner une campagne" /></SelectTrigger>
+                <SelectContent>
+                  {campaigns
+                    .filter(c => filterCompany === "all" || c.entreprise === filterCompany)
+                    .map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Nom du site *</Label>
+              <Input
+                placeholder="Ex: Carrefour Owendo, Stand Marché du Mont-Bouët"
+                value={createForm.nom}
+                onChange={e => setCreateForm(f => ({ ...f, nom: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Ville</Label>
+                <Input
+                  value={createForm.ville}
+                  onChange={e => setCreateForm(f => ({ ...f, ville: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Emplacement précis <span className="text-muted-foreground text-xs">(optionnel)</span></Label>
+                <Input
+                  placeholder="Allée 3, Entrée principale…"
+                  value={createForm.emplacement_precis}
+                  onChange={e => setCreateForm(f => ({ ...f, emplacement_precis: e.target.value }))}
+                />
+              </div>
+            </div>
+            {createForm.campagne && campaigns.find(c => c.id === createForm.campagne)?.type_recompense === "PROMOTIONS" && (
+              <div className="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+                <span className="text-base leading-none mt-0.5">🎁</span>
+                <span>Cette campagne utilise des <strong>offres promotionnelles</strong> — vous pourrez les configurer pour ce site juste après la création.</span>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={() => { setShowCreateDialog(false); setCreateForm(emptyCreateForm); }}>Annuler</Button>
+              <Button type="submit" disabled={savingCreate || !createForm.nom.trim() || !createForm.campagne}>
+                {savingCreate && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Créer le site
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!editingSite} onOpenChange={open => !open && setEditingSite(null)}>
         <DialogContent>
