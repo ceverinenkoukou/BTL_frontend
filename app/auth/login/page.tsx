@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, TrendingUp } from "lucide-react";
+import { Eye, EyeOff, Loader2, TrendingUp, Download } from "lucide-react";
 import { isAxiosError } from "axios";
 
 export default function LoginPage() {
@@ -17,6 +17,20 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const [installPrompt, setInstallPrompt] = useState<{ prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> } | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => { e.preventDefault(); setInstallPrompt(e as never); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") setInstallPrompt(null);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,6 +147,15 @@ export default function LoginPage() {
           </CardContent>
         </Card>
       </div>
+
+      {installPrompt && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4">
+          <button onClick={handleInstall} className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#006776] text-white text-sm font-medium shadow-lg shadow-[#006776]/30 hover:bg-[#005566] transition-colors">
+            <Download className="w-4 h-4" />
+            Installer l&apos;application sur cet appareil
+          </button>
+        </div>
+      )}
     </div>
   );
 }
