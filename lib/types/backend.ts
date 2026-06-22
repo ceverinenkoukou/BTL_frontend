@@ -389,6 +389,14 @@ export interface VenteStats {
   ventes_a_lunite: number;
 }
 
+export interface GainGoodie {
+  id: string;
+  campagne_nom: string;
+  goodie_nom: string;
+  hotesse_nom: string;
+  created_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Goodie
 // ---------------------------------------------------------------------------
