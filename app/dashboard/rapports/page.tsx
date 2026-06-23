@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
-import { FileText, Loader2, Search, RefreshCw, Mail, MailCheck } from "lucide-react";
+import { FileText, Loader2, Search, RefreshCw, Pencil, Clock, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,9 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import api from "@/lib/api";
-import type { RapportJournalier, SiteList, CampagneList } from "@/lib/types/backend";
-import { getRapports, genererRapports } from "@/lib/services/rapportService";
+import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList } from "@/lib/types/backend";
+import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
+import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
+import { buildBulletinHtml } from "@/lib/services/rapportBulletinHtml";
 
 function fmtXOF(val: string | number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -21,14 +26,26 @@ function fmtXOF(val: string | number) {
   }).format(Number(val));
 }
 
+function fmtHeure(val: string | null) {
+  return val ? val.slice(0, 5) : "—";
+}
+
 function unwrapList<T>(data: T[] | { results?: T[] }): T[] {
   if (Array.isArray(data)) return data;
   return data.results ?? [];
 }
 
+const EMPTY_EDIT_FORM: RapportJournalierUpdatePayload = {
+  stock_initial_magasin: null,
+  nombre_personnes_touchees: null,
+  avis_consommateurs: "",
+  observation_generale: "",
+};
+
 export default function RapportsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
+  const canEdit = user?.role === "Administrateur" || user?.role === "Superviseur";
 
   const [rapports, setRapports] = useState<RapportJournalier[]>([]);
   const [sites, setSites] = useState<SiteList[]>([]);
@@ -41,6 +58,11 @@ export default function RapportsPage() {
   const [filterCampagne, setFilterCampagne] = useState("all");
   const [filterDate, setFilterDate] = useState("");
   const [genDate, setGenDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const [editingRapport, setEditingRapport] = useState<RapportJournalier | null>(null);
+  const [editForm, setEditForm] = useState<RapportJournalierUpdatePayload>(EMPTY_EDIT_FORM);
+  const [saving, setSaving] = useState(false);
+  const [bulletinLoadingId, setBulletinLoadingId] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -89,6 +111,67 @@ export default function RapportsPage() {
       toast.error("Erreur lors de la génération.");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const openEdit = (rapport: RapportJournalier) => {
+    setEditingRapport(rapport);
+    setEditForm({
+      stock_initial_magasin: rapport.stock_initial_magasin,
+      nombre_personnes_touchees: rapport.nombre_personnes_touchees,
+      avis_consommateurs: rapport.avis_consommateurs ?? "",
+      observation_generale: rapport.observation_generale ?? "",
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRapport) return;
+    setSaving(true);
+    try {
+      const updated = await updateRapport(editingRapport.id, {
+        stock_initial_magasin: editForm.stock_initial_magasin || null,
+        nombre_personnes_touchees: editForm.nombre_personnes_touchees || null,
+        avis_consommateurs: editForm.avis_consommateurs || null,
+        observation_generale: editForm.observation_generale || null,
+      });
+      setRapports(prev => prev.map(r => (r.id === updated.id ? updated : r)));
+      toast.success("Rapport mis à jour.");
+      setEditingRapport(null);
+    } catch {
+      toast.error("Erreur lors de la mise à jour.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOpenBulletin = async (rapport: RapportJournalier) => {
+    setBulletinLoadingId(rapport.id);
+    try {
+      const campagneId = sites.find(s => s.id === rapport.site)?.campagne;
+      const campagneNom = campagnes.find(c => c.id === campagneId)?.nom ?? rapport.site_nom;
+
+      const [bulletin, configRes] = await Promise.all([
+        getBulletin(rapport.id),
+        campagneId
+          ? api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
+              `/rapport-journalier-configs/par-campagne/?campagne=${campagneId}`
+            ).then(r => r.data).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      const config: RapportJournalierConfig =
+        configRes && !("defaults" in configRes) ? configRes : { ...DEFAULT_RAPPORT_JOURNALIER_CONFIG };
+
+      const html = buildBulletinHtml(bulletin, config, campagneNom);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (win) win.document.title = `Bulletin — ${rapport.site_nom} — ${rapport.date}`;
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch {
+      toast.error("Erreur lors de la génération du bulletin.");
+    } finally {
+      setBulletinLoadingId(null);
     }
   };
 
@@ -143,7 +226,7 @@ export default function RapportsPage() {
               {generating
                 ? <Loader2 className="w-4 h-4 animate-spin" />
                 : <RefreshCw className="w-4 h-4" />}
-              Générer et envoyer les emails
+              Générer les rapports
             </Button>
           </form>
         </div>
@@ -213,11 +296,13 @@ export default function RapportsPage() {
                 <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Date</th>
                 <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Hôtesse</th>
                 <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Site</th>
+                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Pointage</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Dégustations</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Ventes</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Goodies</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">CA</th>
-                <th className="px-4 py-3 font-semibold text-muted-foreground">Email</th>
+                <th className="px-4 py-3 font-semibold text-muted-foreground">Bulletin</th>
+                {canEdit && <th className="px-4 py-3 font-semibold text-muted-foreground">Détails</th>}
               </tr>
             </thead>
             <tbody>
@@ -230,6 +315,11 @@ export default function RapportsPage() {
                   </td>
                   <td className="px-4 py-3 font-medium">{r.hotesse_nom}</td>
                   <td className="px-4 py-3 text-muted-foreground">{r.site_nom}</td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />{fmtHeure(r.heure_arrivee)} – {fmtHeure(r.heure_depart)}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-blue-600">
                     {r.nb_degustations}
                   </td>
@@ -242,17 +332,91 @@ export default function RapportsPage() {
                   <td className="px-4 py-3 text-right font-mono font-semibold text-violet-600">
                     {fmtXOF(r.chiffre_affaires)}
                   </td>
-                  <td className="px-4 py-3">
-                    {r.email_envoye
-                      ? <MailCheck className="w-4 h-4 text-emerald-500 mx-auto" />
-                      : <Mail className="w-4 h-4 text-muted-foreground/40 mx-auto" />}
+                  <td className="px-4 py-3 text-center">
+                    <Button
+                      variant="ghost" size="sm" className="h-8 w-8 p-0"
+                      disabled={bulletinLoadingId === r.id}
+                      onClick={() => handleOpenBulletin(r)}
+                      title="Voir le bulletin"
+                    >
+                      {bulletinLoadingId === r.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <FileDown className="w-3.5 h-3.5" />}
+                    </Button>
                   </td>
+                  {canEdit && (
+                    <td className="px-4 py-3 text-center">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEdit(r)}>
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Edit dialog — champs saisis manuellement */}
+      <Dialog open={!!editingRapport} onOpenChange={open => !open && setEditingRapport(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Détails du jour — {editingRapport?.hotesse_nom} ({editingRapport?.site_nom})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Stock magasin (début de journée)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editForm.stock_initial_magasin ?? ""}
+                  onChange={e => setEditForm(f => ({ ...f, stock_initial_magasin: e.target.value === "" ? null : Number(e.target.value) }))}
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Personnes touchées</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editForm.nombre_personnes_touchees ?? ""}
+                  onChange={e => setEditForm(f => ({ ...f, nombre_personnes_touchees: e.target.value === "" ? null : Number(e.target.value) }))}
+                  className="h-9"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Avis des consommateurs</Label>
+              <textarea
+                value={editForm.avis_consommateurs ?? ""}
+                onChange={e => setEditForm(f => ({ ...f, avis_consommateurs: e.target.value }))}
+                rows={3}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Observation générale</Label>
+              <textarea
+                value={editForm.observation_generale ?? ""}
+                onChange={e => setEditForm(f => ({ ...f, observation_generale: e.target.value }))}
+                rows={3}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setEditingRapport(null)}>Annuler</Button>
+              <Button onClick={handleSaveEdit} disabled={saving} className="gap-2">
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Enregistrer
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

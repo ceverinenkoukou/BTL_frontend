@@ -63,6 +63,18 @@ interface GainGoodieReport {
   created_at: string;
 }
 
+interface GainPromotionReport {
+  id: string;
+  type_promotion: "OFFERT" | "GAGNE" | "TIRAGE";
+  promotion_description: string;
+  quantite_requise: number;
+  quantite_offerte: number;
+  hotesse_nom: string;
+  site_nom: string;
+  nom_client: string | null;
+  created_at: string;
+}
+
 type VenteTypeFilter = "all" | Vente["type_vente"];
 
 const VENTE_TYPE_OPTIONS: { value: VenteTypeFilter; label: string }[] = [
@@ -205,6 +217,7 @@ export default function SalesPage() {
     goodiesSiteMap: Map<string, Map<string, number>>,
     goodiesTotalsBySite: Map<string, number>,
     gainGoodies: GainGoodieReport[],
+    gainPromotions: GainPromotionReport[],
     reportDateLabel: string,
   ): string => {
     const esc = (value: string | number | null | undefined) =>
@@ -214,8 +227,14 @@ export default function SalesPage() {
     const normalizeClientName = (value: string | null | undefined) =>
       (value || "Client").trim().replace(/\s+(achat|offert)$/i, "").replace(/\s+/g, " ");
 
+    // Les promotions GAGNE/TIRAGE ne créent pas de Vente(PROMOTION) (la récompense
+    // passe par la roue) : leur volume offert réel vient de la règle elle-même.
+    // OFFERT est exclu ici car déjà compté via la Vente(PROMOTION) correspondante.
+    const wheelGainPromotions = gainPromotions.filter(gp => gp.type_promotion !== "OFFERT");
+
     const totalVendu = reportSales.reduce((sum, s) => sum + (s.type_vente === "NORMAL" ? s.quantite : 0), 0);
-    const totalOfferts = reportSales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0);
+    const totalOfferts = reportSales.reduce((sum, s) => sum + (s.type_vente !== "NORMAL" ? s.quantite : 0), 0)
+      + wheelGainPromotions.reduce((sum, gp) => sum + (gp.quantite_offerte || 0), 0);
     const totalGoodies = gainGoodies.length;
     const periodGoodiesSiteMap = new Map<string, Map<string, number>>();
     gainGoodies.forEach(gain => {
@@ -251,6 +270,13 @@ export default function SalesPage() {
         hostMap.set(fallbackKey, { hotesse: hotesse || "Non renseignée", site: gain.site_nom, actes: 0, vendu: 0, offert: 0, goodies: 0 });
       }
       hostMap.get(fallbackKey)!.goodies += 1;
+    });
+    wheelGainPromotions.forEach(gp => {
+      const key = `${gp.hotesse_nom}__${gp.site_nom}`;
+      if (!hostMap.has(key)) {
+        hostMap.set(key, { hotesse: gp.hotesse_nom || "Non renseignée", site: gp.site_nom, actes: 0, vendu: 0, offert: 0, goodies: 0 });
+      }
+      hostMap.get(key)!.offert += gp.quantite_offerte || 0;
     });
     const hostesseRows = [...hostMap.values()]
       .sort((a, b) => b.vendu - a.vendu || b.offert - a.offert || a.hotesse.localeCompare(b.hotesse))
@@ -359,6 +385,33 @@ export default function SalesPage() {
           promo: gain.promotion_nom || "-",
           qRequise: gain.promotion_quantite_requise || 0,
           qOfferte: gain.promotion_quantite_offerte || 0,
+        });
+      }
+    });
+    wheelGainPromotions.forEach(gp => {
+      const date = new Date(gp.created_at);
+      const client = normalizeClientName(gp.nom_client);
+      const hotesse = gp.hotesse_nom || "Non renseignée";
+      const match = findTriggeringSale(date.getTime(), gp.hotesse_nom || undefined, gp.site_nom, client);
+      if (match) {
+        const row = match[1];
+        if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
+        row.offert += gp.quantite_offerte || 0;
+        if (row.promo === "-") { row.promo = gp.promotion_description; row.qRequise = gp.quantite_requise || 0; row.qOfferte = gp.quantite_offerte || 0; }
+      } else {
+        tMap.set(`promo__${gp.id}`, {
+          time: date.getTime(),
+          heure: formatTime(gp.created_at),
+          hotesse,
+          site: gp.site_nom,
+          client,
+          produit: "—",
+          vendu: 0,
+          offert: gp.quantite_offerte || 0,
+          goodie: "-",
+          promo: gp.promotion_description,
+          qRequise: gp.quantite_requise || 0,
+          qOfferte: gp.quantite_offerte || 0,
         });
       }
     });
@@ -540,6 +593,7 @@ export default function SalesPage() {
     const goodiesSiteMap = new Map<string, Map<string, number>>();
     const goodiesTotalsBySite = new Map<string, number>();
     let gainGoodies: GainGoodieReport[] = [];
+    let gainPromotions: GainPromotionReport[] = [];
 
     try {
       const companyCampaignNames = new Set(companySales.map(s => s.campagne_nom));
@@ -575,6 +629,12 @@ export default function SalesPage() {
         .catch(() => ({ data: [] as GainGoodieReport[] }));
       const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data.results ?? []);
       gainGoodies = gainsData.filter(gain => companySiteNames.has(gain.site_nom));
+
+      const gainPromosRes = await api
+        .get<GainPromotionReport[] | { results?: GainPromotionReport[] }>("/gains-promotions/")
+        .catch(() => ({ data: [] as GainPromotionReport[] }));
+      const gainPromosData = Array.isArray(gainPromosRes.data) ? gainPromosRes.data : (gainPromosRes.data.results ?? []);
+      gainPromotions = gainPromosData.filter(gp => companySiteNames.has(gp.site_nom));
     } catch {
       toast.error("Impossible de charger le détail des goodies pour le PDF.");
     }
@@ -595,8 +655,9 @@ export default function SalesPage() {
         const archiveId = `${entrepriseNom}__${day}`;
         if (existingArchiveIds.has(archiveId)) return;
         const dayGoodies = gainGoodies.filter(g => new Date(g.created_at).toISOString().slice(0, 10) === day);
+        const dayGainPromotions = gainPromotions.filter(gp => new Date(gp.created_at).toISOString().slice(0, 10) === day);
         const dayLabel = new Date(day).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-        const html = buildReportHtml(daySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, dayGoodies, dayLabel);
+        const html = buildReportHtml(daySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, dayGoodies, dayGainPromotions, dayLabel);
         saveArchive({ id: archiveId, entrepriseNom, generatedAt: `${day}T23:59:59.000Z`, label: dayLabel, htmlContent: html });
       });
     setArchives(loadArchives());
@@ -604,6 +665,7 @@ export default function SalesPage() {
     // Generate and open today's report only
     const todaySales = dayMap.get(todayStr) ?? [];
     const todayGoodies = gainGoodies.filter(g => new Date(g.created_at).toISOString().slice(0, 10) === todayStr);
+    const todayGainPromotions = gainPromotions.filter(gp => new Date(gp.created_at).toISOString().slice(0, 10) === todayStr);
     const todayLabel = new Date(todayStr).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
     if (todaySales.length === 0) {
@@ -611,7 +673,7 @@ export default function SalesPage() {
       return;
     }
 
-    const html = buildReportHtml(todaySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, todayGoodies, todayLabel);
+    const html = buildReportHtml(todaySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, todayGoodies, todayGainPromotions, todayLabel);
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, "_blank");

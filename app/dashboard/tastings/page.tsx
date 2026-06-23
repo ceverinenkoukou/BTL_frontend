@@ -5,7 +5,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import api, { invalidateCache } from "@/lib/api";
 import type {
   Degustation, CreateDegustationPayload, SiteList, MonSiteInfo,
-  TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion,
+  TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion, Genre,
 } from "@/lib/types/backend";
 import { enregistrerGainPromotion } from "@/lib/services/promotionService";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,11 @@ const AGE_OPTIONS: { value: TrancheAge; label: string }[] = [
   { value: "PLUS_50",  label: "Plus de 50 ans" },
 ];
 
+const GENRE_OPTIONS: { value: Genre; label: string }[] = [
+  { value: "HOMME", label: "Homme" },
+  { value: "FEMME", label: "Femme" },
+];
+
 const INTENT_OPTIONS: { value: IntentionAchat; label: string; color: string }[] = [
   { value: "FAIBLE",  label: "Faible",  color: "bg-red-100 text-red-700 border-red-200" },
   { value: "MOYENNE", label: "Moyenne", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
@@ -60,6 +65,7 @@ const EMPTY_FORM = {
   site: "",
   produit: "",
   tranche_age: "" as TrancheAge | "",
+  genre: "" as Genre | "",
   note_gout: 0,
   note_ambiance: 0,
   intention_achat: "" as IntentionAchat | "",
@@ -175,7 +181,7 @@ export default function TastingsPage() {
     e.preventDefault();
     const needsNote     = siteInfo?.note_gout_active;
   const needsAmbiance = siteInfo?.note_ambiance_active;
-  if (!form.site || !form.produit || !form.tranche_age || (needsNote && !form.note_gout) || (needsAmbiance && !form.note_ambiance) || !form.intention_achat) {
+  if (!form.site || !form.produit || !form.tranche_age || !form.genre || (needsNote && !form.note_gout) || (needsAmbiance && !form.note_ambiance) || !form.intention_achat) {
       toast.error("Veuillez remplir tous les champs obligatoires.");
       return;
     }
@@ -186,6 +192,7 @@ export default function TastingsPage() {
         site: form.site,
         produit: form.produit,
         tranche_age: form.tranche_age as TrancheAge,
+        genre: form.genre as Genre,
         ...(siteInfo?.note_gout_active     ? { note_gout:     form.note_gout     || null } : {}),
         ...(siteInfo?.note_ambiance_active ? { note_ambiance: form.note_ambiance || null } : {}),
         intention_achat: form.intention_achat as IntentionAchat,
@@ -478,12 +485,21 @@ export default function TastingsPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>Tranche d&apos;âge *</Label>
-                <Select value={form.tranche_age} onValueChange={v => setForm(f => ({ ...f, tranche_age: v as TrancheAge }))}>
-                  <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
-                  <SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Tranche d&apos;âge *</Label>
+                  <Select value={form.tranche_age} onValueChange={v => setForm(f => ({ ...f, tranche_age: v as TrancheAge }))}>
+                    <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+                    <SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Genre *</Label>
+                  <Select value={form.genre} onValueChange={v => setForm(f => ({ ...f, genre: v as Genre }))}>
+                    <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+                    <SelectContent>{GENRE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {siteInfo?.note_ambiance_active && (

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import type { CampagneList, CreatePromotionPayload, Entreprise, Goodie, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
+import type { CampagneList, CreatePromotionPayload, Entreprise, Goodie, JourAnimation, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,6 +24,8 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Building2,
+  Calendar,
+  Clock,
   Edit2,
   Loader2,
   MapPin,
@@ -130,6 +132,54 @@ export default function SitesPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForm, setCreateForm] = useState<CreateSiteForm>(emptyCreateForm);
   const [savingCreate, setSavingCreate] = useState(false);
+
+  // --- Planning (jours animés) par site ---
+  const [planningSite, setPlanningSite] = useState<SiteList | null>(null);
+  const [siteJours, setSiteJours] = useState<JourAnimation[]>([]);
+  const [sitePlanForm, setSitePlanForm] = useState({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00" });
+  const [savingSitePlan, setSavingSitePlan] = useState(false);
+  const [sitePlanError, setSitePlanError] = useState("");
+
+  const openPlanningDialog = async (site: SiteList) => {
+    setPlanningSite(site);
+    setSiteJours([]);
+    setSitePlanError("");
+    setSitePlanForm({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00" });
+    try {
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?site=${site.id}`);
+      setSiteJours(Array.isArray(res.data) ? res.data : []);
+    } catch { /* silent */ }
+  };
+
+  const handleAddSiteJour = async () => {
+    if (!planningSite) return;
+    if (!sitePlanForm.date) { setSitePlanError("La date est requise."); return; }
+    setSavingSitePlan(true); setSitePlanError("");
+    try {
+      await api.post("/jours-animation/", {
+        campagne: planningSite.campagne,
+        site: planningSite.id,
+        date: sitePlanForm.date,
+        heure_ouverture: sitePlanForm.heure_ouverture,
+        heure_fermeture: sitePlanForm.heure_fermeture,
+      });
+      setSitePlanForm({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00" });
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?site=${planningSite.id}`);
+      setSiteJours(Array.isArray(res.data) ? res.data : []);
+    } catch (e: any) {
+      const d = e?.response?.data;
+      setSitePlanError(d?.date?.[0] || d?.heure_fermeture?.[0] || d?.non_field_errors?.[0] || d?.detail || "Erreur lors de l'ajout.");
+    } finally { setSavingSitePlan(false); }
+  };
+
+  const handleDeleteSiteJour = async (jourId: string) => {
+    if (!planningSite) return;
+    try {
+      await api.delete(`/jours-animation/${jourId}/`);
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?site=${planningSite.id}`);
+      setSiteJours(Array.isArray(res.data) ? res.data : []);
+    } catch { toast.error("Impossible de supprimer ce jour."); }
+  };
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -641,6 +691,10 @@ export default function SitesPage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="outline" size="sm" onClick={() => openPlanningDialog(site)} className="gap-2">
+                          <Clock className="w-4 h-4" />
+                          Planning
+                        </Button>
                         <Button variant="outline" size="sm" onClick={() => openOffersDialog(site)} className="gap-2">
                           <SlidersHorizontal className="w-4 h-4" />
                           Offres
@@ -1137,6 +1191,78 @@ export default function SitesPage() {
         </DialogContent>
       </Dialog>
       {/* ---- Dialog Hôtesses ---- */}
+      {/* ---- Dialog Planning site ---- */}
+      <Dialog open={!!planningSite} onOpenChange={open => !open && setPlanningSite(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-indigo-600" />
+              Planning — {planningSite?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          {planningSite && (() => {
+            const camp = campaigns.find(c => c.id === planningSite.campagne);
+            return (
+              <div className="space-y-4">
+                {/* List */}
+                {siteJours.length > 0 ? (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {siteJours.map(j => (
+                      <div key={j.id} className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-xl">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span className="text-xs font-semibold text-foreground">
+                            {new Date(j.date + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{j.heure_ouverture.slice(0, 5)}–{j.heure_fermeture.slice(0, 5)}</span>
+                        </div>
+                        <button onClick={() => handleDeleteSiteJour(j.id)}
+                          className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors shrink-0">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic text-center py-2">Aucun jour animé défini pour ce site</p>
+                )}
+
+                {/* Add form */}
+                <div className="pt-3 border-t border-slate-100 space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ajouter un jour</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <Label className="text-xs text-muted-foreground">Date</Label>
+                      <Input type="date" value={sitePlanForm.date}
+                        min={camp?.date_debut} max={camp?.date_fin}
+                        onChange={e => setSitePlanForm(f => ({ ...f, date: e.target.value }))}
+                        className="h-8 text-xs mt-0.5" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Ouverture</Label>
+                      <Input type="time" value={sitePlanForm.heure_ouverture}
+                        onChange={e => setSitePlanForm(f => ({ ...f, heure_ouverture: e.target.value }))}
+                        className="h-8 text-xs mt-0.5" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Fermeture</Label>
+                      <Input type="time" value={sitePlanForm.heure_fermeture}
+                        onChange={e => setSitePlanForm(f => ({ ...f, heure_fermeture: e.target.value }))}
+                        className="h-8 text-xs mt-0.5" />
+                    </div>
+                  </div>
+                  {sitePlanError && <p className="text-xs text-rose-500">{sitePlanError}</p>}
+                  <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleAddSiteJour} disabled={savingSitePlan}>
+                    {savingSitePlan ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    Ajouter
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!hotelSite} onOpenChange={open => !open && setHotelSite(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>

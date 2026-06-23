@@ -33,8 +33,21 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FileDown, Loader2 } from "lucide-react";
 import type { Campaign, CampaignSite, CampaignTeamMember, Company, Profile, Sale, Tasting, Zone } from "@/lib/types";
+import type { RapportConfig } from "@/lib/types/backend";
+import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 
-type HostessTasting = Tasting;
+type HostessTasting = Tasting & {
+  // Données brutes du formulaire hôtesse, utilisées par la section "Détail des dégustations"
+  hostess_name?: string;
+  site_name?: string;
+  product_name?: string;
+  nom_client?: string | null;
+  tranche_age_display?: string;
+  intention_achat_display?: string;
+  note_gout?: number | null;
+  note_ambiance?: number | null;
+  a_achete?: boolean;
+};
 type StaffMember = CampaignTeamMember & {
   daily_objective?: number;
   site?: CampaignSite;
@@ -84,6 +97,13 @@ type SiteStat = {
   hostesses: HostessStat[];
 };
 type Palette = ReturnType<typeof buildPalette>;
+type HoraireSite = {
+  site: string | null;
+  site_nom: string | null;
+  date: string;
+  heure_ouverture: string;
+  heure_fermeture: string;
+};
 type CampaignReportProps = {
   campaign: ReportCampaign;
   user?: Profile | null;
@@ -91,6 +111,8 @@ type CampaignReportProps = {
   sales?: ReportSale[];
   team?: StaffMember[];
   sites?: CampaignSite[];
+  horaires?: HoraireSite[];
+  reportConfig?: RapportConfig | null;
 };
 type GeneratePDFArgs = {
   campaign: ReportCampaign;
@@ -99,10 +121,12 @@ type GeneratePDFArgs = {
   siteStats: SiteStat[];
   tastings: HostessTasting[];
   sales: ReportSale[];
+  horaires: HoraireSite[];
   isAdminOrSupervisor: boolean;
   palette: Palette;
   logoBase64: string | null;
   logoMimeType: string;
+  cfg: RapportConfig;
 };
 
 
@@ -232,6 +256,49 @@ async function extractDominantColor(src: string): Promise<RGB | null> {
   });
 }
 
+const DATA_URI_RE = /^data:([^;]+);base64,(.+)$/;
+
+/** Mappe un mime-type ("image/png") vers le format attendu par jsPDF ("PNG"). */
+function mimeToJsPdfFormat(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m.includes("jpeg") || m.includes("jpg")) return "JPEG";
+  if (m.includes("webp")) return "WEBP";
+  if (m.includes("gif")) return "GIF";
+  if (m.includes("bmp")) return "BMP";
+  return "PNG";
+}
+
+/**
+ * Charge une image (URL distante ou data-URI) et la convertit en data-URI PNG
+ * via un canvas, pour qu'elle soit exploitable par jsPDF (doc.addImage).
+ * Retourne null en cas d'échec (CORS, format non supporté…).
+ */
+async function loadImageAsDataUrl(src: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { resolve(null); return; }
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL("image/png"));
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 // 3. Résolution du branding final
 // ─────────────────────────────────────────────────────────────
@@ -258,7 +325,25 @@ async function resolveBranding(company?: BrandCompany) {
     primaryRgb = hexToRgb(company.color) ?? hexToRgb(`#${company.color}`);
   }
 
-  // Priorité 3 — extraction depuis logoUrl
+  // Logo de l'entreprise (Entreprise.logo_url) — data-URI directe ou URL à convertir
+  if (!logoBase64 && company?.logoUrl) {
+    const directMatch = DATA_URI_RE.exec(company.logoUrl);
+    if (directMatch) {
+      logoMimeType = directMatch[1];
+      logoBase64 = directMatch[2];
+    } else {
+      try {
+        const dataUrl = await loadImageAsDataUrl(company.logoUrl);
+        const match = dataUrl ? DATA_URI_RE.exec(dataUrl) : null;
+        if (match) {
+          logoMimeType = match[1];
+          logoBase64 = match[2];
+        }
+      } catch { /* logo distant inaccessible (CORS, etc.) — pas de logo dans le PDF */ }
+    }
+  }
+
+  // Priorité 3 — extraction de couleur depuis logoUrl (si pas déjà trouvée)
   if (!primaryRgb && company?.logoUrl) {
     try {
       primaryRgb = await extractDominantColor(company.logoUrl);
@@ -290,6 +375,19 @@ async function resolveBranding(company?: BrandCompany) {
 const fmt     = (n: number | string)   => Number(n ?? 0).toLocaleString("fr-FR");
 const fmtDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("fr-FR") : "—";
 const pct     = (a: number, b: number) => b > 0 ? Math.round((a / b) * 100) : 0;
+
+/**
+ * Retourne la première valeur non vide (après trim) de la liste, ou "" si
+ * aucune. Contrairement à `??`, traite aussi les chaînes vides ("") comme
+ * absentes — utile car certains champs backend (ex: RapportConfig.titre_personnalise)
+ * valent "" par défaut plutôt que null.
+ */
+function firstNonEmpty(...values: (string | null | undefined)[]): string {
+  for (const v of values) {
+    if (v && v.trim().length > 0) return v;
+  }
+  return "";
+}
 
 const GMS_ID = "3";
 const CHR_ID = "4";
@@ -357,13 +455,28 @@ function buildSiteStats(hostessStats: HostessStat[], tastings: HostessTasting[],
   });
 }
 
+type SiteHoraires = { name: string; horaires: string; jours: number };
+
+/** Pour chaque site, déduit l'horaire effectif (entrées propres au site, sinon entrées "tous les sites" de la campagne). */
+function buildSiteHoraires(horaires: HoraireSite[], siteStats: SiteStat[]): SiteHoraires[] {
+  const fmtRange = (o: string, f: string) => `${o.slice(0, 5)} – ${f.slice(0, 5)}`;
+  const globalEntries = horaires.filter(h => !h.site);
+  return siteStats.map(site => {
+    const own = horaires.filter(h => h.site === site.id);
+    const entries = own.length > 0 ? own : globalEntries;
+    if (entries.length === 0) return { name: site.name, horaires: "—", jours: 0 };
+    const ranges = [...new Set(entries.map(h => fmtRange(h.heure_ouverture, h.heure_fermeture)))];
+    return { name: site.name, horaires: ranges.join(" / "), jours: entries.length };
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 // 6. Construction PDF
 // ─────────────────────────────────────────────────────────────
 
 function generatePDF({
-  campaign, user, hostessStats, siteStats, tastings, sales,
-  isAdminOrSupervisor, palette, logoBase64, logoMimeType,
+  campaign, user, hostessStats, siteStats, tastings, sales, horaires,
+  isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
 }: GeneratePDFArgs) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const PW = doc.internal.pageSize.getWidth();
@@ -395,8 +508,8 @@ function generatePDF({
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
     doc.setTextColor(...P.headerText);
-    doc.text(company.name ?? "—", M, 8.2);
-    doc.text(campaign.name ?? "—", PW - M, 8.2, { align: "right" });
+    doc.text(firstNonEmpty(company.name, "—"), M, 8.2);
+    doc.text(firstNonEmpty(campaign.name, "—"), PW - M, 8.2, { align: "right" });
     doc.setFont("helvetica", "normal");
     doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, PW / 2, 8.2, { align: "center" });
     Y = 18;
@@ -413,26 +526,34 @@ function generatePDF({
 
     // ── Logo entreprise ──
     let logoPlaced = false;
-    if (logoBase64) {
+    if (cfg.show_logo && logoBase64) {
       try {
-        doc.addImage(logoBase64, logoMimeType, M, 8, 0, 28); // hauteur fixe 28mm, largeur auto
+        doc.addImage(logoBase64, mimeToJsPdfFormat(logoMimeType), M, 8, 0, 28); // hauteur fixe 28mm, largeur auto
         logoPlaced = true;
       } catch { /* logo invalide */ }
     }
 
     // ── Nom entreprise ──
-    if (!logoPlaced) {
+    // Affiché systématiquement (même si un logo est présent) : le logo seul
+    // ne suffit pas à identifier l'entreprise dans le rapport.
+    const companyName = firstNonEmpty(company.name, "Entreprise");
+    if (logoPlaced) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(...P.headerText);
+      doc.text(companyName, PW - M, 16, { align: "right" });
+    } else {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(20);
       doc.setTextColor(...P.headerText);
-      doc.text(company.name ?? "Entreprise", M, 26);
+      doc.text(companyName, M, 26);
     }
 
     // ── Sous-titre ──
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(...lighten(P.primary, 0.6));
-    doc.text("Rapport de Campagne Promotionnelle", M, 42);
+    doc.text(firstNonEmpty(cfg.sous_titre_personnalise, "Rapport de Campagne Promotionnelle"), M, 42);
 
     // ── Fond blanc corps ──
     doc.setFillColor(...P.white);
@@ -447,7 +568,7 @@ function generatePDF({
     doc.setFont("helvetica", "bold");
     doc.setFontSize(17);
     doc.setTextColor(...P.dark);
-    doc.text(campaign.name ?? "Campagne", M + 8, 79);
+    doc.text(firstNonEmpty(cfg.titre_personnalise, campaign.name, "Campagne"), M + 8, 79);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
@@ -553,15 +674,17 @@ function generatePDF({
   const totalGoodies  = hostessStats.reduce((a, h) => a + h.goodiesCount, 0);
 
   sectionTitle("Synthèse globale");
-  kpiRow([
-    { value: fmt(totalTastings),              label: TASTING_LABEL },
-    { value: fmt(totalSales),                 label: "Distributions" },
-    { value: `${totalRevenue.toFixed(0)} €`,  label: "Chiffre d'affaires" },
-    { value: fmt(totalGoodies),               label: "Goodies distribués" },
-    { value: fmt(siteStats.length),           label: "Sites actifs" },
-  ]);
+  const kpis = [
+    cfg.show_kpi_degustations ? { value: fmt(totalTastings),             label: TASTING_LABEL }          : null,
+    cfg.show_kpi_ventes       ? { value: fmt(totalSales),                label: "Distributions" }        : null,
+    cfg.show_kpi_ca           ? { value: `${totalRevenue.toFixed(0)} €`, label: "Chiffre d'affaires" }   : null,
+    cfg.show_kpi_goodies      ? { value: fmt(totalGoodies),              label: "Goodies distribués" }   : null,
+    cfg.show_kpi_sites        ? { value: fmt(siteStats.length),          label: "Sites actifs" }         : null,
+  ].filter(Boolean) as { value: string | number; label: string }[];
+  if (kpis.length > 0) kpiRow(kpis);
 
   // ── Offres promotionnelles ──────────────────────────────
+  if (cfg.show_section_offres_promo) {
   sectionTitle("Détail des offres promotionnelles");
   if (isGMS) {
     const totalCan   = sales.reduce((a, s) => a + (s.quantity ?? 0), 0);
@@ -592,98 +715,210 @@ function generatePDF({
       prodMap[k].qty += s.quantity ?? 0;
       prodMap[k].rev += s.total_amount ?? 0;
     });
+    const offresHead = cfg.show_col_ca ? ["Produit", "Qté vendue", "CA (€)"] : ["Produit", "Qté vendue"];
     table(
-      ["Produit", "Qté vendue", "CA (€)"],
-      Object.entries(prodMap).map(([n, v]) => [n, fmt(v.qty), v.rev.toFixed(2)])
+      offresHead,
+      Object.entries(prodMap).map(([n, v]) => cfg.show_col_ca ? [n, fmt(v.qty), v.rev.toFixed(2)] : [n, fmt(v.qty)])
+    );
+  }
+  } // end show_section_offres_promo
+
+  // ── Gains goodies globaux ──────────────────────────────
+  const offrLabel  = isGMS ? "Canettes offertes" : isCHR ? "Bouteilles offertes" : "Offres produit";
+  const tickLabel  = isGMS ? "Tickets tombola"   : isCHR ? "Tirages tombola"     : "Tickets";
+  if (cfg.show_section_gains_goodies) {
+  sectionTitle("Détail des gains de goodies");
+  const gainsHead = ["Site", TASTING_LABEL, "Distributions",
+    ...(cfg.show_col_goodies ? ["Goodies"] : []),
+    ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+  ];
+  table(
+    gainsHead,
+    siteStats.map(s => [
+      s.name, fmt(s.tastings), fmt(s.sales),
+      ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
+      ...(cfg.show_col_promo_details ? [
+        fmt(isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0),
+        fmt(isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0),
+      ] : []),
+    ])
+  );
+  } // end show_section_gains_goodies
+
+  // ── Observations manuelles ─────────────────────────────
+  if (cfg.show_observations && cfg.observations_manuelles) {
+    sectionTitle("Observations");
+    guard(20);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...P.dark);
+    const lines = doc.splitTextToSize(cfg.observations_manuelles, CW);
+    doc.text(lines, M, Y);
+    Y += lines.length * 5 + 6;
+  }
+
+  // ── Horaires d'ouverture des sites ─────────────────────
+  if (cfg.show_section_horaires_sites && horaires.length > 0) {
+    sectionTitle("Horaires d'ouverture des sites");
+    const siteHoraires = buildSiteHoraires(horaires, siteStats);
+    table(
+      ["Site", "Horaires", "Jours animés"],
+      siteHoraires.map(s => [s.name, s.horaires, fmt(s.jours)])
     );
   }
 
-  // ── Gains goodies globaux ──────────────────────────────
-  sectionTitle("Détail des gains de goodies");
-  const offrLabel  = isGMS ? "Canettes offertes" : isCHR ? "Bouteilles offertes" : "Offres produit";
-  const tickLabel  = isGMS ? "Tickets tombola"   : isCHR ? "Tirages tombola"     : "Tickets";
-  table(
-    ["Site", TASTING_LABEL, "Distributions", "Goodies", offrLabel, tickLabel],
-    siteStats.map(s => [
-      s.name, fmt(s.tastings), fmt(s.sales), fmt(s.goodies),
-      fmt(isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0),
-      fmt(isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0),
-    ])
-  );
-
   // ── SECTIONS SELON RÔLE ────────────────────────────────
   if (isAdminOrSupervisor) {
-    // ── Offres par hôtesse ──────────────────────────────
     newPage();
-    sectionTitle("Offres promotionnelles par hôtesse");
-    table(
-      ["Hôtesse", "Site", TASTING_LABEL, "Distributions", "Qté totale", offrLabel, tickLabel, "Goodies"],
-      hostessStats.map(h => [
-        h.name, h.site, fmt(h.tastings), fmt(h.sales), fmt(h.totalQty),
-        fmt(isGMS ? (h.promoGains.canettesOffertes ?? 0) : isCHR ? (h.promoGains.bouteillesOffertes ?? 0) : 0),
-        fmt(isGMS ? (h.promoGains.ticketsTombola ?? 0)   : isCHR ? (h.promoGains.tirages ?? 0) : 0),
-        fmt(h.goodiesCount),
-      ])
-    );
+
+    // ── Détail des dégustations (formulaire hôtesse) ────
+    if (cfg.show_section_detail_degustations) {
+      sectionTitle("Détail des dégustations");
+      const detailHead = ["Hôtesse", "Site",
+        ...(cfg.show_col_nom_client ? ["Client"] : []),
+        ...(cfg.show_col_tranche_age ? ["Tranche d'âge"] : []),
+        ...(cfg.show_col_intention_achat ? ["Intention d'achat"] : []),
+        ...(cfg.inclure_notes_sensorielles ? ["Note goût", "Note ambiance"] : []),
+        "Achat",
+      ];
+      table(
+        detailHead,
+        tastings.map(t => [
+          t.hostess_name ?? "—", t.site_name ?? "—",
+          ...(cfg.show_col_nom_client ? [t.nom_client || "—"] : []),
+          ...(cfg.show_col_tranche_age ? [t.tranche_age_display ?? "—"] : []),
+          ...(cfg.show_col_intention_achat ? [t.intention_achat_display ?? "—"] : []),
+          ...(cfg.inclure_notes_sensorielles ? [
+            t.note_gout != null ? String(t.note_gout) : "—",
+            t.note_ambiance != null ? String(t.note_ambiance) : "—",
+          ] : []),
+          t.a_achete ? "Oui" : "Non",
+        ])
+      );
+    }
+
+    // ── Offres par hôtesse ──────────────────────────────
+    if (cfg.show_section_offres_par_hotesse && cfg.show_equipe_hotesses) {
+      sectionTitle("Offres promotionnelles par hôtesse");
+      const hotOffrHead = ["Hôtesse", "Site", TASTING_LABEL, "Distributions", "Qté totale",
+        ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+        ...(cfg.show_col_goodies ? ["Goodies"] : []),
+      ];
+      table(
+        hotOffrHead,
+        hostessStats.map(h => [
+          h.name, h.site, fmt(h.tastings), fmt(h.sales), fmt(h.totalQty),
+          ...(cfg.show_col_promo_details ? [
+            fmt(isGMS ? (h.promoGains.canettesOffertes ?? 0) : isCHR ? (h.promoGains.bouteillesOffertes ?? 0) : 0),
+            fmt(isGMS ? (h.promoGains.ticketsTombola ?? 0)   : isCHR ? (h.promoGains.tirages ?? 0) : 0),
+          ] : []),
+          ...(cfg.show_col_goodies ? [fmt(h.goodiesCount)] : []),
+        ])
+      );
+    }
 
     // ── Performance hôtesses vs objectif journalier ─────
-    sectionTitle("Performance hôtesses vs objectif journalier");
-    table(
-      ["Hôtesse", "Site", "Moy./jour", "Obj. journalier", "Taux d'atteinte", "Statut"],
-      hostessStats.map(h => [
-        h.name, h.site, fmt(h.avgPerDay), fmt(h.dailyObjective),
-        `${h.perfPct} %`,
-        h.perfPct >= 100 ? "✅ Atteint"
-          : h.perfPct >= 75 ? "⚠️ En approche"
-          : "❌ En deçà",
-      ])
-    );
+    if (cfg.show_section_perf_hotesses && cfg.show_equipe_hotesses) {
+      sectionTitle("Performance hôtesses vs objectif journalier");
+      const perfHead = ["Hôtesse", "Site", "Moy./jour", "Obj. journalier",
+        ...(cfg.show_col_performance ? ["Taux d'atteinte", "Statut"] : []),
+      ];
+      table(
+        perfHead,
+        hostessStats.map(h => [
+          h.name, h.site, fmt(h.avgPerDay), fmt(h.dailyObjective),
+          ...(cfg.show_col_performance ? [
+            `${h.perfPct} %`,
+            h.perfPct >= 100 ? "✅ Atteint" : h.perfPct >= 75 ? "⚠️ En approche" : "❌ En deçà",
+          ] : []),
+        ])
+      );
+    }
 
     // ── Performances par site ───────────────────────────
-    sectionTitle("Performances par site");
-    const siteObj = Math.max(1, Math.ceil(campaign.sales_objective / (siteStats.length || 1)));
-    table(
-      ["Site", "Localisation", TASTING_LABEL, "Distributions", "Objectif", "Taux", "CA (€)", "Goodies"],
-      siteStats.map(s => [
-        s.name, s.location, fmt(s.tastings), fmt(s.sales),
-        fmt(siteObj), `${pct(s.sales, siteObj)} %`,
-        s.revenue.toFixed(2), fmt(s.goodies),
-      ])
-    );
+    if (cfg.show_section_perf_sites) {
+      sectionTitle("Performances par site");
+      const siteObj = Math.max(1, Math.ceil(campaign.sales_objective / (siteStats.length || 1)));
+      const sitePerfHead = ["Site", "Localisation", TASTING_LABEL, "Distributions",
+        ...(cfg.show_col_performance ? ["Objectif", "Taux"] : []),
+        ...(cfg.show_col_ca ? ["CA (€)"] : []),
+        ...(cfg.show_col_goodies ? ["Goodies"] : []),
+      ];
+      table(
+        sitePerfHead,
+        siteStats.map(s => [
+          s.name, s.location, fmt(s.tastings), fmt(s.sales),
+          ...(cfg.show_col_performance ? [fmt(siteObj), `${pct(s.sales, siteObj)} %`] : []),
+          ...(cfg.show_col_ca ? [s.revenue.toFixed(2)] : []),
+          ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
+        ])
+      );
+    }
 
     // ── Goodies par site ────────────────────────────────
-    sectionTitle("Goodies distribués par site");
-    table(
-      ["Site", "Goodies directs", offrLabel, tickLabel, "Total avantages"],
-      siteStats.map(s => {
-        const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
-        const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
-        return [s.name, fmt(s.goodies), fmt(offrt), fmt(ticks), fmt(s.goodies + offrt + ticks)];
-      })
-    );
+    if (cfg.show_section_goodies_par_site) {
+      sectionTitle("Goodies distribués par site");
+      const goodiesSiteHead = ["Site",
+        ...(cfg.show_col_goodies ? ["Goodies directs"] : []),
+        ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+        "Total avantages",
+      ];
+      table(
+        goodiesSiteHead,
+        siteStats.map(s => {
+          const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
+          const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
+          return [
+            s.name,
+            ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
+            ...(cfg.show_col_promo_details ? [fmt(offrt), fmt(ticks)] : []),
+            fmt(s.goodies + offrt + ticks),
+          ];
+        })
+      );
+    }
 
   } else {
     // ── Rapport Entreprise ──────────────────────────────
     newPage();
-    sectionTitle("Détail des offres promotionnelles par site");
-    table(
-      ["Site", TASTING_LABEL, "Distributions", offrLabel, tickLabel],
-      siteStats.map(s => [
-        s.name, fmt(s.tastings), fmt(s.sales),
-        fmt(isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0),
-        fmt(isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0),
-      ])
-    );
+    if (cfg.show_section_offres_promo) {
+      sectionTitle("Détail des offres promotionnelles par site");
+      const entOffrHead = ["Site", TASTING_LABEL, "Distributions",
+        ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+      ];
+      table(
+        entOffrHead,
+        siteStats.map(s => [
+          s.name, fmt(s.tastings), fmt(s.sales),
+          ...(cfg.show_col_promo_details ? [
+            fmt(isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0),
+            fmt(isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0),
+          ] : []),
+        ])
+      );
+    }
 
-    sectionTitle("Goodies distribués par site");
-    table(
-      ["Site", "Goodies distribués", offrLabel, tickLabel, "Total avantages client"],
-      siteStats.map(s => {
-        const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
-        const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
-        return [s.name, fmt(s.goodies), fmt(offrt), fmt(ticks), fmt(s.goodies + offrt + ticks)];
-      })
-    );
+    if (cfg.show_section_goodies_par_site) {
+      sectionTitle("Goodies distribués par site");
+      const entGoodiesHead = ["Site",
+        ...(cfg.show_col_goodies ? ["Goodies distribués"] : []),
+        ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+        "Total avantages client",
+      ];
+      table(
+        entGoodiesHead,
+        siteStats.map(s => {
+          const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
+          const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
+          return [
+            s.name,
+            ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
+            ...(cfg.show_col_promo_details ? [fmt(offrt), fmt(ticks)] : []),
+            fmt(s.goodies + offrt + ticks),
+          ];
+        })
+      );
+    }
   }
 
   // ── Pied de page sur toutes les pages ─────────────────
@@ -697,7 +932,7 @@ function generatePDF({
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(...P.mid);
-    doc.text(`${company.name ?? "Rapport"} — ${campaign.name} — Confidentiel`, M, PH - 4);
+    doc.text(`${firstNonEmpty(company.name, "Rapport")} — ${firstNonEmpty(campaign.name, "Campagne")} — Confidentiel`, M, PH - 4);
     doc.text(`${i} / ${total}`, PW - M, PH - 4, { align: "right" });
   }
 
@@ -715,6 +950,8 @@ export default function CampaignReport({
   sales     = [],
   team      = [],
   sites     = [],
+  horaires  = [],
+  reportConfig,
 }: CampaignReportProps) {
   const [loading, setLoading] = useState(false);
   const isAdminOrSupervisor = user?.role === "admin" || user?.role === "supervisor";
@@ -728,9 +965,11 @@ export default function CampaignReport({
       const hostessStats = buildHostessStats(tastings, sales, team, campaign);
       const siteStats    = buildSiteStats(hostessStats, tastings, sales, sites);
 
+      const cfg: RapportConfig = reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG };
+
       const doc = generatePDF({
-        campaign, user, hostessStats, siteStats, tastings, sales,
-        isAdminOrSupervisor, palette, logoBase64, logoMimeType,
+        campaign, user, hostessStats, siteStats, tastings, sales, horaires,
+        isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
       });
 
       const slug = (campaign.name ?? "rapport").replace(/\s+/g, "_").toLowerCase();
@@ -741,7 +980,7 @@ export default function CampaignReport({
     } finally {
       setLoading(false);
     }
-  }, [campaign, user, tastings, sales, team, sites, isAdminOrSupervisor]);
+  }, [campaign, user, tastings, sales, team, sites, horaires, isAdminOrSupervisor, reportConfig]);
 
   return (
     <button

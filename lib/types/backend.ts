@@ -15,6 +15,7 @@ export type TrancheAge =
   | "PLUS_50";
 
 export type IntentionAchat = "FAIBLE" | "MOYENNE" | "ELEVEE";
+export type Genre = "HOMME" | "FEMME";
 export type TypeConditionnement = "UNITE" | "PACK";
 
 export type TypeCampagne = "DEGUSTATION" | "VENTE" | "DEGUSTATION_VENTE";
@@ -306,12 +307,15 @@ export interface Degustation {
   site: string;
   site_nom: string;
   campagne_nom: string;
+  hotesse: string;
   hotesse_nom: string;
   produit: string;
   produit_nom: string;
   nom_client: string | null;
   tranche_age: TrancheAge;
   tranche_age_display: string;
+  genre: Genre;
+  genre_display: string;
   note_gout: number | null;
   note_ambiance: number | null;
   intention_achat: IntentionAchat;
@@ -326,6 +330,7 @@ export interface CreateDegustationPayload {
   produit: string;
   nom_client?: string;
   tranche_age: TrancheAge;
+  genre: Genre;
   note_gout?: number | null;
   note_ambiance?: number | null;
   intention_achat: IntentionAchat;
@@ -364,6 +369,7 @@ export interface MonSiteInfo {
 
 export interface Vente {
   id: string;
+  hotesse: string;
   hotesse_nom: string;
   site_nom: string;
   campagne_nom: string;
@@ -394,6 +400,18 @@ export interface GainGoodie {
   campagne_nom: string;
   goodie_nom: string;
   hotesse_nom: string;
+  created_at: string;
+}
+
+export interface JourAnimation {
+  id: string;
+  campagne: string;
+  campagne_nom: string;
+  site: string | null;
+  site_nom: string | null;
+  date: string;
+  heure_ouverture: string;
+  heure_fermeture: string;
   created_at: string;
 }
 
@@ -497,13 +515,86 @@ export interface RapportJournalier {
   hotesse: string;
   hotesse_nom: string;
   date: string;
+  // Calculé automatiquement (Celery, chaque soir)
   nb_degustations: number;
   nb_ventes: number;
   nb_goodies: number;
   chiffre_affaires: string;
-  email_envoye: boolean;
+  heure_arrivee: string | null;
+  heure_depart: string | null;
+  // Saisi manuellement (superviseur / admin)
+  stock_initial_magasin: number | null;
+  nombre_personnes_touchees: number | null;
+  avis_consommateurs: string | null;
+  observation_generale: string | null;
   created_at: string;
 }
+
+export type RapportJournalierUpdatePayload = Partial<
+  Pick<RapportJournalier, "stock_initial_magasin" | "nombre_personnes_touchees" | "avis_consommateurs" | "observation_generale">
+>;
+
+export interface RapportJournalierBulletin extends RapportJournalier {
+  genre_breakdown: { hommes: number; femmes: number };
+  ugs_recus: { goodie: string; quantite: number }[];
+  ugs_distribues: { goodie: string; quantite: number }[];
+  ugs_restants: { goodie: string; quantite: number }[];
+  ventes_hors_promo: number;
+  ventes_promo_detail: {
+    quantite_requise: number;
+    quantite_offerte: number;
+    occurrences: number;
+    total_offert: number;
+  }[];
+}
+
+// ---------------------------------------------------------------------------
+// RapportJournalierConfig
+// ---------------------------------------------------------------------------
+
+export interface RapportJournalierConfig {
+  id: string;
+  campagne: string;
+  configure_par: string | null;
+  configure_par_nom: string | null;
+  show_pointage: boolean;
+  show_stock: boolean;
+  show_ventes_detail: boolean;
+  show_ugs_recus: boolean;
+  show_ugs_distribues: boolean;
+  show_ugs_restants: boolean;
+  show_degustation: boolean;
+  show_genre: boolean;
+  show_personnes_touchees: boolean;
+  show_avis_consommateurs: boolean;
+  show_observation_generale: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type RapportJournalierConfigPayload = Omit<
+  RapportJournalierConfig, "id" | "campagne" | "configure_par" | "configure_par_nom" | "created_at" | "updated_at"
+>;
+
+export const DEFAULT_RAPPORT_JOURNALIER_CONFIG: RapportJournalierConfig = {
+  id: "",
+  campagne: "",
+  configure_par: null,
+  configure_par_nom: null,
+  show_pointage: true,
+  show_stock: true,
+  show_ventes_detail: true,
+  show_ugs_recus: true,
+  show_ugs_distribues: true,
+  show_ugs_restants: true,
+  show_degustation: true,
+  show_genre: true,
+  show_personnes_touchees: true,
+  show_avis_consommateurs: true,
+  show_observation_generale: true,
+  created_at: "",
+  updated_at: "",
+};
 
 // ---------------------------------------------------------------------------
 // SiteProduitPrix
@@ -523,6 +614,144 @@ export interface CreateSiteProduitPrixPayload {
   site: string;
   produit: string;
   prix: number;
+}
+
+// ---------------------------------------------------------------------------
+// RapportConfig
+// ---------------------------------------------------------------------------
+
+export interface RapportConfig {
+  id: string;
+  campagne: string;
+  configure_par: string | null;
+  configure_par_nom: string | null;
+  // En-tête
+  titre_personnalise: string | null;
+  sous_titre_personnalise: string | null;
+  // KPIs
+  show_kpi_degustations: boolean;
+  show_kpi_ventes: boolean;
+  show_kpi_ca: boolean;
+  show_kpi_goodies: boolean;
+  show_kpi_sites: boolean;
+  // Sections
+  show_section_offres_promo: boolean;
+  show_section_gains_goodies: boolean;
+  show_section_perf_hotesses: boolean;
+  show_section_perf_sites: boolean;
+  show_section_goodies_par_site: boolean;
+  show_section_offres_par_hotesse: boolean;
+  show_section_detail_degustations: boolean;
+  show_section_horaires_sites: boolean;
+  // Colonnes
+  show_col_ca: boolean;
+  show_col_goodies: boolean;
+  show_col_promo_details: boolean;
+  show_col_performance: boolean;
+  // Colonnes du détail des dégustations (formulaire hôtesse)
+  show_col_nom_client: boolean;
+  show_col_tranche_age: boolean;
+  show_col_intention_achat: boolean;
+  // Options générales
+  show_logo: boolean;
+  show_equipe_hotesses: boolean;
+  inclure_notes_sensorielles: boolean;
+  // Observations manuelles
+  show_observations: boolean;
+  observations_manuelles: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type RapportConfigPayload = Omit<RapportConfig, "id" | "campagne" | "configure_par" | "configure_par_nom" | "created_at" | "updated_at">;
+
+export const DEFAULT_RAPPORT_CONFIG: RapportConfig = {
+  id: "",
+  campagne: "",
+  configure_par: null,
+  configure_par_nom: null,
+  titre_personnalise: null,
+  sous_titre_personnalise: null,
+  show_kpi_degustations: true,
+  show_kpi_ventes: true,
+  show_kpi_ca: true,
+  show_kpi_goodies: true,
+  show_kpi_sites: true,
+  show_section_offres_promo: true,
+  show_section_gains_goodies: true,
+  show_section_perf_hotesses: true,
+  show_section_perf_sites: true,
+  show_section_goodies_par_site: true,
+  show_section_offres_par_hotesse: true,
+  show_section_detail_degustations: false,
+  show_section_horaires_sites: true,
+  show_col_ca: true,
+  show_col_goodies: true,
+  show_col_promo_details: true,
+  show_col_performance: true,
+  show_col_nom_client: true,
+  show_col_tranche_age: true,
+  show_col_intention_achat: true,
+  show_logo: true,
+  show_equipe_hotesses: true,
+  inclure_notes_sensorielles: false,
+  show_observations: true,
+  observations_manuelles: null,
+  created_at: "",
+  updated_at: "",
+};
+
+// ---------------------------------------------------------------------------
+// Pointage hôtesse
+// ---------------------------------------------------------------------------
+
+export interface Pointage {
+  id: string;
+  hotesse: string;
+  hotesse_nom: string;
+  site: string;
+  site_nom: string;
+  campagne: string;
+  campagne_nom: string;
+  jour: string | null;
+  date: string;
+  heure_arrivee: string | null;
+  heure_depart: string | null;
+  heure_ouverture_prevue: string | null;
+  heure_fermeture_prevue: string | null;
+  created_at: string;
+}
+
+export interface PointerPayload {
+  site_id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Livraison goodies (jour)
+// ---------------------------------------------------------------------------
+
+export interface LivraisonGoodiesJour {
+  id: string;
+  site: string;
+  site_nom: string;
+  goodie: string;
+  goodie_nom: string;
+  campagne: string;
+  campagne_nom: string;
+  date: string;
+  quantite_apportee: number;
+  gains_du_jour: number;
+  restants_du_jour: number;
+  enregistre_par: string | null;
+  enregistre_par_nom: string | null;
+  created_at: string;
+}
+
+export interface CreateLivraisonGoodiesJourPayload {
+  site: string;
+  goodie: string;
+  date: string;
+  quantite_apportee: number;
 }
 
 // ---------------------------------------------------------------------------
