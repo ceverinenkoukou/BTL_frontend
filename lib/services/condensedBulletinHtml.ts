@@ -209,7 +209,7 @@ export function buildCondensedBulletinHtml(
 
   return `<!DOCTYPE html>
 <html lang="fr"><head><meta charset="UTF-8">
-<title>Bulletin condensé — ${esc(campagne.nom)} — ${esc(dateLabel)}</title>
+<title>RAPPPORT JOURNALIER — ${esc(campagne.nom)} — ${esc(dateLabel)}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root{--brand-primary:${colorPrimary};--brand-secondary:${colorSecondary}}
@@ -252,13 +252,13 @@ export function buildCondensedBulletinHtml(
 <div id="capture-zone">
   <div class="hdr">
     <div>
-      <h1>Bulletin condensé — ${esc(campagne.nom)}</h1>
+      <h1>RAPPORT JOURNALIER — ${esc(campagne.nom)}</h1>
       <p>${esc(campagne.entreprise_nom)} — ${esc(dateLabel)} — ${bulletins.length} rapport${bulletins.length > 1 ? "s" : ""}</p>
     </div>
     ${logoUrl ? `<div class="hdr-logo"><img src="${esc(logoUrl)}" alt="Logo" /></div>` : ""}
   </div>
   ${sections.join("\n")}
-  <div class="foot">Bulletin condensé généré depuis MHedia BTL</div>
+  <div class="foot">Rapport journalier généré depuis MHedia BTL</div>
 </div>
 <script>
   function generateDirectPDF() {
