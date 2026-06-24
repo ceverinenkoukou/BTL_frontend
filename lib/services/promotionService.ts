@@ -21,6 +21,7 @@ export async function enregistrerGainPromotion(
     produit_id?: string;
     nom_client?: string;
     tranche_age?: string;
+    degustation_id?: string;
   }
 ): Promise<{
   detail: string;
