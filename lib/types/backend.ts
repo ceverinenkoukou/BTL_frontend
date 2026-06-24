@@ -536,6 +536,8 @@ export type RapportJournalierUpdatePayload = Partial<
 
 export interface RapportJournalierBulletin extends RapportJournalier {
   genre_breakdown: { hommes: number; femmes: number };
+  tranche_age_breakdown: { tranche_age: string; label: string; quantite: number }[];
+  notes_moyennes: { note_gout: number | null; note_ambiance: number | null };
   ugs_recus: { goodie: string; quantite: number }[];
   ugs_distribues: { goodie: string; quantite: number }[];
   ugs_restants: { goodie: string; quantite: number }[];
@@ -599,6 +601,8 @@ export interface RapportJournalierConfig {
   show_ugs_restants: boolean;
   show_degustation: boolean;
   show_genre: boolean;
+  show_tranche_age: boolean;
+  show_notes_degustation: boolean;
   show_personnes_touchees: boolean;
   show_avis_consommateurs: boolean;
   show_observation_generale: boolean;
@@ -625,6 +629,8 @@ export const DEFAULT_RAPPORT_JOURNALIER_CONFIG: RapportJournalierConfig = {
   show_ugs_restants: true,
   show_degustation: true,
   show_genre: true,
+  show_tranche_age: true,
+  show_notes_degustation: true,
   show_personnes_touchees: true,
   show_avis_consommateurs: true,
   show_observation_generale: true,

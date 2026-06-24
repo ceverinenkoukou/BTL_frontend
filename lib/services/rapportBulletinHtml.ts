@@ -109,6 +109,29 @@ export function buildBulletinHtml(
       </div>`);
   }
 
+  if (config.show_tranche_age) {
+    const trancheRows = bulletin.tranche_age_breakdown
+      .filter(t => t.quantite > 0)
+      .map(t => `<div class="field"><span class="label">${esc(t.label)}</span><span class="value">${t.quantite}</span></div>`)
+      .join("");
+    sections.push(`
+      <div class="section">
+        <h2>Répartition par tranche d'âge</h2>
+        <div class="row">${trancheRows || `<p class="muted">Aucune donnée.</p>`}</div>
+      </div>`);
+  }
+
+  if (config.show_notes_degustation) {
+    sections.push(`
+      <div class="section">
+        <h2>Notes moyennes</h2>
+        <div class="row">
+          <div class="field"><span class="label">Goût</span><span class="value">${bulletin.notes_moyennes.note_gout != null ? bulletin.notes_moyennes.note_gout.toFixed(1) : "—"}</span></div>
+          <div class="field"><span class="label">Ambiance</span><span class="value">${bulletin.notes_moyennes.note_ambiance != null ? bulletin.notes_moyennes.note_ambiance.toFixed(1) : "—"}</span></div>
+        </div>
+      </div>`);
+  }
+
   if (config.show_ugs_restants) {
     sections.push(`<div class="section"><h2>UGs restants</h2>${ugsListHtml(bulletin.ugs_restants)}</div>`);
   }
