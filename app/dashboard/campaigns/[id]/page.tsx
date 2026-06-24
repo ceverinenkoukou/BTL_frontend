@@ -8,7 +8,7 @@ import api, { invalidateCache } from "@/lib/api";
 import type {
   CampagneDetail, Degustation, Vente, SiteList, MonSiteInfo,
   CreateDegustationPayload, TrancheAge, IntentionAchat, TypeConditionnement, Genre,
-  CampagneRapportSites, TypePromotion, Goodie, JourAnimation, RapportConfig,
+  CampagneRapportSites, TypePromotion, Promotion, Goodie, JourAnimation, RapportConfig,
   Pointage, LivraisonGoodiesJour, DonneesSiteJour,
 } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
@@ -47,6 +47,13 @@ import RapportJournalierConfigPanel from "@/components/dashboard/RapportJournali
 
 function initials(name: string) {
   return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+}
+
+/** Une offre ciblée sur des sites précis (`sites.length > 0`) n'est proposable
+ * que sur ces sites — sinon enregistrer-gain la rejette (400) alors que la
+ * dégustation a déjà été créée, ce qui produit des ventes orphelines. */
+function isPromoEligibleForSite(promo: Promotion, siteId: string): boolean {
+  return promo.is_active && (promo.sites.length === 0 || (!!siteId && promo.sites.includes(siteId)));
 }
 
 function fmtXOF(n: number) {
@@ -812,7 +819,7 @@ export default function CampaignDetailPage() {
     const baseValid = degForm.site && degForm.produit && degForm.tranche_age && degForm.genre;
     const noteRequired     = !!campaign?.note_gout_active;
     const ambianceRequired = !!campaign?.note_ambiance_active;
-    const hasActivePromos = (campaign?.promotions ?? []).some(p => p.is_active);
+    const hasActivePromos = (campaign?.promotions ?? []).some(p => isPromoEligibleForSite(p, degForm.site));
     const promoChoiceValid = !isPromoMode || !hasActivePromos || degForm.promotion_selectionnee !== "";
     const promoValid = (isPromoMode
       ? baseValid && (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance)
@@ -2382,11 +2389,11 @@ export default function CampaignDetailPage() {
               {/* ── Étape 3 : Offre (radio, rien coché par défaut) ── */}
               {degStep === 3 && showPromos && (
                 <div className="space-y-4">
-                  {(campaign?.promotions ?? []).length > 0 && (
+                  {(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).length > 0 && (
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2"><Label className="text-sm font-semibold text-blue-600">Offre promotionnelle applicable</Label><span className="text-xs text-muted-foreground">({(campaign?.promotions ?? []).filter(p => p.is_active).length} règle{(campaign?.promotions ?? []).filter(p => p.is_active).length > 1 ? "s" : ""})</span></div>
+                      <div className="flex items-center gap-2"><Label className="text-sm font-semibold text-blue-600">Offre promotionnelle applicable</Label><span className="text-xs text-muted-foreground">({(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).length} règle{(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).length > 1 ? "s" : ""})</span></div>
                       <div className="space-y-2">
-                        {(campaign?.promotions ?? []).filter(p => p.is_active).map((promo) => {
+                        {(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).map((promo) => {
                           const styles = PROMO_TYPE_STYLES[promo.type_promotion];
                           const isChecked = degForm.promotion_selectionnee === promo.id;
                           const willOpenWheel = promo.type_promotion === "TIRAGE" || promo.type_promotion === "GAGNE";
