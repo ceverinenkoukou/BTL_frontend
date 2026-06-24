@@ -680,6 +680,8 @@ export interface RapportConfig {
   show_section_offres_par_hotesse: boolean;
   show_section_detail_degustations: boolean;
   show_section_horaires_sites: boolean;
+  show_section_stock_boissons: boolean;
+  show_section_ugs_livraisons: boolean;
   // Colonnes
   show_col_ca: boolean;
   show_col_goodies: boolean;
@@ -723,6 +725,8 @@ export const DEFAULT_RAPPORT_CONFIG: RapportConfig = {
   show_section_offres_par_hotesse: true,
   show_section_detail_degustations: false,
   show_section_horaires_sites: true,
+  show_section_stock_boissons: true,
+  show_section_ugs_livraisons: true,
   show_col_ca: true,
   show_col_goodies: true,
   show_col_promo_details: true,

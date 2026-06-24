@@ -33,7 +33,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FileDown, Loader2 } from "lucide-react";
 import type { Campaign, CampaignSite, CampaignTeamMember, Company, Profile, Sale, Tasting, Zone } from "@/lib/types";
-import type { RapportConfig } from "@/lib/types/backend";
+import type { RapportConfig, DonneesSiteJour, LivraisonGoodiesJour } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 
 type HostessTasting = Tasting & {
@@ -113,6 +113,8 @@ type CampaignReportProps = {
   team?: StaffMember[];
   sites?: CampaignSite[];
   horaires?: HoraireSite[];
+  donneesSiteJour?: DonneesSiteJour[];
+  livraisons?: LivraisonGoodiesJour[];
   reportConfig?: RapportConfig | null;
 };
 type GeneratePDFArgs = {
@@ -123,6 +125,8 @@ type GeneratePDFArgs = {
   tastings: HostessTasting[];
   sales: ReportSale[];
   horaires: HoraireSite[];
+  donneesSiteJour: DonneesSiteJour[];
+  livraisons: LivraisonGoodiesJour[];
   isAdminOrSupervisor: boolean;
   palette: Palette;
   logoBase64: string | null;
@@ -477,6 +481,7 @@ function buildSiteHoraires(horaires: HoraireSite[], siteStats: SiteStat[]): Site
 
 function generatePDF({
   campaign, user, hostessStats, siteStats, tastings, sales, horaires,
+  donneesSiteJour, livraisons,
   isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
 }: GeneratePDFArgs) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -771,6 +776,51 @@ function generatePDF({
     );
   }
 
+  // ── Stock de boissons & boissons gratuites par site ────
+  // Saisies indépendantes de l'hôtesse (cf. DonneesSiteJour) : on affiche le
+  // stock le plus récent (snapshot) et le cumul des boissons gratuites sur
+  // la période du rapport.
+  if (cfg.show_section_stock_boissons && donneesSiteJour.length > 0) {
+    sectionTitle("Stock de boissons & boissons gratuites par site");
+    const parSite = new Map<string, DonneesSiteJour[]>();
+    donneesSiteJour.forEach(d => {
+      if (!parSite.has(d.site)) parSite.set(d.site, []);
+      parSite.get(d.site)!.push(d);
+    });
+    table(
+      ["Site", "Stock actuel", "Conditionnement", "Boissons gratuites (période)"],
+      siteStats
+        .filter(s => parSite.has(s.id))
+        .map(s => {
+          const entries = parSite.get(s.id)!.sort((a, b) => a.date.localeCompare(b.date));
+          const dernier = entries[entries.length - 1];
+          const totalGratuites = entries.reduce((sum, d) => sum + (d.nombre_boissons_gratuites ?? 0), 0);
+          return [s.name, fmt(dernier.stock_boissons ?? 0), dernier.conditionnement_display, fmt(totalGratuites)];
+        })
+    );
+  }
+
+  // ── UGs (goodies) reçus / distribués / restants par site ─
+  if (cfg.show_section_ugs_livraisons && livraisons.length > 0) {
+    sectionTitle("UGs (goodies) reçus / distribués / restants par site");
+    const parSiteGoodie = new Map<string, { siteName: string; goodieNom: string; recus: number; distribues: number }>();
+    livraisons.forEach(l => {
+      const key = `${l.site}__${l.goodie}`;
+      if (!parSiteGoodie.has(key)) {
+        parSiteGoodie.set(key, { siteName: l.site_nom, goodieNom: l.goodie_nom, recus: 0, distribues: 0 });
+      }
+      const entry = parSiteGoodie.get(key)!;
+      entry.recus += l.quantite_apportee;
+      entry.distribues += l.gains_du_jour;
+    });
+    table(
+      ["Site", "Goodie", "Reçus", "Distribués", "Restants"],
+      [...parSiteGoodie.values()].map(e => [
+        e.siteName, e.goodieNom, fmt(e.recus), fmt(e.distribues), fmt(Math.max(0, e.recus - e.distribues)),
+      ])
+    );
+  }
+
   // ── SECTIONS SELON RÔLE ────────────────────────────────
   if (isAdminOrSupervisor) {
     newPage();
@@ -955,6 +1005,8 @@ export default function CampaignReport({
   team      = [],
   sites     = [],
   horaires  = [],
+  donneesSiteJour = [],
+  livraisons = [],
   reportConfig,
 }: CampaignReportProps) {
   const [loading, setLoading] = useState(false);
@@ -973,6 +1025,7 @@ export default function CampaignReport({
 
       const doc = generatePDF({
         campaign, user, hostessStats, siteStats, tastings, sales, horaires,
+        donneesSiteJour, livraisons,
         isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
       });
 
@@ -984,7 +1037,7 @@ export default function CampaignReport({
     } finally {
       setLoading(false);
     }
-  }, [campaign, user, tastings, sales, team, sites, horaires, isAdminOrSupervisor, reportConfig]);
+  }, [campaign, user, tastings, sales, team, sites, horaires, donneesSiteJour, livraisons, isAdminOrSupervisor, reportConfig]);
 
   return (
     <button

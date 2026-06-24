@@ -1564,6 +1564,8 @@ export default function CampaignDetailPage() {
               team={teamForReport as any}
               sites={sitesForReport as any}
               horaires={joursAnimation as any}
+              donneesSiteJour={donneesSiteJour}
+              livraisons={livraisons}
               reportConfig={reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG }}
             />
           </div>
@@ -2600,6 +2602,8 @@ export default function CampaignDetailPage() {
           team={teamForReport as any}
           sites={sitesForReport as any}
           horaires={joursAnimation as any}
+          donneesSiteJour={donneesSiteJour}
+          livraisons={livraisons}
           reportConfig={reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG }}
         />
 
