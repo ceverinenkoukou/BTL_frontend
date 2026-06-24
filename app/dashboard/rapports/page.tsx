@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
-import { FileText, Loader2, Search, RefreshCw, Pencil, Clock, FileDown, FileStack } from "lucide-react";
+import { FileText, Loader2, Search, RefreshCw, Pencil, Clock, FileDown, FileStack, Archive, Trash2, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { cn } from "@/lib/utils";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import api from "@/lib/api";
 import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour, GainGoodie } from "@/lib/types/backend";
@@ -22,6 +23,13 @@ import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
 import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
 import { buildBulletinHtml } from "@/lib/services/rapportBulletinHtml";
 import { buildCondensedBulletinHtml } from "@/lib/services/condensedBulletinHtml";
+import {
+  type CondensedBulletinArchiveEntry,
+  loadCondensedBulletinArchives,
+  saveCondensedBulletinArchive,
+  deleteCondensedBulletinArchive,
+  renameCondensedBulletinArchive,
+} from "@/lib/services/condensedBulletinArchive";
 
 function fmtXOF(val: string | number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -68,6 +76,14 @@ function RapportsPageContent() {
   const [bulletinLoadingId, setBulletinLoadingId] = useState<string | null>(null);
   const [condensedLoading, setCondensedLoading] = useState(false);
 
+  const [view, setView] = useState<"rapports" | "archives">("rapports");
+  const [archives, setArchives] = useState<CondensedBulletinArchiveEntry[]>([]);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiveLabel, setArchiveLabel] = useState("");
+  const [archiveViewingId, setArchiveViewingId] = useState<string | null>(null);
+  const [renamingArchiveId, setRenamingArchiveId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -87,6 +103,7 @@ function RapportsPageContent() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { setArchives(loadCondensedBulletinArchives()); }, []);
 
   const filtered = rapports.filter(r => {
     const matchSite = filterSite === "all" || r.site === filterSite;
@@ -179,34 +196,41 @@ function RapportsPageContent() {
     }
   };
 
-  const handleGenerateCondensedBulletin = async () => {
-    if (filterCampagne === "all") {
-      toast.error("Sélectionnez une campagne pour générer le bulletin condensé.");
-      return;
-    }
-    const campagne = campagnes.find(c => c.id === filterCampagne);
+  // Régénère et ouvre un bulletin condensé à partir d'une liste de rapports
+  // donnée — toujours à partir des données ACTUELLES (pas d'un instantané),
+  // pour qu'une entrée archivée reflète les corrections faites depuis.
+  const generateAndOpenCondensedBulletin = useCallback(async (rapportIds: string[], campagneId: string) => {
+    const campagne = campagnes.find(c => c.id === campagneId);
     if (!campagne) {
       toast.error("Campagne introuvable.");
-      return;
+      return false;
     }
-    if (filtered.length === 0) {
+    if (rapportIds.length === 0) {
       toast.error("Aucun rapport à condenser pour cette sélection.");
-      return;
+      return false;
     }
-    setCondensedLoading(true);
     try {
-      const [bulletins, configRes, livraisonsRes, gainGoodiesRes] = await Promise.all([
-        Promise.all(filtered.map(r => getBulletin(r.id))),
+      const [bulletinResults, configRes, livraisonsRes, gainGoodiesRes] = await Promise.all([
+        Promise.all(rapportIds.map(id => getBulletin(id).catch(() => null))),
         api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
-          `/rapport-journalier-configs/par-campagne/?campagne=${filterCampagne}`
+          `/rapport-journalier-configs/par-campagne/?campagne=${campagneId}`
         ).then(r => r.data).catch(() => null),
-        api.get<LivraisonGoodiesJour[]>(`/livraisons-goodies/?campagne=${filterCampagne}`)
+        api.get<LivraisonGoodiesJour[]>(`/livraisons-goodies/?campagne=${campagneId}`)
           .then(r => unwrapList<LivraisonGoodiesJour>(r.data)).catch(() => []),
         // Pas de filtre serveur par campagne sur cette route : on filtre côté
         // client dans buildCondensedBulletinHtml (comme sur la page Ventes).
         api.get<GainGoodie[]>(`/gains-goodies/`)
           .then(r => unwrapList<GainGoodie>(r.data)).catch(() => []),
       ]);
+
+      const bulletins = bulletinResults.filter((b): b is NonNullable<typeof b> => b !== null);
+      if (bulletins.length < rapportIds.length) {
+        toast.warning(`${rapportIds.length - bulletins.length} rapport(s) introuvable(s) (supprimé(s) depuis) ont été ignorés.`);
+      }
+      if (bulletins.length === 0) {
+        toast.error("Aucun rapport disponible pour cette sélection.");
+        return false;
+      }
 
       const config: RapportJournalierConfig =
         configRes && !("defaults" in configRes) ? configRes : { ...DEFAULT_RAPPORT_JOURNALIER_CONFIG };
@@ -217,12 +241,95 @@ function RapportsPageContent() {
       const win = window.open(url, "_blank");
       if (win) win.document.title = `Bulletin condensé — ${campagne.nom}`;
       setTimeout(() => URL.revokeObjectURL(url), 15000);
+      return true;
     } catch (err) {
       console.error("Erreur génération bulletin condensé :", err);
       toast.error("Erreur lors de la génération du bulletin condensé.");
+      return false;
+    }
+  }, [campagnes]);
+
+  const handleGenerateCondensedBulletin = async () => {
+    if (filterCampagne === "all") {
+      toast.error("Sélectionnez une campagne pour générer le bulletin condensé.");
+      return;
+    }
+    setCondensedLoading(true);
+    try {
+      await generateAndOpenCondensedBulletin(filtered.map(r => r.id), filterCampagne);
     } finally {
       setCondensedLoading(false);
     }
+  };
+
+  const openArchiveDialog = () => {
+    if (filterCampagne === "all") {
+      toast.error("Sélectionnez une campagne pour archiver le bulletin condensé.");
+      return;
+    }
+    if (filtered.length === 0) {
+      toast.error("Aucun rapport à archiver pour cette sélection.");
+      return;
+    }
+    const campagne = campagnes.find(c => c.id === filterCampagne);
+    const defaultLabel = filterDate
+      ? `${campagne?.nom ?? ""} — ${new Date(filterDate).toLocaleDateString("fr-FR")}`
+      : `${campagne?.nom ?? ""} — ${new Date().toLocaleDateString("fr-FR")}`;
+    setArchiveLabel(defaultLabel);
+    setArchiveDialogOpen(true);
+  };
+
+  const handleConfirmArchive = async () => {
+    if (filterCampagne === "all" || filtered.length === 0) return;
+    const campagne = campagnes.find(c => c.id === filterCampagne);
+    if (!campagne) return;
+
+    const entry: CondensedBulletinArchiveEntry = {
+      id: `${filterCampagne}__${Date.now()}`,
+      campagneId: filterCampagne,
+      campagneNom: campagne.nom,
+      rapportIds: filtered.map(r => r.id),
+      label: archiveLabel.trim() || campagne.nom,
+      archivedAt: new Date().toISOString(),
+    };
+    saveCondensedBulletinArchive(entry);
+    setArchives(loadCondensedBulletinArchives());
+    setArchiveDialogOpen(false);
+    toast.success("Bulletin condensé archivé.");
+
+    setCondensedLoading(true);
+    try {
+      await generateAndOpenCondensedBulletin(entry.rapportIds, entry.campagneId);
+    } finally {
+      setCondensedLoading(false);
+    }
+  };
+
+  const handleViewArchive = async (entry: CondensedBulletinArchiveEntry) => {
+    setArchiveViewingId(entry.id);
+    try {
+      await generateAndOpenCondensedBulletin(entry.rapportIds, entry.campagneId);
+    } finally {
+      setArchiveViewingId(null);
+    }
+  };
+
+  const handleDeleteArchive = (id: string) => {
+    if (!confirm("Supprimer cette entrée archivée ? (Le bulletin reste régénérable tant que les rapports existent — ceci supprime juste le raccourci.)")) return;
+    deleteCondensedBulletinArchive(id);
+    setArchives(loadCondensedBulletinArchives());
+  };
+
+  const startRenameArchive = (entry: CondensedBulletinArchiveEntry) => {
+    setRenamingArchiveId(entry.id);
+    setRenameValue(entry.label);
+  };
+
+  const confirmRenameArchive = () => {
+    if (!renamingArchiveId) return;
+    renameCondensedBulletinArchive(renamingArchiveId, renameValue.trim() || "Sans nom");
+    setArchives(loadCondensedBulletinArchives());
+    setRenamingArchiveId(null);
   };
 
   return (
@@ -314,21 +421,112 @@ function RapportsPageContent() {
           </SelectContent>
         </Select>
         {canEdit && (
-          <Button
-            variant="outline"
-            className="h-9 gap-2"
-            disabled={condensedLoading || filterCampagne === "all"}
-            onClick={handleGenerateCondensedBulletin}
-            title={filterCampagne === "all" ? "Sélectionnez une campagne pour générer le bulletin condensé" : "Générer un bulletin condensé pour la sélection courante (campagne + site + date)"}
-          >
-            {condensedLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileStack className="w-4 h-4" />}
-            Bulletin condensé
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              className="h-9 gap-2"
+              disabled={condensedLoading || filterCampagne === "all"}
+              onClick={handleGenerateCondensedBulletin}
+              title={filterCampagne === "all" ? "Sélectionnez une campagne pour générer le bulletin condensé" : "Générer un bulletin condensé pour la sélection courante (campagne + site + date)"}
+            >
+              {condensedLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileStack className="w-4 h-4" />}
+              Bulletin condensé
+            </Button>
+            <Button
+              variant="outline"
+              className="h-9 gap-2"
+              disabled={filterCampagne === "all"}
+              onClick={openArchiveDialog}
+              title="Archiver ce bulletin condensé pour le retrouver plus tard"
+            >
+              <Archive className="w-4 h-4" />
+              Archiver
+            </Button>
+          </>
         )}
       </div>
 
-      {/* Table */}
-      {loading ? (
+      {canEdit && (
+        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+          <button
+            onClick={() => setView("rapports")}
+            className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+              view === "rapports" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+          >
+            <span className="flex items-center gap-2"><FileText className="w-4 h-4" />Rapports</span>
+          </button>
+          <button
+            onClick={() => setView("archives")}
+            className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all relative",
+              view === "archives" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+          >
+            <span className="flex items-center gap-2">
+              <Archive className="w-4 h-4" />Bulletins condensés archivés
+              {archives.length > 0 && (
+                <span className="bg-violet-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">{archives.length}</span>
+              )}
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Archives view */}
+      {view === "archives" ? (
+        archives.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-100 p-14 text-center text-muted-foreground">
+            <Archive className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">Aucun bulletin condensé archivé</p>
+            <p className="text-sm mt-1">Utilise le bouton "Archiver" depuis l'onglet Rapports.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {archives.map(entry => (
+              <div key={entry.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center shrink-0">
+                    <FileStack className="w-5 h-5 text-violet-700" />
+                  </div>
+                  <button
+                    onClick={() => handleDeleteArchive(entry.id)}
+                    className="p-1.5 rounded-lg border border-transparent hover:border-red-100 hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors"
+                    title="Supprimer cette entrée"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {renamingArchiveId === entry.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") confirmRenameArchive(); if (e.key === "Escape") setRenamingArchiveId(null); }}
+                        className="h-8 text-sm"
+                        autoFocus
+                      />
+                      <Button size="sm" className="h-8" onClick={confirmRenameArchive}>OK</Button>
+                    </div>
+                  ) : (
+                    <button onClick={() => startRenameArchive(entry)} className="font-bold text-foreground text-sm truncate text-left hover:underline" title="Renommer">
+                      {entry.label}
+                    </button>
+                  )}
+                  <p className="text-xs text-muted-foreground truncate">{entry.campagneNom} — {entry.rapportIds.length} rapport{entry.rapportIds.length > 1 ? "s" : ""}</p>
+                  <p className="text-xs text-muted-foreground">Archivé le {new Date(entry.archivedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</p>
+                </div>
+                <Button
+                  size="sm" variant="outline" className="w-full gap-2"
+                  disabled={archiveViewingId === entry.id}
+                  onClick={() => handleViewArchive(entry)}
+                >
+                  {archiveViewingId === entry.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                  Aperçu / Télécharger
+                </Button>
+              </div>
+            ))}
+          </div>
+        )
+      ) : loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
@@ -476,6 +674,37 @@ function RapportsPageContent() {
               <Button onClick={handleSaveEdit} disabled={saving} className="gap-2">
                 {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Enregistrer
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Archive dialog — nom du bulletin condensé à archiver */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Archiver le bulletin condensé</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label className="text-xs">Nom de l'archive</Label>
+              <Input
+                value={archiveLabel}
+                onChange={e => setArchiveLabel(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleConfirmArchive(); }}
+                className="h-9"
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                Les données restent à jour : si un rapport est corrigé ensuite, le bulletin archivé sera mis à jour à la prochaine ouverture.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setArchiveDialogOpen(false)}>Annuler</Button>
+              <Button onClick={handleConfirmArchive} disabled={condensedLoading} className="gap-2">
+                {condensedLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Archiver
               </Button>
             </div>
           </div>
