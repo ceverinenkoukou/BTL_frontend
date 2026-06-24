@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import { contrastColor } from "@/lib/utils/branding";
 
 // Palette MHédia par défaut — utilisée quand aucune couleur de marque client n'est fournie.
-const MHEDIA_PRIMARY = "#1B4F5C";
-const MHEDIA_SECONDARY = "#2E7A8C";
+const MHEDIA_PRIMARY = "#00C9D4";
+const MHEDIA_SECONDARY = "#0099A8";
 
 interface PageHeaderProps {
   title: string;

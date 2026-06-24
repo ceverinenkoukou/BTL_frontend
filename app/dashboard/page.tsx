@@ -18,14 +18,14 @@ import {
 
 // ─── Simplified role hero config (hero only — cards use brand palette) ────────
 const ROLE_HERO: Record<string, { bg: string; shadow: string }> = {
-  Administrateur: { bg: "from-slate-800 via-slate-700 to-slate-600",   shadow: "shadow-slate-400/30" },
+  Administrateur: { bg: "from-[#0C6E78] via-[#0099A8] to-[#00C9D4]",   shadow: "shadow-cyan-400/30" },
   Superviseur:    { bg: "from-[#004d5c] via-[#006776] to-[#00899b]",   shadow: "shadow-teal-400/30" },
   Hotesse:        { bg: "from-[#3b1f6e] via-[#5b3a8c] to-[#7c5cbf]",  shadow: "shadow-violet-400/30" },
-  default:        { bg: "from-[#004d5c] via-[#006776] to-[#00899b]",   shadow: "shadow-teal-400/30" },
+  default:        { bg: "from-[#0C6E78] via-[#0099A8] to-[#00C9D4]",   shadow: "shadow-cyan-400/30" },
 };
 
 // Brand chart colors — consistent across all roles
-const CHART_COLORS = { c1: "#006776", c2: "#00899b", pie: ["#006776", "#00899b", "#4db8c8", "#0d2d33"] };
+const CHART_COLORS = { c1: "#00C9D4", c2: "#0099A8", pie: ["#00C9D4", "#0099A8", "#2E7A8C", "#0d2d33"] };
 
 // Stat card accent per position (calm, consistent)
 const STAT_ACCENTS = [
