@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
-import { FileText, Loader2, Search, RefreshCw, Pencil, Clock, FileDown } from "lucide-react";
+import { FileText, Loader2, Search, RefreshCw, Pencil, Clock, FileDown, FileStack } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,7 @@ import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournali
 import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
 import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
 import { buildBulletinHtml } from "@/lib/services/rapportBulletinHtml";
+import { buildCondensedBulletinHtml } from "@/lib/services/condensedBulletinHtml";
 
 function fmtXOF(val: string | number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -65,6 +66,7 @@ function RapportsPageContent() {
   const [editForm, setEditForm] = useState<RapportJournalierUpdatePayload>(EMPTY_EDIT_FORM);
   const [saving, setSaving] = useState(false);
   const [bulletinLoadingId, setBulletinLoadingId] = useState<string | null>(null);
+  const [condensedLoading, setCondensedLoading] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -177,6 +179,45 @@ function RapportsPageContent() {
     }
   };
 
+  const handleGenerateCondensedBulletin = async () => {
+    if (filterCampagne === "all") {
+      toast.error("Sélectionnez une campagne pour générer le bulletin condensé.");
+      return;
+    }
+    const campagne = campagnes.find(c => c.id === filterCampagne);
+    if (!campagne) {
+      toast.error("Campagne introuvable.");
+      return;
+    }
+    if (filtered.length === 0) {
+      toast.error("Aucun rapport à condenser pour cette sélection.");
+      return;
+    }
+    setCondensedLoading(true);
+    try {
+      const [bulletins, configRes] = await Promise.all([
+        Promise.all(filtered.map(r => getBulletin(r.id))),
+        api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
+          `/rapport-journalier-configs/par-campagne/?campagne=${filterCampagne}`
+        ).then(r => r.data).catch(() => null),
+      ]);
+
+      const config: RapportJournalierConfig =
+        configRes && !("defaults" in configRes) ? configRes : { ...DEFAULT_RAPPORT_JOURNALIER_CONFIG };
+
+      const html = buildCondensedBulletinHtml(bulletins, config, campagne);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (win) win.document.title = `Bulletin condensé — ${campagne.nom}`;
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch {
+      toast.error("Erreur lors de la génération du bulletin condensé.");
+    } finally {
+      setCondensedLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -265,6 +306,18 @@ function RapportsPageContent() {
               .map(s => <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>)}
           </SelectContent>
         </Select>
+        {canEdit && (
+          <Button
+            variant="outline"
+            className="h-9 gap-2"
+            disabled={condensedLoading || filterCampagne === "all"}
+            onClick={handleGenerateCondensedBulletin}
+            title={filterCampagne === "all" ? "Sélectionnez une campagne pour générer le bulletin condensé" : "Générer un bulletin condensé pour la sélection courante (campagne + site + date)"}
+          >
+            {condensedLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileStack className="w-4 h-4" />}
+            Bulletin condensé
+          </Button>
+        )}
       </div>
 
       {/* Table */}
