@@ -44,7 +44,6 @@ export function buildCondensedBulletinHtml(
   // nb_degustations comme nombre de ventes (source la plus fiable), plutôt
   // que de sommer deux compteurs qui devraient déjà être égaux.
   const totalDeg = bulletins.reduce((s, b) => s + (b.nb_degustations ?? 0), 0);
-  const totalGoodies = bulletins.reduce((s, b) => s + (b.nb_goodies ?? 0), 0);
   const totalCA = bulletins.reduce((s, b) => s + Number(b.chiffre_affaires || 0), 0);
   const totalHorsPromo = bulletins.reduce((s, b) => s + (b.ventes_hors_promo ?? 0), 0);
   const totalPersonnesTouchees = bulletins.reduce((s, b) => s + (b.nombre_personnes_touchees ?? 0), 0);
@@ -93,6 +92,16 @@ export function buildCondensedBulletinHtml(
     ugsRestantsMap.set(goodieNom, Math.max(0, recus - (ugsDistribuesMap.get(goodieNom) ?? 0)));
   });
 
+  // Total goodies distribués : même raisonnement que ci-dessus, nb_goodies
+  // (calculé par nuit avec le même filtre par hôtesse) sous-compte sur les
+  // sites à plusieurs hôtesses. On utilise le total UGs distribués, fiable.
+  const totalGoodies = [...ugsDistribuesMap.values()].reduce((s, v) => s + v, 0);
+
+  const goodiesParSite = new Map<string, number>();
+  relevantLivraisons.forEach(l => {
+    goodiesParSite.set(l.site, (goodiesParSite.get(l.site) ?? 0) + l.gains_du_jour);
+  });
+
   const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnement: string; gratuites: number }>();
   bulletins.forEach(b => {
     if (!stockParSite.has(b.site)) {
@@ -102,13 +111,12 @@ export function buildCondensedBulletinHtml(
     entry.gratuites += b.nombre_boissons_gratuites ?? 0;
   });
 
-  const parSite = new Map<string, { siteNom: string; deg: number; ca: number; goodies: number }>();
+  const parSite = new Map<string, { siteNom: string; deg: number; ca: number }>();
   bulletins.forEach(b => {
-    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ca: 0, goodies: 0 });
+    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ca: 0 });
     const e = parSite.get(b.site)!;
     e.deg += b.nb_degustations ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
-    e.goodies += b.nb_goodies ?? 0;
   });
 
   const avis = bulletins.filter(b => b.avis_consommateurs).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.avis_consommateurs! }));
@@ -128,7 +136,7 @@ export function buildCondensedBulletinHtml(
   sections.push(`
     <h2 class="section-title">Détail par site</h2>
     <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th><th class="r">Goodies</th><th class="r">CA</th></tr></thead>
-    <tbody>${[...parSite.values()].map(e => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${e.goodies}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
+    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
 
   if (config.show_genre) {
     sections.push(`
