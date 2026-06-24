@@ -11,21 +11,21 @@
   --card-foreground: #1A3A40;
   --popover: #ffffff;
   --popover-foreground: #1A3A40;
-  --primary: #2E7A8C;            /* Teal/bleu canard */
-  --primary-foreground: #ffffff;
+  --primary: #00C9D4;            /* Cyan vif — couleur principale */
+  --primary-foreground: #1A3A40; /* Texte sombre : le cyan est trop clair pour du blanc */
   --secondary: #CDEEF0;          /* Turquoise clair éclairci */
   --secondary-foreground: #1B4F5C;
   --muted: #E8EFF0;
   --muted-foreground: #8C8C8C;   /* Gris moyen */
-  --accent: #00C9D4;             /* Cyan vif */
-  --accent-foreground: #1A3A40;
+  --accent: #2E7A8C;             /* Teal/bleu canard (ancien primary) */
+  --accent-foreground: #ffffff;
   --destructive: oklch(0.57 0.24 25);
   --destructive-foreground: #ffffff;
   --border: #CFE3E5;
   --input: #D7E8EA;
-  --ring: #2E7A8C;
-  --chart-1: #2E7A8C;
-  --chart-2: #00C9D4;
+  --ring: #00C9D4;
+  --chart-1: #00C9D4;
+  --chart-2: #2E7A8C;
   --chart-3: #7FD4D9;
   --chart-4: #1A3A40;
   --chart-5: #8C8C8C;
@@ -33,12 +33,12 @@
   /* Sidebar – fond foncé teal profond */
   --sidebar: #1B4F5C;            /* Teal foncé */
   --sidebar-foreground: #EAF7F8;
-  --sidebar-primary: #2E7A8C;
-  --sidebar-primary-foreground: #ffffff;
+  --sidebar-primary: #00C9D4;
+  --sidebar-primary-foreground: #1A3A40;
   --sidebar-accent: #276370;
   --sidebar-accent-foreground: #EAF7F8;
   --sidebar-border: #2D6F80;
-  --sidebar-ring: #2E7A8C;
+  --sidebar-ring: #00C9D4;
   --success: oklch(0.62 0.2 145);
   --success-foreground: #ffffff;
   --warning: oklch(0.78 0.2 80);
@@ -187,7 +187,7 @@
   background-size: 280px 280px;
   background-position: top left;
   background-repeat: repeat;
-  opacity: 0.06;
+  opacity: 0.12;
   pointer-events: none;
 }
 
