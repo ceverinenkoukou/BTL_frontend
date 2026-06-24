@@ -34,20 +34,23 @@ export function buildCondensedBulletinHtml(
       ? fmtDateLong(dates[0])
       : `${fmtDateLong(dates[0])} — ${fmtDateLong(dates[dates.length - 1])}`;
 
-  const totalDeg = bulletins.reduce((s, b) => s + b.nb_degustations, 0);
-  const totalVentes = bulletins.reduce((s, b) => s + b.nb_ventes, 0);
-  const totalGoodies = bulletins.reduce((s, b) => s + b.nb_goodies, 0);
+  // Champs optionnels / défensif : si le backend déployé est plus ancien que
+  // ce générateur (nouveaux champs pas encore renvoyés par l'API), on dégrade
+  // proprement au lieu de planter en plein milieu de la génération.
+  const totalDeg = bulletins.reduce((s, b) => s + (b.nb_degustations ?? 0), 0);
+  const totalVentes = bulletins.reduce((s, b) => s + (b.nb_ventes ?? 0), 0);
+  const totalGoodies = bulletins.reduce((s, b) => s + (b.nb_goodies ?? 0), 0);
   const totalCA = bulletins.reduce((s, b) => s + Number(b.chiffre_affaires || 0), 0);
-  const totalHorsPromo = bulletins.reduce((s, b) => s + b.ventes_hors_promo, 0);
+  const totalHorsPromo = bulletins.reduce((s, b) => s + (b.ventes_hors_promo ?? 0), 0);
 
   const genreTotal = bulletins.reduce((acc, b) => {
-    acc.hommes += b.genre_breakdown.hommes;
-    acc.femmes += b.genre_breakdown.femmes;
+    acc.hommes += b.genre_breakdown?.hommes ?? 0;
+    acc.femmes += b.genre_breakdown?.femmes ?? 0;
     return acc;
   }, { hommes: 0, femmes: 0 });
 
   const trancheMap = new Map<string, { label: string; quantite: number }>();
-  bulletins.forEach(b => b.tranche_age_breakdown.forEach(t => {
+  bulletins.forEach(b => (b.tranche_age_breakdown ?? []).forEach(t => {
     if (!trancheMap.has(t.tranche_age)) trancheMap.set(t.tranche_age, { label: t.label, quantite: 0 });
     trancheMap.get(t.tranche_age)!.quantite += t.quantite;
   }));
@@ -55,8 +58,8 @@ export function buildCondensedBulletinHtml(
   const notesGout: number[] = [];
   const notesAmbiance: number[] = [];
   bulletins.forEach(b => {
-    if (b.notes_moyennes.note_gout != null) notesGout.push(b.notes_moyennes.note_gout);
-    if (b.notes_moyennes.note_ambiance != null) notesAmbiance.push(b.notes_moyennes.note_ambiance);
+    if (b.notes_moyennes?.note_gout != null) notesGout.push(b.notes_moyennes.note_gout);
+    if (b.notes_moyennes?.note_ambiance != null) notesAmbiance.push(b.notes_moyennes.note_ambiance);
   });
   const avgGout = notesGout.length ? notesGout.reduce((a, v) => a + v, 0) / notesGout.length : null;
   const avgAmbiance = notesAmbiance.length ? notesAmbiance.reduce((a, v) => a + v, 0) / notesAmbiance.length : null;
@@ -65,9 +68,9 @@ export function buildCondensedBulletinHtml(
   const ugsDistribuesMap = new Map<string, number>();
   const ugsRestantsMap = new Map<string, number>();
   bulletins.forEach(b => {
-    b.ugs_recus.forEach(u => ugsRecusMap.set(u.goodie, (ugsRecusMap.get(u.goodie) ?? 0) + u.quantite));
-    b.ugs_distribues.forEach(u => ugsDistribuesMap.set(u.goodie, (ugsDistribuesMap.get(u.goodie) ?? 0) + u.quantite));
-    b.ugs_restants.forEach(u => ugsRestantsMap.set(u.goodie, u.quantite)); // snapshot courant, pas cumulatif
+    (b.ugs_recus ?? []).forEach(u => ugsRecusMap.set(u.goodie, (ugsRecusMap.get(u.goodie) ?? 0) + u.quantite));
+    (b.ugs_distribues ?? []).forEach(u => ugsDistribuesMap.set(u.goodie, (ugsDistribuesMap.get(u.goodie) ?? 0) + u.quantite));
+    (b.ugs_restants ?? []).forEach(u => ugsRestantsMap.set(u.goodie, u.quantite)); // snapshot courant, pas cumulatif
   });
 
   const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnement: string; gratuites: number }>();
@@ -83,10 +86,10 @@ export function buildCondensedBulletinHtml(
   bulletins.forEach(b => {
     if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ventes: 0, ca: 0, goodies: 0 });
     const e = parSite.get(b.site)!;
-    e.deg += b.nb_degustations;
-    e.ventes += b.nb_ventes;
+    e.deg += b.nb_degustations ?? 0;
+    e.ventes += b.nb_ventes ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
-    e.goodies += b.nb_goodies;
+    e.goodies += b.nb_goodies ?? 0;
   });
 
   const avis = bulletins.filter(b => b.avis_consommateurs).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.avis_consommateurs! }));

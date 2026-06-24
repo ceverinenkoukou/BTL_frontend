@@ -211,7 +211,8 @@ function RapportsPageContent() {
       const win = window.open(url, "_blank");
       if (win) win.document.title = `Bulletin condensé — ${campagne.nom}`;
       setTimeout(() => URL.revokeObjectURL(url), 15000);
-    } catch {
+    } catch (err) {
+      console.error("Erreur génération bulletin condensé :", err);
       toast.error("Erreur lors de la génération du bulletin condensé.");
     } finally {
       setCondensedLoading(false);
