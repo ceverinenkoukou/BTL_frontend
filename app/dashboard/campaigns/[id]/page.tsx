@@ -542,15 +542,15 @@ export default function CampaignDetailPage() {
       if (goodies.length === 0) return [];
       return goodies.map(g => ({ id: g.id, name: g.nom, isGoodie: true }));
     }
-    // Standard GOODIES wheel: requires per-site stock
+    // Standard GOODIES wheel : tous les goodies de la campagne apparaissent,
+    // même sans stock alloué à ce site — le stock n'est vérifié qu'au moment de
+    // confirmer le gain (avec l'option de relancer la roue si insuffisant).
     let activeGoodies: { id: string; name: string }[] = [];
     if (siteInfo?.goodies_disponibles && siteInfo.goodies_disponibles.length > 0) {
       activeGoodies = siteInfo.goodies_disponibles
-        .filter(g => g.quantite_restante > 0)
         .map(g => ({ id: g.id, name: g.nom }));
     } else {
       activeGoodies = goodies
-        .filter(g => g.quantite_restante > 0)
         .map(g => ({ id: g.id, name: g.nom }));
     }
     if (activeGoodies.length === 0) return [];

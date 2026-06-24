@@ -159,12 +159,15 @@ export default function WheelPage() {
         const { data } = await api.get<MonSiteInfo>("/degustations/mon-site/", {
           params: { site_id: selectedSite },
         });
-        activeGoodies = (data.goodies_disponibles ?? []).filter(g => g.quantite_restante > 0);
+        // Tous les goodies de la campagne apparaissent sur la roue, même sans stock
+        // alloué à ce site — le stock n'est vérifié qu'au moment de confirmer le gain
+        // (avec l'option de relancer la roue si le stock est insuffisant ce jour-là).
+        activeGoodies = data.goodies_disponibles ?? [];
         setGoodies([]);
       } else {
         const campGoodies = await getGoodiesByCampagne(selectedCampaign);
         setGoodies(campGoodies);
-        activeGoodies = campGoodies.filter(g => g.quantite_restante > 0);
+        activeGoodies = campGoodies;
       }
       
       if (activeGoodies.length === 0) {
