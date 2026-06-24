@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
@@ -52,7 +52,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   );
 }
 
-export default function StatsPage() {
+function StatsPageContent() {
   const { user } = useAuth();
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useUrlState("campagne", "all");
@@ -453,5 +453,13 @@ export default function StatsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function StatsPage() {
+  return (
+    <Suspense fallback={null}>
+      <StatsPageContent />
+    </Suspense>
   );
 }

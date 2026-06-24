@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type { Entreprise } from "@/lib/types/backend";
@@ -23,7 +23,7 @@ const COMPANY_GRADIENTS = [
   { from: "from-pink-500",   to: "to-rose-600",    light: "bg-pink-50",   border: "border-pink-100",   text: "text-pink-700",   dot: "bg-pink-400"   },
 ];
 
-export default function ProductsPage() {
+function ProductsPageContent() {
   const { user } = useAuth();
   const [entreprises, setEntreprises] = useState<Entreprise[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,5 +173,13 @@ export default function ProductsPage() {
       )}
 
     </div>
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProductsPageContent />
+    </Suspense>
   );
 }

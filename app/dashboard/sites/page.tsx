@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type { CampagneList, CreatePromotionPayload, DonneesSiteJour, Entreprise, Goodie, JourAnimation, LivraisonGoodiesJour, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
@@ -104,7 +104,7 @@ type HotesseForm = {
 
 const emptyHotesseForm: HotesseForm = { email: "", name: "" };
 
-export default function SitesPage() {
+function SitesPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
   const isSuperviseur = user?.role === "Superviseur";
@@ -156,7 +156,11 @@ export default function SitesPage() {
   const [loadingStock, setLoadingStock] = useState(false);
   const [stockLivraisonForm, setStockLivraisonForm] = useState({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
   const [savingStockLivraison, setSavingStockLivraison] = useState(false);
-  const [stockDonneesForm, setStockDonneesForm] = useState({ date: new Date().toISOString().slice(0, 10), stock_boissons: "", nombre_boissons_gratuites: "" });
+  const [stockDonneesForm, setStockDonneesForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    conditionnement: "UNITE" as TypeConditionnement,
+    stock_boissons: "", nombre_boissons_gratuites: "",
+  });
   const [savingStockDonnees, setSavingStockDonnees] = useState(false);
 
   const openPlanningDialog = async (site: SiteList) => {
@@ -207,7 +211,7 @@ export default function SitesPage() {
     setStockLivraisons([]);
     setStockDonnees([]);
     setStockLivraisonForm({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
-    setStockDonneesForm({ date: new Date().toISOString().slice(0, 10), stock_boissons: "", nombre_boissons_gratuites: "" });
+    setStockDonneesForm({ date: new Date().toISOString().slice(0, 10), conditionnement: "UNITE", stock_boissons: "", nombre_boissons_gratuites: "" });
     setLoadingStock(true);
     try {
       const [goodiesRes, livrRes, dsjRes] = await Promise.all([
@@ -257,6 +261,7 @@ export default function SitesPage() {
       const res = await api.post<DonneesSiteJour>("/donnees-site-jour/", {
         site: stockSite.id,
         date: stockDonneesForm.date,
+        conditionnement: stockDonneesForm.conditionnement,
         stock_boissons: stockDonneesForm.stock_boissons === "" ? null : Number(stockDonneesForm.stock_boissons),
         nombre_boissons_gratuites: stockDonneesForm.nombre_boissons_gratuites === "" ? null : Number(stockDonneesForm.nombre_boissons_gratuites),
       });
@@ -971,6 +976,16 @@ export default function SitesPage() {
                       <Label className="text-xs text-muted-foreground">Date</Label>
                       <Input type="date" className="h-8 text-xs mt-0.5" value={stockDonneesForm.date} onChange={e => setStockDonneesForm(f => ({ ...f, date: e.target.value }))} />
                     </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Conditionnement</Label>
+                      <Select value={stockDonneesForm.conditionnement} onValueChange={v => setStockDonneesForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                        <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -992,6 +1007,7 @@ export default function SitesPage() {
                         <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
                           <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
                           <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-muted-foreground">{d.conditionnement_display}</span>
                             <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
                             <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
                           </div>
@@ -1572,5 +1588,13 @@ export default function SitesPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function SitesPage() {
+  return (
+    <Suspense fallback={null}>
+      <SitesPageContent />
+    </Suspense>
   );
 }

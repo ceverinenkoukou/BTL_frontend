@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import {
@@ -42,7 +42,7 @@ function unwrapList<T>(data: T[] | { results?: T[] }): T[] {
   return data.results ?? [];
 }
 
-export default function ObjectifsPage() {
+function ObjectifsPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
 
@@ -418,5 +418,13 @@ export default function ObjectifsPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function ObjectifsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ObjectifsPageContent />
+    </Suspense>
   );
 }

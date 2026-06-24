@@ -53,7 +53,7 @@ export function buildBulletinHtml(
     sections.push(`
       <div class="section">
         <h2>Stock de boissons du site</h2>
-        <p class="big">${bulletin.stock_boissons ?? "—"}</p>
+        <p class="big">${bulletin.stock_boissons ?? "—"}${bulletin.conditionnement_boissons ? ` <span class="label" style="font-size:11px;">(${esc(bulletin.conditionnement_boissons)})</span>` : ""}</p>
       </div>`);
   }
 
@@ -61,7 +61,7 @@ export function buildBulletinHtml(
     sections.push(`
       <div class="section">
         <h2>Boissons gratuites</h2>
-        <p class="big">${bulletin.nombre_boissons_gratuites ?? "—"}</p>
+        <p class="big">${bulletin.nombre_boissons_gratuites ?? "—"}${bulletin.conditionnement_boissons ? ` <span class="label" style="font-size:11px;">(${esc(bulletin.conditionnement_boissons)})</span>` : ""}</p>
       </div>`);
   }
 

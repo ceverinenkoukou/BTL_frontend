@@ -130,6 +130,7 @@ export default function CampaignsPage() {
   const [teamFilter, setTeamFilter] = useState<Record<string, string>>({});
 
   const isAdmin = user?.role === "Administrateur";
+  const isHostess = user?.role === "Hotesse";
   const canManage = user?.role && ["Administrateur", "Superviseur"].includes(user.role);
 
   const hotesses = staff.filter(m => m.role === "Hotesse");
@@ -1013,13 +1014,22 @@ export default function CampaignsPage() {
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
-                    <Button size="sm" variant="outline" asChild
-                      style={{ borderColor: `${p1}60`, color: p1 }}
-                      className="hover:opacity-80">
-                      <Link href={`/dashboard/campaigns/${campaign.id}`}>
-                        <Eye className="w-3.5 h-3.5 mr-1.5" />Voir détails
-                      </Link>
-                    </Button>
+                    {isHostess && statusKey === "planifiee" ? (
+                      <div className="text-xs text-muted-foreground">
+                        <Button size="sm" variant="outline" disabled className="opacity-60">
+                          <Eye className="w-3.5 h-3.5 mr-1.5" />Voir détails
+                        </Button>
+                        <p className="mt-1">Disponible le {new Date(campaign.date_debut).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</p>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" asChild
+                        style={{ borderColor: `${p1}60`, color: p1 }}
+                        className="hover:opacity-80">
+                        <Link href={`/dashboard/campaigns/${campaign.id}`}>
+                          <Eye className="w-3.5 h-3.5 mr-1.5" />Voir détails
+                        </Link>
+                      </Button>
+                    )}
                     {canManage && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

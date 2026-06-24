@@ -549,6 +549,7 @@ export interface RapportJournalierBulletin extends RapportJournalier {
   // Saisies par site/jour (indépendantes de l'hôtesse), voir DonneesSiteJour
   stock_boissons: number | null;
   nombre_boissons_gratuites: number | null;
+  conditionnement_boissons: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +563,8 @@ export interface DonneesSiteJour {
   campagne: string;
   campagne_nom: string;
   date: string;
+  conditionnement: TypeConditionnement;
+  conditionnement_display: string;
   stock_boissons: number | null;
   nombre_boissons_gratuites: number | null;
   enregistre_par: string | null;
@@ -572,6 +575,7 @@ export interface DonneesSiteJour {
 export interface UpsertDonneesSiteJourPayload {
   site: string;
   date: string;
+  conditionnement?: TypeConditionnement;
   stock_boissons?: number | null;
   nombre_boissons_gratuites?: number | null;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import { Tag, Plus, Trash2, Edit2, Loader2, Search } from "lucide-react";
@@ -34,7 +34,7 @@ function unwrapList<T>(data: T[] | { results?: T[] }): T[] {
   return data.results ?? [];
 }
 
-export default function PrixSitesPage() {
+function PrixSitesPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
 
@@ -315,5 +315,13 @@ export default function PrixSitesPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function PrixSitesPage() {
+  return (
+    <Suspense fallback={null}>
+      <PrixSitesPageContent />
+    </Suspense>
   );
 }

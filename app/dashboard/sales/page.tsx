@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 
 import api, { invalidateCache } from "@/lib/api";
@@ -92,7 +92,7 @@ const VENTE_TYPE_OPTIONS: { value: VenteTypeFilter; label: string }[] = [
 // Helpers ventes (fmt, getSaleRevenueAmount, VenteTypeBadge...) déplacés dans
 // lib/utils/ventes.tsx pour être réutilisés par components/dashboard/SalesTable.tsx.
 
-export default function SalesPage() {
+function SalesPageContent() {
   const { user } = useAuth();
   const [sales, setSales] = useState<VenteEnrichie[]>([]);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
@@ -1049,5 +1049,13 @@ export default function SalesPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function SalesPage() {
+  return (
+    <Suspense fallback={null}>
+      <SalesPageContent />
+    </Suspense>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type { CampagneList, Entreprise, Goodie, SiteList } from "@/lib/types/backend";
@@ -39,7 +39,7 @@ const EMPTY_FORM: GoodieFormData = {
   quantite_total: "",
 };
 
-export default function GoodiesPage() {
+function GoodiesPageContent() {
   const { user } = useAuth();
   const [goodies, setGoodies] = useState<Goodie[]>([]);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
@@ -505,5 +505,13 @@ export default function GoodiesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function GoodiesPage() {
+  return (
+    <Suspense fallback={null}>
+      <GoodiesPageContent />
+    </Suspense>
   );
 }

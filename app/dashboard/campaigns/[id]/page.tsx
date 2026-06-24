@@ -172,6 +172,8 @@ export default function CampaignDetailPage() {
 
   const [degForm, setDegForm] = useState({ ...EMPTY_DEG_FORM });
   const [savingDeg, setSavingDeg] = useState(false);
+  const [degStep, setDegStep] = useState<1 | 2 | 3>(1);
+  const [showDegConfirm, setShowDegConfirm] = useState(false);
   const [loadingSite, setLoadingSite] = useState(false);
   const [siteInfo, setSiteInfo] = useState<MonSiteInfo | null>(null);
   const activeSiteRef = useRef<string>("");
@@ -217,6 +219,7 @@ export default function CampaignDetailPage() {
   const [donneesSiteJour, setDonneesSiteJour] = useState<DonneesSiteJour[]>([]);
   const [donneesSiteForm, setDonneesSiteForm] = useState({
     site: "", date: new Date().toISOString().slice(0, 10),
+    conditionnement: "UNITE" as TypeConditionnement,
     stock_boissons: "", nombre_boissons_gratuites: "",
   });
   const [savingDonneesSite, setSavingDonneesSite] = useState(false);
@@ -435,6 +438,7 @@ export default function CampaignDetailPage() {
       const res = await api.post<DonneesSiteJour>("/donnees-site-jour/", {
         site: donneesSiteForm.site,
         date: donneesSiteForm.date,
+        conditionnement: donneesSiteForm.conditionnement,
         stock_boissons: donneesSiteForm.stock_boissons === "" ? null : Number(donneesSiteForm.stock_boissons),
         nombre_boissons_gratuites: donneesSiteForm.nombre_boissons_gratuites === "" ? null : Number(donneesSiteForm.nombre_boissons_gratuites),
       });
@@ -805,9 +809,12 @@ export default function CampaignDetailPage() {
     const baseValid = degForm.site && degForm.produit && degForm.tranche_age && degForm.genre;
     const noteRequired     = !!campaign?.note_gout_active;
     const ambianceRequired = !!campaign?.note_ambiance_active;
-    const promoValid = isPromoMode
+    const hasActivePromos = (campaign?.promotions ?? []).some(p => p.is_active);
+    const promoChoiceValid = !isPromoMode || !hasActivePromos || degForm.promotion_selectionnee !== "";
+    const promoValid = (isPromoMode
       ? baseValid && (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance)
-      : baseValid && (showTasting ? ((noteRequired ? degForm.note_gout : true) && (ambianceRequired ? degForm.note_ambiance : true) && degForm.intention_achat) : (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance));
+      : baseValid && (showTasting ? ((noteRequired ? degForm.note_gout : true) && (ambianceRequired ? degForm.note_ambiance : true) && degForm.intention_achat) : (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance))
+    ) && promoChoiceValid;
     if (!promoValid) {
       toast.error("Veuillez remplir tous les champs obligatoires.");
       return;
@@ -825,7 +832,7 @@ export default function CampaignDetailPage() {
         intention_achat: isPromoMode ? "ELEVEE" : (showTasting ? degForm.intention_achat as IntentionAchat : "MOYENNE"),
         a_achete,
         nom_client: degForm.nom_client.trim() || undefined,
-        ...(isPromoMode && !degForm.promotion_selectionnee && {
+        ...(isPromoMode && degForm.promotion_selectionnee === "__NONE__" && {
           conditionnement: degForm.conditionnement,
           quantite: degForm.quantite,
         }),
@@ -833,7 +840,7 @@ export default function CampaignDetailPage() {
       const { data: created } = await api.post<Degustation>("/degustations/", payload);
 
       let selectedPromo = null;
-      if (isPromoMode && degForm.promotion_selectionnee) {
+      if (isPromoMode && degForm.promotion_selectionnee && degForm.promotion_selectionnee !== "__NONE__") {
         selectedPromo = campaign?.promotions?.find(p => p.id === degForm.promotion_selectionnee);
         if (selectedPromo) {
           try {
@@ -852,28 +859,35 @@ export default function CampaignDetailPage() {
 
       setTastings(prev => [created, ...prev]);
       invalidateCache("/degustations");
-      toast.success("Dégustation enregistrée !");
       const clientName = degForm.nom_client.trim();
       setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
+      setDegStep(1);
 
-      if (campaign?.type_recompense === "GOODIES") {
-        setWheelClientName(clientName || "Client");
-        setWonPrize(null);
-        wheelRotationRef.current = 0;
-        setWheelSpinning(false);
-        setWheelOpen(true);
-      } else if (isPromoMode && (selectedPromo?.type_promotion === "GAGNE" || selectedPromo?.type_promotion === "TIRAGE")) {
-        setWheelClientName(clientName || "Client");
-        setWonPrize(null);
-        wheelRotationRef.current = 0;
-        setWheelSpinning(false);
-        if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
-          setTirageGoodiesOverride(selectedPromo.goodies_details.map(g => ({ id: g.id, nom: g.nom })));
-        } else {
-          setTirageGoodiesOverride(null);
+      // Confirmation plein écran (~1s) + vibration mobile, avant l'ouverture
+      // éventuelle de la roue pour ne pas superposer les deux.
+      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(120);
+      setShowDegConfirm(true);
+      setTimeout(() => {
+        setShowDegConfirm(false);
+        if (campaign?.type_recompense === "GOODIES") {
+          setWheelClientName(clientName || "Client");
+          setWonPrize(null);
+          wheelRotationRef.current = 0;
+          setWheelSpinning(false);
+          setWheelOpen(true);
+        } else if (isPromoMode && (selectedPromo?.type_promotion === "GAGNE" || selectedPromo?.type_promotion === "TIRAGE")) {
+          setWheelClientName(clientName || "Client");
+          setWonPrize(null);
+          wheelRotationRef.current = 0;
+          setWheelSpinning(false);
+          if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
+            setTirageGoodiesOverride(selectedPromo.goodies_details.map(g => ({ id: g.id, nom: g.nom })));
+          } else {
+            setTirageGoodiesOverride(null);
+          }
+          setActiveWheelPromoId(selectedPromo.id);
         }
-        setActiveWheelPromoId(selectedPromo.id);
-      }
+      }, 1000);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast.error(msg ?? "Erreur lors de l'enregistrement.");
@@ -1480,6 +1494,16 @@ export default function CampaignDetailPage() {
                     <Input type="date" className="h-8 text-xs mt-0.5" value={donneesSiteForm.date} onChange={e => setDonneesSiteForm(f => ({ ...f, date: e.target.value }))} />
                   </div>
                 </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Conditionnement</Label>
+                  <Select value={donneesSiteForm.conditionnement} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                    <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                      <SelectItem value="PACK">En pack</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
@@ -1504,6 +1528,7 @@ export default function CampaignDetailPage() {
                         <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
                       </div>
                       <div className="flex items-center gap-3 shrink-0 text-right">
+                        <span className="text-muted-foreground">{d.conditionnement_display}</span>
                         <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
                         <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
                       </div>
@@ -2218,140 +2243,203 @@ export default function CampaignDetailPage() {
               </h3>
             </div>
             <form onSubmit={handleDegSubmit} className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Campagne</Label><div className="h-10 px-3 flex items-center rounded-xl border border-input bg-muted/40 text-sm font-medium">{siteInfo?.campagne_nom ?? campaign.nom}</div></div>
-                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Hôtesse</Label><div className="h-10 px-3 flex items-center rounded-xl border border-input bg-muted/40 text-sm font-medium">{user?.name ?? ""}</div></div>
-              </div>
-              <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Nom du client <span className="normal-case font-normal">(utilisé pour la roue)</span></Label><Input value={degForm.nom_client} onChange={e => setDegForm(f => ({ ...f, nom_client: e.target.value }))} placeholder="Prénom du client" className="h-10" /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Site</Label><div className="h-10 px-3 flex items-center rounded-xl border border-input bg-muted/40 text-sm font-medium">{campaignSites.find(s => s.id === degForm.site)?.nom ?? siteInfo?.site_nom ?? "—"}</div></div>
-                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Produit *</Label><Select value={degForm.produit} onValueChange={v => setDegForm(f => ({ ...f, produit: v }))} disabled={!degForm.site || loadingSite}><SelectTrigger>{loadingSite ? <Loader2 className="w-4 h-4 animate-spin" /> : <SelectValue placeholder="Sélectionner" />}</SelectTrigger><SelectContent>{(siteInfo?.produits ?? []).map(p => <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>)}</SelectContent></Select></div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Tranche d'âge *</Label><Select value={degForm.tranche_age} onValueChange={v => setDegForm(f => ({ ...f, tranche_age: v as TrancheAge }))}><SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger><SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Genre *</Label><Select value={degForm.genre} onValueChange={v => setDegForm(f => ({ ...f, genre: v as Genre }))}><SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger><SelectContent>{GENRE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Campagne</Label><div className="h-10 px-3 flex items-center rounded-xl border border-input bg-muted/40 text-sm font-medium truncate">{siteInfo?.campagne_nom ?? campaign.nom}</div></div>
+                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Hôtesse</Label><div className="h-10 px-3 flex items-center rounded-xl border border-input bg-muted/40 text-sm font-medium truncate">{user?.name ?? ""}</div></div>
+                <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Site</Label><div className="h-10 px-3 flex items-center rounded-xl border border-input bg-muted/40 text-sm font-medium truncate">{campaignSites.find(s => s.id === degForm.site)?.nom ?? siteInfo?.site_nom ?? "—"}</div></div>
               </div>
 
-              {/* Note d'ambiance — visible si activé, quel que soit le type */}
-              {campaign?.note_ambiance_active && (
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground text-xs uppercase tracking-wide">Note d&apos;ambiance *</Label>
-                  {(campaign.note_ambiance_max ?? 5) <= 5 ? (
-                    <div className="flex justify-between gap-2">
-                      {RATING_ICONS_5.map(r => (
-                        <button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_ambiance: r.rating }))}
-                          className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1",
-                            degForm.note_ambiance === r.rating ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
-                          {r.icon}<span className="text-xs font-medium">{r.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-5 gap-2">
-                      {Array.from({ length: campaign.note_ambiance_max }, (_, i) => i + 1).map(n => (
-                        <button key={n} type="button" onClick={() => setDegForm(f => ({ ...f, note_ambiance: n }))}
-                          className={cn("py-2.5 rounded-xl border-2 text-sm font-bold transition-all",
-                            degForm.note_ambiance === n ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Note du goût — visible si activé, quel que soit le type */}
-              {campaign?.note_gout_active && (
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground text-xs uppercase tracking-wide">Note du goût *</Label>
-                  {(campaign.note_gout_max ?? 5) <= 5 ? (
-                    <div className="flex justify-between gap-2">
-                      {RATING_ICONS_5.map(r => (
-                        <button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: r.rating }))}
-                          className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1",
-                            degForm.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
-                          {r.icon}<span className="text-xs font-medium">{r.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-5 gap-2">
-                      {Array.from({ length: campaign.note_gout_max }, (_, i) => i + 1).map(n => (
-                        <button key={n} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: n }))}
-                          className={cn("py-2.5 rounded-xl border-2 text-sm font-bold transition-all",
-                            degForm.note_gout === n ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Intention d'achat (uniquement si showTasting et pas de promo) */}
-              {showTasting && !showPromos && (
-                <div className="space-y-2"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Intention d'achat *</Label><div className="grid grid-cols-3 gap-2">{INTENT_OPTIONS.map(o => (<button key={o.value} type="button" onClick={() => setDegForm(f => ({ ...f, intention_achat: o.value }))} className={cn("py-3 px-2 rounded-lg border-2 font-medium transition-all text-sm", degForm.intention_achat === o.value ? o.color + " border-current" : "border-border hover:border-indigo-300")}>{o.label}</button>))}</div></div>
-              )}
-
-              {/* Promotions : checkboxes */}
-              {showPromos && (campaign?.promotions ?? []).length > 0 && (
-                <div className="space-y-3 pt-3 border-t border-slate-100">
-                  <div className="flex items-center gap-2"><Label className="text-sm font-semibold text-blue-600">Offre promotionnelle applicable</Label><span className="text-xs text-muted-foreground">({(campaign?.promotions ?? []).filter(p => p.is_active).length} règle{(campaign?.promotions ?? []).filter(p => p.is_active).length > 1 ? "s" : ""})</span></div>
-                  <div className="space-y-2">
-                    {(campaign?.promotions ?? []).filter(p => p.is_active).map((promo) => {
-                      const styles = PROMO_TYPE_STYLES[promo.type_promotion];
-                      const isChecked = degForm.promotion_selectionnee === promo.id;
-                      const willOpenWheel = promo.type_promotion === "TIRAGE" || promo.type_promotion === "GAGNE";
+              {/* ── Stepper ── */}
+              {(() => {
+                const totalDegSteps = showPromos ? 3 : 2;
+                const stepLabels = ["Client", "Achat", "Offre"].slice(0, totalDegSteps);
+                return (
+                  <div className="flex items-center gap-2 pt-1">
+                    {stepLabels.map((label, i) => {
+                      const n = i + 1;
+                      const done = degStep > n;
+                      const active = degStep === n;
                       return (
-                        <label key={promo.id} className={cn("flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all", isChecked ? `${styles.bg} ${styles.border} ${styles.text}` : "border-slate-200 bg-white hover:border-slate-300")}>
-                          <input type="checkbox" className="mt-1 w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked={isChecked} onChange={(e) => { if (e.target.checked) setDegForm(f => ({ ...f, promotion_selectionnee: promo.id })); else setDegForm(f => ({ ...f, promotion_selectionnee: "" })); }} />
-                          <div className="flex-1 flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center shrink-0"><span className="text-xl">{styles.icon}</span></div><div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}</span><span className="text-xs font-medium text-slate-500">→ {styles.label}</span>{willOpenWheel && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎡 Lance la roue</span>}</div><p className="font-semibold text-sm mt-1">{promo.recompense_description}</p></div></div>
-                          {isChecked && <CheckCircle2 className={cn("w-5 h-5 shrink-0", styles.text)} />}
-                        </label>
+                        <div key={n} className="flex items-center gap-2 flex-1">
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+                              done ? "bg-emerald-500 text-white" : active ? "text-white" : "bg-slate-200 text-slate-500")}
+                              style={active ? { background: p1 } : undefined}>
+                              {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
+                            </div>
+                            <span className={cn("text-xs font-semibold whitespace-nowrap", active ? "text-foreground" : "text-muted-foreground")}>{label}</span>
+                          </div>
+                          {n < totalDegSteps && <div className="flex-1 h-px bg-slate-200" />}
+                        </div>
                       );
                     })}
                   </div>
-                  <label className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-white hover:border-slate-300 cursor-pointer">
-                    <input type="checkbox" className="w-5 h-5 rounded border-gray-300" checked={degForm.promotion_selectionnee === ""} onChange={(e) => { if (e.target.checked) setDegForm(f => ({ ...f, promotion_selectionnee: "" })); }} />
-                    <span className="text-sm font-medium text-slate-700">Vente hors offre promotionnelle</span>
-                  </label>
+                );
+              })()}
+
+              {/* ── Étape 1 : Client ── */}
+              {degStep === 1 && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Nom du client <span className="normal-case font-normal">(utilisé pour la roue)</span></Label><Input value={degForm.nom_client} onChange={e => setDegForm(f => ({ ...f, nom_client: e.target.value }))} placeholder="Prénom du client" className="h-10" /></div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Tranche d'âge *</Label><Select value={degForm.tranche_age} onValueChange={v => setDegForm(f => ({ ...f, tranche_age: v as TrancheAge }))}><SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger><SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
+                    <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Genre *</Label><Select value={degForm.genre} onValueChange={v => setDegForm(f => ({ ...f, genre: v as Genre }))}><SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger><SelectContent>{GENRE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select></div>
+                  </div>
+                  <Button type="button" onClick={() => setDegStep(2)} disabled={!degForm.tranche_age || !degForm.genre}
+                    className="w-full h-11 text-white" style={{ background: p1 }}>
+                    Suivant : Achat
+                  </Button>
                 </div>
               )}
 
-              {/* Quantité vendue (vente hors offre promotionnelle) */}
-              {showPromos && !degForm.promotion_selectionnee && (
-                <div className="space-y-3 pt-3 border-t border-slate-100">
-                  <Label className="text-sm font-semibold text-slate-600">Quantité vendue (hors promo) *</Label>
-                  <div className="grid grid-cols-2 gap-3">
+              {/* ── Étape 2 : Achat ── */}
+              {degStep === 2 && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Produit *</Label><Select value={degForm.produit} onValueChange={v => setDegForm(f => ({ ...f, produit: v }))} disabled={!degForm.site || loadingSite}><SelectTrigger>{loadingSite ? <Loader2 className="w-4 h-4 animate-spin" /> : <SelectValue placeholder="Sélectionner" />}</SelectTrigger><SelectContent>{(siteInfo?.produits ?? []).map(p => <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>)}</SelectContent></Select></div>
+
+                  {/* Note d'ambiance — visible si activé, quel que soit le type */}
+                  {campaign?.note_ambiance_active && (
                     <div className="space-y-2">
-                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">Conditionnement</Label>
-                      <Select value={degForm.conditionnement} onValueChange={v => setDegForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
-                          <SelectItem value="PACK">En pack</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">Note d&apos;ambiance *</Label>
+                      {(campaign.note_ambiance_max ?? 5) <= 5 ? (
+                        <div className="flex justify-between gap-2">
+                          {RATING_ICONS_5.map(r => (
+                            <button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_ambiance: r.rating }))}
+                              className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1",
+                                degForm.note_ambiance === r.rating ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
+                              {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-5 gap-2">
+                          {Array.from({ length: campaign.note_ambiance_max }, (_, i) => i + 1).map(n => (
+                            <button key={n} type="button" onClick={() => setDegForm(f => ({ ...f, note_ambiance: n }))}
+                              className={cn("py-2.5 rounded-xl border-2 text-sm font-bold transition-all",
+                                degForm.note_ambiance === n ? "border-violet-500 bg-violet-50 text-violet-600" : "border-border hover:border-violet-300")}>
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                  )}
+
+                  {/* Note du goût — visible si activé, quel que soit le type */}
+                  {campaign?.note_gout_active && (
                     <div className="space-y-2">
-                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">Quantité</Label>
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => setDegForm(f => ({ ...f, quantite: Math.max(1, f.quantite - 1) }))}
-                          className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">−</button>
-                        <Input type="number" min="1" value={degForm.quantite}
-                          onChange={e => setDegForm(f => ({ ...f, quantite: Math.max(1, parseInt(e.target.value) || 1) }))}
-                          className="w-16 text-center font-semibold h-9" />
-                        <button type="button" onClick={() => setDegForm(f => ({ ...f, quantite: f.quantite + 1 }))}
-                          className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">+</button>
-                      </div>
+                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">Note du goût *</Label>
+                      {(campaign.note_gout_max ?? 5) <= 5 ? (
+                        <div className="flex justify-between gap-2">
+                          {RATING_ICONS_5.map(r => (
+                            <button key={r.rating} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: r.rating }))}
+                              className={cn("flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all flex-1",
+                                degForm.note_gout === r.rating ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                              {r.icon}<span className="text-xs font-medium">{r.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-5 gap-2">
+                          {Array.from({ length: campaign.note_gout_max }, (_, i) => i + 1).map(n => (
+                            <button key={n} type="button" onClick={() => setDegForm(f => ({ ...f, note_gout: n }))}
+                              className={cn("py-2.5 rounded-xl border-2 text-sm font-bold transition-all",
+                                degForm.note_gout === n ? "border-indigo-500 bg-indigo-50 text-indigo-600" : "border-border hover:border-indigo-300")}>
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                  )}
+
+                  {/* Intention d'achat (uniquement si showTasting et pas de promo) */}
+                  {showTasting && !showPromos && (
+                    <div className="space-y-2"><Label className="text-muted-foreground text-xs uppercase tracking-wide">Intention d'achat *</Label><div className="grid grid-cols-3 gap-2">{INTENT_OPTIONS.map(o => (<button key={o.value} type="button" onClick={() => setDegForm(f => ({ ...f, intention_achat: o.value }))} className={cn("py-3 px-2 rounded-lg border-2 font-medium transition-all text-sm", degForm.intention_achat === o.value ? o.color + " border-current" : "border-border hover:border-indigo-300")}>{o.label}</button>))}</div></div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <Button type="button" variant="outline" className="h-11" onClick={() => setDegStep(1)}>Retour</Button>
+                    {showPromos ? (
+                      <Button type="button" onClick={() => setDegStep(3)} disabled={!degForm.produit}
+                        className="flex-1 h-11 text-white" style={{ background: p1 }}>
+                        Suivant : Offre
+                      </Button>
+                    ) : (
+                      <Button type="submit" disabled={savingDeg} className="flex-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white h-11 text-base font-semibold">
+                        {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : <><UtensilsCrossed className="w-4 h-4 mr-2" />{showWheel ? "Enregistrer & lancer la roue 🎡" : "Enregistrer la dégustation"}</>}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
 
-              <Button type="submit" disabled={savingDeg} className="w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white h-12 text-base font-semibold">
-                {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : (() => { const sel = (campaign?.promotions ?? []).find(p => p.id === degForm.promotion_selectionnee); const promoLancesRoue = sel?.type_promotion === "TIRAGE" || sel?.type_promotion === "GAGNE"; return <><UtensilsCrossed className="w-4 h-4 mr-2" />{(showPromos && promoLancesRoue) || showWheel ? "Enregistrer & lancer la roue 🎡" : showPromos ? "Enregistrer le client" : "Enregistrer la dégustation"}</>; })()}
-              </Button>
+              {/* ── Étape 3 : Offre (radio, rien coché par défaut) ── */}
+              {degStep === 3 && showPromos && (
+                <div className="space-y-4">
+                  {(campaign?.promotions ?? []).length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2"><Label className="text-sm font-semibold text-blue-600">Offre promotionnelle applicable</Label><span className="text-xs text-muted-foreground">({(campaign?.promotions ?? []).filter(p => p.is_active).length} règle{(campaign?.promotions ?? []).filter(p => p.is_active).length > 1 ? "s" : ""})</span></div>
+                      <div className="space-y-2">
+                        {(campaign?.promotions ?? []).filter(p => p.is_active).map((promo) => {
+                          const styles = PROMO_TYPE_STYLES[promo.type_promotion];
+                          const isChecked = degForm.promotion_selectionnee === promo.id;
+                          const willOpenWheel = promo.type_promotion === "TIRAGE" || promo.type_promotion === "GAGNE";
+                          return (
+                            <label key={promo.id} className={cn("flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all", isChecked ? `${styles.bg} ${styles.border} ${styles.text}` : "border-slate-200 bg-white hover:border-slate-300")}>
+                              <input type="radio" name="promotion_choice" className="mt-1 w-5 h-5 border-gray-300 text-blue-600 focus:ring-blue-500" checked={isChecked} onChange={() => setDegForm(f => ({ ...f, promotion_selectionnee: promo.id }))} />
+                              <div className="flex-1 flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center shrink-0"><span className="text-xl">{styles.icon}</span></div><div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}</span><span className="text-xs font-medium text-slate-500">→ {styles.label}</span>{willOpenWheel && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎡 Lance la roue</span>}</div><p className="font-semibold text-sm mt-1">{promo.recompense_description}</p></div></div>
+                              {isChecked && <CheckCircle2 className={cn("w-5 h-5 shrink-0", styles.text)} />}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <label className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-white hover:border-slate-300 cursor-pointer">
+                        <input type="radio" name="promotion_choice" className="w-5 h-5 border-gray-300" checked={degForm.promotion_selectionnee === "__NONE__"} onChange={() => setDegForm(f => ({ ...f, promotion_selectionnee: "__NONE__" }))} />
+                        <span className="text-sm font-medium text-slate-700">Vente hors offre promotionnelle</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* Quantité vendue (vente hors offre promotionnelle) */}
+                  {degForm.promotion_selectionnee === "__NONE__" && (
+                    <div className="space-y-3 pt-3 border-t border-slate-100">
+                      <Label className="text-sm font-semibold text-slate-600">Quantité vendue (hors promo) *</Label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label className="text-muted-foreground text-xs uppercase tracking-wide">Conditionnement</Label>
+                          <Select value={degForm.conditionnement} onValueChange={v => setDegForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                              <SelectItem value="PACK">En pack</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-muted-foreground text-xs uppercase tracking-wide">Quantité</Label>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setDegForm(f => ({ ...f, quantite: Math.max(1, f.quantite - 1) }))}
+                              className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">−</button>
+                            <Input type="number" min="1" value={degForm.quantite}
+                              onChange={e => setDegForm(f => ({ ...f, quantite: Math.max(1, parseInt(e.target.value) || 1) }))}
+                              className="w-16 text-center font-semibold h-9" />
+                            <button type="button" onClick={() => setDegForm(f => ({ ...f, quantite: f.quantite + 1 }))}
+                              className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">+</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <Button type="button" variant="outline" className="h-12" onClick={() => setDegStep(2)}>Retour</Button>
+                    <Button type="submit" disabled={savingDeg || degForm.promotion_selectionnee === ""} className="flex-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white h-12 text-base font-semibold">
+                      {savingDeg ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : (() => { const sel = (campaign?.promotions ?? []).find(p => p.id === degForm.promotion_selectionnee); const promoLancesRoue = sel?.type_promotion === "TIRAGE" || sel?.type_promotion === "GAGNE"; return <><UtensilsCrossed className="w-4 h-4 mr-2" />{promoLancesRoue ? "Enregistrer & lancer la roue 🎡" : "Enregistrer le client"}</>; })()}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </form>
           </div>
         </div>
@@ -2440,6 +2528,16 @@ export default function CampaignDetailPage() {
                 <Input type="date" className="h-8 text-xs mt-0.5" value={donneesSiteForm.date} onChange={e => setDonneesSiteForm(f => ({ ...f, date: e.target.value }))} />
               </div>
             </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Conditionnement</Label>
+              <Select value={donneesSiteForm.conditionnement} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                  <SelectItem value="PACK">En pack</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
@@ -2464,6 +2562,7 @@ export default function CampaignDetailPage() {
                     <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-muted-foreground">{d.conditionnement_display}</span>
                     <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
                     <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
                   </div>
@@ -2560,6 +2659,17 @@ export default function CampaignDetailPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Confirmation plein écran après enregistrement (hôtesse) */}
+      {showDegConfirm && (
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 text-white animate-fade-up"
+          style={{ background: `linear-gradient(135deg, ${p1} 0%, ${p2} 100%)` }}>
+          <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center">
+            <CheckCircle2 className="w-12 h-12" />
+          </div>
+          <p className="text-xl font-bold">Enregistré !</p>
         </div>
       )}
 

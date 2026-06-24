@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import { FileText, Loader2, Search, RefreshCw, Pencil, Clock, FileDown } from "lucide-react";
@@ -44,7 +44,7 @@ const EMPTY_EDIT_FORM: RapportJournalierUpdatePayload = {
   observation_generale: "",
 };
 
-export default function RapportsPage() {
+function RapportsPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
   const canEdit = user?.role === "Administrateur" || user?.role === "Superviseur";
@@ -422,5 +422,13 @@ export default function RapportsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function RapportsPage() {
+  return (
+    <Suspense fallback={null}>
+      <RapportsPageContent />
+    </Suspense>
   );
 }
