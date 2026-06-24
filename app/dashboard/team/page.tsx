@@ -15,9 +15,12 @@ import {
 import { toast } from "sonner";
 import {
   Plus, Search, Users, UserCheck, UserX, Mail, ShieldCheck,
-  Clock, Edit2, Trash2, X, Loader2, SendHorizonal,
+  Clock, Edit2, Trash2, X, Loader2, SendHorizonal, MoreVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/dashboard/page-header";
 
 type RoleFilter = "all" | "Hotesse" | "Superviseur";
@@ -44,7 +47,6 @@ export default function TeamPage() {
   const [editing, setEditing]             = useState<RemoteUser | null>(null);
   const [submitting, setSubmitting]       = useState(false);
   const [form, setForm]                   = useState<CreateUserPayload>({ ...EMPTY_FORM });
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [resendingId, setResendingId]       = useState<string | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -139,7 +141,6 @@ export default function TeamPage() {
     try {
       await api.delete(`/users/${id}/`);
       setMembers(prev => prev.filter(m => m.id !== id));
-      setDeleteConfirm(null);
       toast.success("Membre supprimé.");
     } catch {
       toast.error("Erreur lors de la suppression.");
@@ -298,50 +299,41 @@ export default function TeamPage() {
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="px-4 pb-4 flex flex-col gap-2 border-t border-slate-50 pt-3">
-                  {/* Row 1: Edit + Toggle active + Delete */}
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" className="flex-1 rounded-xl text-xs" onClick={() => openEdit(member)}>
-                      <Edit2 className="w-3.5 h-3.5 mr-1.5" />Modifier
-                    </Button>
-                    <Button
-                      size="sm" variant="outline"
-                      className={cn("flex-1 rounded-xl text-xs", member.is_active ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50")}
-                      onClick={() => handleToggleActive(member)}
-                    >
-                      {member.is_active
-                        ? <><UserX className="w-3.5 h-3.5 mr-1.5" />Désactiver</>
-                        : <><UserCheck className="w-3.5 h-3.5 mr-1.5" />Réactiver</>
-                      }
-                    </Button>
-                    {deleteConfirm === member.id ? (
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="destructive" className="rounded-xl text-xs px-2.5" onClick={() => handleDelete(member.id)}>
-                          Confirmer
-                        </Button>
-                        <Button size="sm" variant="ghost" className="rounded-xl text-xs px-2" onClick={() => setDeleteConfirm(null)}>
-                          <X className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button size="sm" variant="ghost" className="rounded-xl text-rose-500 hover:bg-rose-50 hover:text-rose-600 px-2.5" onClick={() => setDeleteConfirm(member.id)}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                  {/* Row 2: Resend credentials */}
-                  <Button
-                    size="sm" variant="outline"
-                    className="w-full rounded-xl text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
-                    onClick={() => handleResendCredentials(member)}
-                    disabled={resendingId === member.id}
-                  >
-                    {resendingId === member.id
-                      ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Envoi en cours…</>
-                      : <><SendHorizonal className="w-3.5 h-3.5 mr-1.5" />Renvoyer les identifiants</>
-                    }
+                {/* Actions : "Modifier" visible + menu "..." pour le reste */}
+                <div className="px-4 pb-4 flex items-center gap-2 border-t border-slate-50 pt-3">
+                  <Button size="sm" variant="outline" className="flex-1 rounded-xl text-xs" onClick={() => openEdit(member)}>
+                    <Edit2 className="w-3.5 h-3.5 mr-1.5" />Modifier
                   </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="sm" variant="outline" className="rounded-xl px-2.5">
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleToggleActive(member)}>
+                        {member.is_active
+                          ? <><UserX className="w-3.5 h-3.5 mr-2" />Désactiver</>
+                          : <><UserCheck className="w-3.5 h-3.5 mr-2" />Réactiver</>
+                        }
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={resendingId === member.id}
+                        onClick={() => handleResendCredentials(member)}
+                      >
+                        {resendingId === member.id
+                          ? <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />Envoi en cours…</>
+                          : <><SendHorizonal className="w-3.5 h-3.5 mr-2" />Renvoyer les identifiants</>
+                        }
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-rose-600 focus:text-rose-600"
+                        onClick={() => { if (confirm(`Supprimer ${member.name} ?`)) handleDelete(member.id); }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-2" />Supprimer
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             );

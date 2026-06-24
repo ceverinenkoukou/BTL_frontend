@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
+import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, CreatePromotionPayload, Entreprise, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypePromotion } from "@/lib/types/backend";
+import type { CampagneList, CreatePromotionPayload, DonneesSiteJour, Entreprise, Goodie, JourAnimation, LivraisonGoodiesJour, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,8 +23,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 import {
+  Beer,
   Building2,
+  Calendar,
+  Clock,
   Edit2,
   Loader2,
   MapPin,
@@ -71,18 +77,22 @@ const emptyCreateForm: CreateSiteForm = {
 
 type PromoForm = {
   type_promotion: TypePromotion;
+  conditionnement: TypeConditionnement;
   quantite_requise: string;
   quantite_offerte: string;
   recompense_description: string;
   produit_cible: string;
+  goodies: string[];
 };
 
 const emptyPromoForm: PromoForm = {
   type_promotion: "OFFERT",
+  conditionnement: "UNITE",
   quantite_requise: "3",
   quantite_offerte: "1",
   recompense_description: "",
   produit_cible: "",
+  goodies: [],
 };
 
 type EditPromoForm = PromoForm & { id: string };
@@ -94,7 +104,11 @@ type HotesseForm = {
 
 const emptyHotesseForm: HotesseForm = { email: "", name: "" };
 
-export default function SitesPage() {
+function SitesPageContent() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "Administrateur";
+  const isSuperviseur = user?.role === "Superviseur";
+
   const [sites, setSites] = useState<SiteList[]>([]);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [entreprises, setEntreprises] = useState<Entreprise[]>([]);
@@ -106,12 +120,13 @@ export default function SitesPage() {
   const [promoForm, setPromoForm] = useState<PromoForm>(emptyPromoForm);
   const [editingPromo, setEditingPromo] = useState<EditPromoForm | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterCompany, setFilterCompany] = useState("all");
-  const [filterCampaign, setFilterCampaign] = useState("all");
+  const [filterCompany, setFilterCompany] = useUrlState("entreprise", "all");
+  const [filterCampaign, setFilterCampaign] = useUrlState("campagne", "all");
   const [editingSite, setEditingSite] = useState<SiteList | null>(null);
   const [offersSite, setOffersSite] = useState<SiteList | null>(null);
   const [siteForm, setSiteForm] = useState<SiteForm>(emptySiteForm);
   const [campagneProduits, setCampagneProduits] = useState<Produit[]>([]);
+  const [campagneGoodies, setCampagneGoodies] = useState<Goodie[]>([]);
 
   // --- Hôtesses ---
   const [hotelSite, setHotelSite] = useState<SiteList | null>(null);
@@ -125,6 +140,140 @@ export default function SitesPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForm, setCreateForm] = useState<CreateSiteForm>(emptyCreateForm);
   const [savingCreate, setSavingCreate] = useState(false);
+
+  // --- Planning (jours animés) par site ---
+  const [planningSite, setPlanningSite] = useState<SiteList | null>(null);
+  const [siteJours, setSiteJours] = useState<JourAnimation[]>([]);
+  const [sitePlanForm, setSitePlanForm] = useState({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00" });
+  const [savingSitePlan, setSavingSitePlan] = useState(false);
+  const [sitePlanError, setSitePlanError] = useState("");
+
+  // --- Goodies livrés & stock de boissons par site (admin + superviseur) ---
+  const [stockSite, setStockSite] = useState<SiteList | null>(null);
+  const [stockGoodies, setStockGoodies] = useState<Goodie[]>([]);
+  const [stockLivraisons, setStockLivraisons] = useState<LivraisonGoodiesJour[]>([]);
+  const [stockDonnees, setStockDonnees] = useState<DonneesSiteJour[]>([]);
+  const [loadingStock, setLoadingStock] = useState(false);
+  const [stockLivraisonForm, setStockLivraisonForm] = useState({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
+  const [savingStockLivraison, setSavingStockLivraison] = useState(false);
+  const [stockDonneesForm, setStockDonneesForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    conditionnement: "UNITE" as TypeConditionnement,
+    stock_boissons: "", nombre_boissons_gratuites: "",
+  });
+  const [savingStockDonnees, setSavingStockDonnees] = useState(false);
+
+  const openPlanningDialog = async (site: SiteList) => {
+    setPlanningSite(site);
+    setSiteJours([]);
+    setSitePlanError("");
+    setSitePlanForm({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00" });
+    try {
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?site=${site.id}`);
+      setSiteJours(Array.isArray(res.data) ? res.data : []);
+    } catch { /* silent */ }
+  };
+
+  const handleAddSiteJour = async () => {
+    if (!planningSite) return;
+    if (!sitePlanForm.date) { setSitePlanError("La date est requise."); return; }
+    setSavingSitePlan(true); setSitePlanError("");
+    try {
+      await api.post("/jours-animation/", {
+        campagne: planningSite.campagne,
+        site: planningSite.id,
+        date: sitePlanForm.date,
+        heure_ouverture: sitePlanForm.heure_ouverture,
+        heure_fermeture: sitePlanForm.heure_fermeture,
+      });
+      setSitePlanForm({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00" });
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?site=${planningSite.id}`);
+      setSiteJours(Array.isArray(res.data) ? res.data : []);
+    } catch (e: any) {
+      const d = e?.response?.data;
+      setSitePlanError(d?.date?.[0] || d?.heure_fermeture?.[0] || d?.non_field_errors?.[0] || d?.detail || "Erreur lors de l'ajout.");
+    } finally { setSavingSitePlan(false); }
+  };
+
+  const handleDeleteSiteJour = async (jourId: string) => {
+    if (!planningSite) return;
+    try {
+      await api.delete(`/jours-animation/${jourId}/`);
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?site=${planningSite.id}`);
+      setSiteJours(Array.isArray(res.data) ? res.data : []);
+    } catch { toast.error("Impossible de supprimer ce jour."); }
+  };
+
+  // --- Goodies livrés & stock de boissons par site (admin + superviseur) ---
+  const openStockDialog = async (site: SiteList) => {
+    setStockSite(site);
+    setStockGoodies([]);
+    setStockLivraisons([]);
+    setStockDonnees([]);
+    setStockLivraisonForm({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
+    setStockDonneesForm({ date: new Date().toISOString().slice(0, 10), conditionnement: "UNITE", stock_boissons: "", nombre_boissons_gratuites: "" });
+    setLoadingStock(true);
+    try {
+      const [goodiesRes, livrRes, dsjRes] = await Promise.all([
+        api.get(`/goodies/?campagne=${site.campagne}`),
+        api.get(`/livraisons-goodies/?site=${site.id}`),
+        api.get(`/donnees-site-jour/?site=${site.id}`),
+      ]);
+      setStockGoodies(unwrapList<Goodie>(goodiesRes.data));
+      setStockLivraisons(unwrapList<LivraisonGoodiesJour>(livrRes.data));
+      setStockDonnees(unwrapList<DonneesSiteJour>(dsjRes.data));
+    } catch {
+      toast.error("Erreur lors du chargement.");
+    } finally {
+      setLoadingStock(false);
+    }
+  };
+
+  const handleSubmitStockLivraison = async () => {
+    if (!stockSite || !stockLivraisonForm.goodie || !stockLivraisonForm.date) {
+      toast.error("Remplissez tous les champs."); return;
+    }
+    setSavingStockLivraison(true);
+    try {
+      const res = await api.post<LivraisonGoodiesJour>("/livraisons-goodies/", {
+        site: stockSite.id,
+        goodie: stockLivraisonForm.goodie,
+        date: stockLivraisonForm.date,
+        quantite_apportee: stockLivraisonForm.quantite,
+      });
+      setStockLivraisons(prev => {
+        const idx = prev.findIndex(l => l.goodie === res.data.goodie && l.date === res.data.date);
+        if (idx >= 0) { const n = [...prev]; n[idx] = res.data; return n; }
+        return [res.data, ...prev];
+      });
+      toast.success("Livraison enregistrée !");
+      setStockLivraisonForm(f => ({ ...f, goodie: "", quantite: 1 }));
+    } catch { toast.error("Erreur lors de l'enregistrement."); }
+    finally { setSavingStockLivraison(false); }
+  };
+
+  const handleSubmitStockDonnees = async () => {
+    if (!stockSite || !stockDonneesForm.date) {
+      toast.error("Sélectionnez une date."); return;
+    }
+    setSavingStockDonnees(true);
+    try {
+      const res = await api.post<DonneesSiteJour>("/donnees-site-jour/", {
+        site: stockSite.id,
+        date: stockDonneesForm.date,
+        conditionnement: stockDonneesForm.conditionnement,
+        stock_boissons: stockDonneesForm.stock_boissons === "" ? null : Number(stockDonneesForm.stock_boissons),
+        nombre_boissons_gratuites: stockDonneesForm.nombre_boissons_gratuites === "" ? null : Number(stockDonneesForm.nombre_boissons_gratuites),
+      });
+      setStockDonnees(prev => {
+        const idx = prev.findIndex(d => d.date === res.data.date);
+        if (idx >= 0) { const n = [...prev]; n[idx] = res.data; return n; }
+        return [res.data, ...prev];
+      });
+      toast.success("Données enregistrées !");
+    } catch { toast.error("Erreur lors de l'enregistrement."); }
+    finally { setSavingStockDonnees(false); }
+  };
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -287,17 +436,20 @@ export default function SitesPage() {
     setShowPromoForm(false);
     setPromoForm(emptyPromoForm);
     setCampagneProduits([]);
+    setCampagneGoodies([]);
     setLoadingOffers(true);
 
     try {
       const campagne = campaigns.find(c => c.id === site.campagne);
       const entrepriseId = campagne?.entreprise;
-      const [promoRes, produitsRes] = await Promise.all([
+      const [promoRes, produitsRes, goodiesRes] = await Promise.all([
         api.get(`/promotions/?campagne=${site.campagne}`),
         entrepriseId ? api.get(`/entreprises/${entrepriseId}/`) : Promise.resolve({ data: { produits: [] } }),
+        api.get(`/goodies/?campagne=${site.campagne}`),
       ]);
       setPromotions(unwrapList<Promotion>(promoRes.data));
       setCampagneProduits(produitsRes.data.produits ?? []);
+      setCampagneGoodies(unwrapList<Goodie>(goodiesRes.data));
     } catch {
       toast.error("Erreur lors du chargement des offres.");
     } finally {
@@ -323,10 +475,12 @@ export default function SitesPage() {
     setEditingPromo({
       id: promotion.id,
       type_promotion: promotion.type_promotion,
+      conditionnement: promotion.conditionnement ?? "UNITE",
       quantite_requise: String(promotion.quantite_requise),
       quantite_offerte: String(promotion.quantite_offerte ?? 1),
       recompense_description: promotion.recompense_description,
       produit_cible: promotion.produit_cible ?? "",
+      goodies: promotion.goodies ?? [],
     });
   };
 
@@ -340,10 +494,12 @@ export default function SitesPage() {
     try {
       const { data } = await api.patch<Promotion>(`/promotions/${editingPromo.id}/`, {
         type_promotion: editingPromo.type_promotion,
+        conditionnement: editingPromo.conditionnement,
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: editingPromo.recompense_description.trim(),
         produit_cible: editingPromo.produit_cible || null,
+        goodies: editingPromo.type_promotion === "TIRAGE" ? editingPromo.goodies : [],
       });
       setPromotions(current => current.map(p => (p.id === data.id ? data : p)));
       setEditingPromo(null);
@@ -367,10 +523,12 @@ export default function SitesPage() {
         campagne: offersSite.campagne,
         sites: [offersSite.id],
         type_promotion: promoForm.type_promotion,
+        conditionnement: promoForm.conditionnement,
         quantite_requise: qty,
         quantite_offerte: qtyOfferte,
         recompense_description: promoForm.recompense_description.trim(),
         produit_cible: promoForm.produit_cible || null,
+        goodies: promoForm.type_promotion === "TIRAGE" ? promoForm.goodies : [],
         is_active: true,
       };
       const { data } = await api.post<Promotion>("/promotions/", payload);
@@ -489,45 +647,35 @@ export default function SitesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-emerald-800 to-cyan-700 text-white shadow-2xl shadow-emerald-200">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_65%)]" />
-        <div className="relative z-10 p-6 md:p-8">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                  <MapPin className="w-4 h-4" />
-                </div>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Gestion des sites</h1>
-              </div>
-              <div className="text-white/70 text-sm ml-12 mb-3">
-                Modifier les sites des campagnes et cibler les offres par site.
-              </div>
-              <button
-                type="button"
-                onClick={openCreateDialog}
-                className="mt-1 ml-12 inline-flex items-center gap-2 rounded-lg border border-white/40 bg-white/15 px-4 py-2 text-sm font-medium text-white hover:bg-white/25 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Nouveau site
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
-                <p className="text-lg font-black">{sites.length}</p>
-                <p className="text-xs text-white/65">sites</p>
-              </div>
-              <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
-                <p className="text-lg font-black">{groupedSites.length}</p>
-                <p className="text-xs text-white/65">lieux</p>
-              </div>
-              <div className="rounded-xl bg-white/15 px-4 py-3 border border-white/20">
-                <p className="text-lg font-black">{campaigns.length}</p>
-                <p className="text-xs text-white/65">campagnes</p>
-              </div>
-            </div>
+      <PageHeader
+        title="Gestion des sites"
+        description="Modifier les sites des campagnes et cibler les offres par site."
+        icon={<MapPin className="w-5 h-5" />}
+        ctaSlot={
+          isAdmin ? (
+            <Button
+              onClick={openCreateDialog}
+              className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Nouveau site
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-3 gap-3 max-w-md">
+        {[
+          { label: "sites", value: sites.length },
+          { label: "lieux", value: groupedSites.length },
+          { label: "campagnes", value: campaigns.length },
+        ].map((s, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3 text-center">
+            <p className="text-lg font-black text-foreground">{s.value}</p>
+            <p className="text-xs text-muted-foreground">{s.label}</p>
           </div>
-        </div>
+        ))}
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -627,21 +775,35 @@ export default function SitesPage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <Button variant="outline" size="sm" onClick={() => openOffersDialog(site)} className="gap-2">
-                          <SlidersHorizontal className="w-4 h-4" />
-                          Offres
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => openHotessesDialog(site)} className="gap-2">
-                          <Users className="w-4 h-4" />
-                          Hôtesses
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => openEditDialog(site)} className="gap-2">
-                          <Edit2 className="w-4 h-4" />
-                          Modifier
-                        </Button>
-                        <Button variant="outline" size="icon" onClick={() => handleDeleteSite(site)}>
-                          <Trash2 className="w-4 h-4 text-red-500" />
-                        </Button>
+                        {(isAdmin || isSuperviseur) && (
+                          <Button variant="outline" size="sm" onClick={() => openStockDialog(site)} className="gap-2">
+                            <Beer className="w-4 h-4" />
+                            Goodies & stock
+                          </Button>
+                        )}
+                        {isAdmin && (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => openPlanningDialog(site)} className="gap-2">
+                              <Clock className="w-4 h-4" />
+                              Planning
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openOffersDialog(site)} className="gap-2">
+                              <SlidersHorizontal className="w-4 h-4" />
+                              Offres
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openHotessesDialog(site)} className="gap-2">
+                              <Users className="w-4 h-4" />
+                              Hôtesses
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openEditDialog(site)} className="gap-2">
+                              <Edit2 className="w-4 h-4" />
+                              Modifier
+                            </Button>
+                            <Button variant="outline" size="icon" onClick={() => handleDeleteSite(site)}>
+                              <Trash2 className="w-4 h-4 text-red-500" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -742,6 +904,124 @@ export default function SitesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={!!stockSite} onOpenChange={open => !open && setStockSite(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Beer className="w-4 h-4 text-sky-600" />
+              Goodies & stock — {stockSite?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          {stockSite && (
+            loadingStock ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Goodies livrés / jour */}
+                <div className="space-y-2.5">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Goodies livrés / jour</p>
+                  {stockGoodies.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">Aucun goodie disponible pour cette campagne.</p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Goodie</Label>
+                          <Select value={stockLivraisonForm.goodie} onValueChange={v => setStockLivraisonForm(f => ({ ...f, goodie: v }))}>
+                            <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue placeholder="Goodie" /></SelectTrigger>
+                            <SelectContent>{stockGoodies.map(g => <SelectItem key={g.id} value={g.id}>{g.nom}</SelectItem>)}</SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Date</Label>
+                          <Input type="date" className="h-8 text-xs mt-0.5" value={stockLivraisonForm.date} onChange={e => setStockLivraisonForm(f => ({ ...f, date: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Quantité apportée</Label>
+                        <Input type="number" min={1} className="h-8 text-xs mt-0.5" value={stockLivraisonForm.quantite} onChange={e => setStockLivraisonForm(f => ({ ...f, quantite: parseInt(e.target.value) || 1 }))} />
+                      </div>
+                      <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitStockLivraison} disabled={savingStockLivraison}>
+                        {savingStockLivraison ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                        Enregistrer livraison
+                      </Button>
+                    </>
+                  )}
+                  {stockLivraisons.length > 0 && (
+                    <div className="space-y-1.5 pt-1 max-h-32 overflow-y-auto">
+                      {stockLivraisons.slice(0, 10).map(l => (
+                        <div key={l.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-foreground truncate">{l.goodie_nom}</p>
+                            <p className="text-muted-foreground">{new Date(l.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 text-right">
+                            <span className="text-emerald-600 font-bold">+{l.quantite_apportee}</span>
+                            {l.gains_du_jour > 0 && <span className="text-rose-500">−{l.gains_du_jour}</span>}
+                            <span className="font-semibold text-foreground">={l.restants_du_jour}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Stock de boissons & boissons gratuites */}
+                <div className="space-y-2.5 pt-3 border-t border-slate-100">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Stock de boissons & boissons gratuites</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Date</Label>
+                      <Input type="date" className="h-8 text-xs mt-0.5" value={stockDonneesForm.date} onChange={e => setStockDonneesForm(f => ({ ...f, date: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Conditionnement</Label>
+                      <Select value={stockDonneesForm.conditionnement} onValueChange={v => setStockDonneesForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                        <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
+                      <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={stockDonneesForm.stock_boissons} onChange={e => setStockDonneesForm(f => ({ ...f, stock_boissons: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Boissons gratuites</Label>
+                      <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={stockDonneesForm.nombre_boissons_gratuites} onChange={e => setStockDonneesForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
+                    </div>
+                  </div>
+                  <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitStockDonnees} disabled={savingStockDonnees}>
+                    {savingStockDonnees ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    Enregistrer
+                  </Button>
+                  {stockDonnees.length > 0 && (
+                    <div className="space-y-1.5 pt-1 max-h-32 overflow-y-auto">
+                      {stockDonnees.slice(0, 10).map(d => (
+                        <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                          <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-muted-foreground">{d.conditionnement_display}</span>
+                            <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
+                            <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!offersSite} onOpenChange={open => !open && setOffersSite(null)}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
@@ -786,9 +1066,25 @@ export default function SitesPage() {
                         <SelectContent>
                           <SelectItem value="OFFERT">Produit offert</SelectItem>
                           <SelectItem value="GAGNE">À gagner / Bon cadeau</SelectItem>
+                          <SelectItem value="TIRAGE">Tirage à la roue</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Conditionnement</Label>
+                      <Select
+                        value={promoForm.conditionnement}
+                        onValueChange={v => setPromoForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
                       <Select
@@ -823,15 +1119,44 @@ export default function SitesPage() {
                         onChange={e => setPromoForm(f => ({ ...f, quantite_requise: e.target.value }))}
                       />
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Qté offerte (Vol. offert dans le journal)</Label>
-                      <Input
-                        type="number" min={1} className="h-9"
-                        value={promoForm.quantite_offerte}
-                        onChange={e => setPromoForm(f => ({ ...f, quantite_offerte: e.target.value }))}
-                      />
-                    </div>
+                    {promoForm.type_promotion !== "TIRAGE" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Qté offerte (Vol. offert dans le journal)</Label>
+                        <Input
+                          type="number" min={1} className="h-9"
+                          value={promoForm.quantite_offerte}
+                          onChange={e => setPromoForm(f => ({ ...f, quantite_offerte: e.target.value }))}
+                        />
+                      </div>
+                    )}
                   </div>
+                  {promoForm.type_promotion === "TIRAGE" && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Goodies sur la roue <span className="text-muted-foreground">(optionnel)</span></Label>
+                      {campagneGoodies.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Aucun goodie disponible pour cette campagne.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-x-4 gap-y-2">
+                          {campagneGoodies.map(g => (
+                            <label key={g.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <Checkbox
+                                checked={promoForm.goodies.includes(g.id)}
+                                onCheckedChange={checked =>
+                                  setPromoForm(f => ({
+                                    ...f,
+                                    goodies: checked
+                                      ? [...f.goodies, g.id]
+                                      : f.goodies.filter(id => id !== g.id),
+                                  }))
+                                }
+                              />
+                              {g.nom}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2">
                     <Button type="button" size="sm" variant="ghost"
                       onClick={() => { setShowPromoForm(false); setPromoForm(emptyPromoForm); }}
@@ -872,9 +1197,25 @@ export default function SitesPage() {
                                   <SelectContent>
                                     <SelectItem value="OFFERT">Produit offert</SelectItem>
                                     <SelectItem value="GAGNE">À gagner / Bon cadeau</SelectItem>
+                                    <SelectItem value="TIRAGE">Tirage à la roue</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Conditionnement</Label>
+                                <Select
+                                  value={editingPromo.conditionnement}
+                                  onValueChange={v => setEditingPromo(f => f ? { ...f, conditionnement: v as TypeConditionnement } : f)}
+                                >
+                                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                                    <SelectItem value="PACK">En pack</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <Label className="text-xs">Produit ciblé <span className="text-muted-foreground">(optionnel)</span></Label>
                                 <Select
@@ -917,6 +1258,33 @@ export default function SitesPage() {
                                 />
                               </div>
                             </div>
+                            {editingPromo.type_promotion === "TIRAGE" && (
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Goodies sur la roue <span className="text-muted-foreground">(optionnel)</span></Label>
+                                {campagneGoodies.length === 0 ? (
+                                  <p className="text-xs text-muted-foreground italic">Aucun goodie disponible pour cette campagne.</p>
+                                ) : (
+                                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                    {campagneGoodies.map(g => (
+                                      <label key={g.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <Checkbox
+                                          checked={editingPromo.goodies.includes(g.id)}
+                                          onCheckedChange={checked =>
+                                            setEditingPromo(f => f ? ({
+                                              ...f,
+                                              goodies: checked
+                                                ? [...f.goodies, g.id]
+                                                : f.goodies.filter(id => id !== g.id),
+                                            }) : f)
+                                          }
+                                        />
+                                        {g.nom}
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div className="flex justify-end gap-2">
                               <Button type="button" size="sm" variant="ghost" onClick={() => setEditingPromo(null)}>Annuler</Button>
                               <Button type="submit" size="sm" disabled={saving || !editingPromo.recompense_description.trim()}>
@@ -930,7 +1298,7 @@ export default function SitesPage() {
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className="font-semibold">
-                                  Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
+                                  Achat&nbsp;<span className="text-blue-700 font-bold">{promotion.quantite_requise}</span>&nbsp;<span className="text-xs font-normal text-muted-foreground">({promotion.conditionnement_display ?? (promotion.conditionnement === "PACK" ? "Pack" : "Unité")})</span>&nbsp;→&nbsp;Offert&nbsp;<span className="text-emerald-700 font-bold">{promotion.quantite_offerte ?? 1}</span>&nbsp;—&nbsp;{promotion.recompense_description}
                                 </p>
                                 {promotion.produit_cible_nom && (
                                   <Badge variant="outline" className="text-xs">{promotion.produit_cible_nom}</Badge>
@@ -940,7 +1308,14 @@ export default function SitesPage() {
                                 </Badge>
                                 {isGlobal && <Badge variant="outline">Tous les sites</Badge>}
                               </div>
-                              <p className="text-xs text-muted-foreground mt-1">{promotion.type_promotion_display}</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                  {promotion.type_promotion_display}
+                                  {promotion.type_promotion === "TIRAGE" && promotion.goodies_details.length > 0 && (
+                                    <span className="ml-2 text-purple-600 font-medium">
+                                      — Roue : {promotion.goodies_details.map(g => g.nom).join(", ")}
+                                    </span>
+                                  )}
+                                </p>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <Button
@@ -1028,6 +1403,78 @@ export default function SitesPage() {
         </DialogContent>
       </Dialog>
       {/* ---- Dialog Hôtesses ---- */}
+      {/* ---- Dialog Planning site ---- */}
+      <Dialog open={!!planningSite} onOpenChange={open => !open && setPlanningSite(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-indigo-600" />
+              Planning — {planningSite?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          {planningSite && (() => {
+            const camp = campaigns.find(c => c.id === planningSite.campagne);
+            return (
+              <div className="space-y-4">
+                {/* List */}
+                {siteJours.length > 0 ? (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {siteJours.map(j => (
+                      <div key={j.id} className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-xl">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span className="text-xs font-semibold text-foreground">
+                            {new Date(j.date + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{j.heure_ouverture.slice(0, 5)}–{j.heure_fermeture.slice(0, 5)}</span>
+                        </div>
+                        <button onClick={() => handleDeleteSiteJour(j.id)}
+                          className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors shrink-0">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic text-center py-2">Aucun jour animé défini pour ce site</p>
+                )}
+
+                {/* Add form */}
+                <div className="pt-3 border-t border-slate-100 space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ajouter un jour</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <Label className="text-xs text-muted-foreground">Date</Label>
+                      <Input type="date" value={sitePlanForm.date}
+                        min={camp?.date_debut} max={camp?.date_fin}
+                        onChange={e => setSitePlanForm(f => ({ ...f, date: e.target.value }))}
+                        className="h-8 text-xs mt-0.5" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Ouverture</Label>
+                      <Input type="time" value={sitePlanForm.heure_ouverture}
+                        onChange={e => setSitePlanForm(f => ({ ...f, heure_ouverture: e.target.value }))}
+                        className="h-8 text-xs mt-0.5" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Fermeture</Label>
+                      <Input type="time" value={sitePlanForm.heure_fermeture}
+                        onChange={e => setSitePlanForm(f => ({ ...f, heure_fermeture: e.target.value }))}
+                        className="h-8 text-xs mt-0.5" />
+                    </div>
+                  </div>
+                  {sitePlanError && <p className="text-xs text-rose-500">{sitePlanError}</p>}
+                  <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleAddSiteJour} disabled={savingSitePlan}>
+                    {savingSitePlan ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    Ajouter
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!hotelSite} onOpenChange={open => !open && setHotelSite(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -1141,5 +1588,13 @@ export default function SitesPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function SitesPage() {
+  return (
+    <Suspense fallback={null}>
+      <SitesPageContent />
+    </Suspense>
   );
 }

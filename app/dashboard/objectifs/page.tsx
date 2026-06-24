@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import {
@@ -17,12 +17,17 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import api from "@/lib/api";
+import { PageHeader } from "@/components/dashboard/page-header";
 import type {
   ObjectifSite, CreateObjectifSitePayload, SiteList, RemoteUser, CampagneList,
 } from "@/lib/types/backend";
 import {
   getObjectifs, createObjectif, updateObjectif, deleteObjectif, genererObjectifsCampagne,
 } from "@/lib/services/objectifService";
+import { getRapports } from "@/lib/services/rapportService";
+import type { RapportJournalier } from "@/lib/types/backend";
+import { cn } from "@/lib/utils";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 
 const EMPTY_FORM: CreateObjectifSitePayload = {
   site: "",
@@ -37,7 +42,7 @@ function unwrapList<T>(data: T[] | { results?: T[] }): T[] {
   return data.results ?? [];
 }
 
-export default function ObjectifsPage() {
+function ObjectifsPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
 
@@ -54,30 +59,51 @@ export default function ObjectifsPage() {
   const [form, setForm] = useState<CreateObjectifSitePayload>(EMPTY_FORM);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterSite, setFilterSite] = useState("all");
-  const [filterCampagne, setFilterCampagne] = useState("all");
+  const [filterSite, setFilterSite] = useUrlState("site", "all");
+  const [filterCampagne, setFilterCampagne] = useUrlState("campagne", "all");
   const [genCampagneId, setGenCampagneId] = useState("");
   const [genDate, setGenDate] = useState(new Date().toISOString().slice(0, 10));
+  const [rapports, setRapports] = useState<RapportJournalier[]>([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [objData, sitesData, usersData, campData] = await Promise.all([
+      const [objData, sitesData, usersData, campData, rapportsData] = await Promise.all([
         getObjectifs(),
         api.get("/sites/").then(r => unwrapList<SiteList>(r.data)),
         api.get("/users/?role=Hotesse").then(r => unwrapList<RemoteUser>(r.data)),
         api.get("/campagnes/").then(r => unwrapList<CampagneList>(r.data)),
+        getRapports().catch(() => [] as RapportJournalier[]),
       ]);
       setObjectifs(objData);
       setSites(sitesData);
       setHotesses(usersData);
       setCampagnes(campData);
+      setRapports(rapportsData);
     } catch {
       toast.error("Erreur lors du chargement.");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // "Réalisé" par (site, hôtesse, date) — dérivé du RapportJournalier déjà
+  // calculé chaque nuit côté backend, plutôt que de recalculer côté front
+  // ou d'ajouter un nouvel endpoint (refonte UX/UI uniquement).
+  const rapportParCle = useMemo(() => {
+    const map = new Map<string, RapportJournalier>();
+    rapports.forEach(r => map.set(`${r.site}|${r.hotesse}|${r.date}`, r));
+    return map;
+  }, [rapports]);
+
+  function getProgress(o: ObjectifSite) {
+    const r = rapportParCle.get(`${o.site}|${o.hotesse}|${o.date}`);
+    if (!r) return null; // pas encore de rapport pour ce jour → pas de % calculable
+    const objTotal = (o.objectif_degustations || 0) + (o.objectif_ventes || 0);
+    if (objTotal <= 0) return null;
+    const realiseTotal = (r.nb_degustations || 0) + (r.nb_ventes || 0);
+    return Math.round((realiseTotal / objTotal) * 100);
+  }
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -160,23 +186,18 @@ export default function ObjectifsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Target className="w-6 h-6 text-primary" />
-            Objectifs par site / hôtesse
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {objectifs.length} objectif{objectifs.length !== 1 ? "s" : ""} au total
-          </p>
-        </div>
-        {isAdmin && (
-          <Button onClick={openCreate} className="gap-2">
-            <Plus className="w-4 h-4" /> Nouvel objectif
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Objectifs par site / hôtesse"
+        description={`${objectifs.length} objectif${objectifs.length !== 1 ? "s" : ""} au total`}
+        icon={<Target className="w-5 h-5" />}
+        ctaSlot={
+          isAdmin ? (
+            <Button onClick={openCreate} className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm">
+              <Plus className="w-4 h-4 mr-2" /> Nouvel objectif
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Auto-generate block (admin only) */}
       {isAdmin && (
@@ -270,6 +291,7 @@ export default function ObjectifsPage() {
                 <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Date</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Obj. Dégustations</th>
                 <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Obj. Ventes</th>
+                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Progression</th>
                 {isAdmin && <th className="px-4 py-3" />}
               </tr>
             </thead>
@@ -284,10 +306,25 @@ export default function ObjectifsPage() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-blue-600">
-                    {o.objectif_degustations}
+                    {o.objectif_degustations || <span className="text-muted-foreground font-normal">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">
-                    {o.objectif_ventes}
+                    {o.objectif_ventes || <span className="text-muted-foreground font-normal">—</span>}
+                  </td>
+                  <td className="px-4 py-3 w-40">
+                    {(() => {
+                      const pct = getProgress(o);
+                      if (pct === null) return <span className="text-xs text-muted-foreground">—</span>;
+                      const barColor = pct < 50 ? "bg-rose-500" : pct < 80 ? "bg-amber-500" : "bg-emerald-500";
+                      return (
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
+                            <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                          <span className="text-xs font-semibold text-muted-foreground w-10 text-right">{pct}%</span>
+                        </div>
+                      );
+                    })()}
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
@@ -381,5 +418,13 @@ export default function ObjectifsPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function ObjectifsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ObjectifsPageContent />
+    </Suspense>
   );
 }

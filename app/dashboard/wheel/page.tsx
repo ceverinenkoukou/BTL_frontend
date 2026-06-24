@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type { CampagneList, Goodie, MonSiteInfo, SiteList } from "@/lib/types/backend";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -446,40 +447,46 @@ export default function WheelPage() {
     return <div className="p-6 text-muted-foreground text-center">Chargement de la roue...</div>;
   }
 
+  const activeCampaign = campaigns.find(c => c.id === selectedCampaign);
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">Roue à cadeaux</h1>
-          <p className="text-muted-foreground mt-1">Tirage goodies par campagne et par site</p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Sélectionner une campagne" />
-            </SelectTrigger>
-            <SelectContent>
-              {campaigns.map((campaign) => (
-                <SelectItem key={campaign.id} value={campaign.id}>
-                  {campaign.nom}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {sites.length > 1 && (
-            <Select value={selectedSite} onValueChange={setSelectedSite}>
-              <SelectTrigger className="w-56">
-                <SelectValue placeholder="Sélectionner un site" />
+      <PageHeader
+        title="Roue à cadeaux"
+        description="Tirage goodies par campagne et par site"
+        icon={<Gift className="w-5 h-5" />}
+        brandColor={activeCampaign?.couleur_primaire}
+        brandSecondary={activeCampaign?.couleur_secondaire}
+        logoUrl={activeCampaign?.logo_url}
+        ctaSlot={
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+              <SelectTrigger className="w-64 bg-white/20 border-white/30 text-white placeholder:text-white/60 [&>svg]:text-white">
+                <SelectValue placeholder="Sélectionner une campagne" />
               </SelectTrigger>
               <SelectContent>
-                {sites.map(s => (
-                  <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>
+                {campaigns.map((campaign) => (
+                  <SelectItem key={campaign.id} value={campaign.id}>
+                    {campaign.nom}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          )}
-        </div>
-      </div>
+            {sites.length > 1 && (
+              <Select value={selectedSite} onValueChange={setSelectedSite}>
+                <SelectTrigger className="w-56 bg-white/20 border-white/30 text-white placeholder:text-white/60 [&>svg]:text-white">
+                  <SelectValue placeholder="Sélectionner un site" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sites.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        }
+      />
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">

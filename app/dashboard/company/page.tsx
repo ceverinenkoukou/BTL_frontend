@@ -10,27 +10,33 @@ import { getMyEntreprise } from "@/lib/services/entrepriseService";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import {
   Target, Trophy, ShoppingCart, TrendingUp, Users,
   CalendarDays, MapPin, ArrowUp, Beer, Gift, Box, Clock, CheckCircle2, AlertCircle,
   Download, FileText, RefreshCw, Tag, Activity, Gauge, Building2,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { buildChartPalette } from "@/lib/utils/branding";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
-
-const RED        = "#006776";
-const AMBER      = "#00899b";
-const PIE_COLORS = ["#006776", "#00899b", "#4db8c8", "#0d2d33", "#193f47"];
-const AGE_COLORS = ["#006776", "#00899b", "#4db8c8", "#0d9488", "#0369a1"];
 
 function fmt(n: number) {
   return new Intl.NumberFormat("fr-FR").format(n);
 }
 function fmtXOF(n: number) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
+}
+
+function hex(color: string, alpha: number) {
+  const c = (color || "#006776").replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) {
@@ -67,6 +73,9 @@ export default function CompanyDashboardPage() {
   const [rapports, setRapports] = useState<CampagneRapportSites[]>([]);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [period, setPeriod] = useState<"today" | "7" | "30" | "custom">("7");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -173,16 +182,39 @@ export default function CompanyDashboardPage() {
     ? Math.max(0, Math.floor((new Date(activeCamps[0].date_fin).getTime() - today.getTime()) / 86400000))
     : 0;
 
-  // Per-day chart (last 14 days)
-  const dailyData = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13 - i));
-    const dayStr = d.toISOString().slice(0, 10);
-    return {
-      date: d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
-      tastings: tastings.filter(t => t.created_at.slice(0, 10) === dayStr).length,
-      sales: ventes.filter(v => v.created_at.slice(0, 10) === dayStr).length,
-    };
-  });
+  // Per-day chart — plage pilotée par le filtre de période
+  const periodDays = (() => {
+    if (period === "today") return 1;
+    if (period === "30") return 30;
+    if (period === "custom") return null; // géré séparément ci-dessous
+    return 7;
+  })();
+
+  const dailyData = periodDays
+    ? Array.from({ length: periodDays }, (_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - (periodDays - 1 - i));
+        const dayStr = d.toISOString().slice(0, 10);
+        return {
+          date: d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
+          tastings: tastings.filter(t => t.created_at.slice(0, 10) === dayStr).length,
+          sales: ventes.filter(v => v.created_at.slice(0, 10) === dayStr).length,
+        };
+      })
+    : (() => {
+        if (!customFrom || !customTo) return [];
+        const days: { date: string; tastings: number; sales: number }[] = [];
+        const start = new Date(customFrom);
+        const end = new Date(customTo);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dayStr = d.toISOString().slice(0, 10);
+          days.push({
+            date: d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
+            tastings: tastings.filter(t => t.created_at.slice(0, 10) === dayStr).length,
+            sales: ventes.filter(v => v.created_at.slice(0, 10) === dayStr).length,
+          });
+        }
+        return days;
+      })();
 
   const kpis = [
     {
@@ -227,6 +259,13 @@ export default function CompanyDashboardPage() {
   const p1 = entreprise?.couleur_primaire ?? "#006776";
   const p2 = entreprise?.couleur_secondaire ?? "#00899b";
   const companyName = entreprise?.nom_commercial ?? user?.name ?? "Mon Entreprise";
+  // Graphiques : palette dérivée des couleurs de marque de l'entreprise
+  // (au lieu de teintes fixes) — cohérent avec la règle de branding client.
+  const RED = p1;
+  const AMBER = p2;
+  const CHART_PALETTE = buildChartPalette(p1, p2, 5);
+  const PIE_COLORS = CHART_PALETTE;
+  const AGE_COLORS = CHART_PALETTE;
 
   return (
     <div className="space-y-6">
@@ -319,24 +358,38 @@ export default function CompanyDashboardPage() {
 
                   {(objDeg || objVen) && (
                     <div className="grid grid-cols-2 gap-3">
-                      {objDeg != null && objDeg > 0 && (
-                        <div className="rounded-xl bg-red-50 p-3 space-y-1">
-                          <p className="text-xs text-muted-foreground flex items-center gap-1"><Beer className="w-3 h-3" />Dégustations</p>
-                          <p className="font-bold text-sm text-red-700">{fmt(realDeg)} <span className="font-normal text-muted-foreground text-xs">/ {fmt(objDeg)}</span></p>
-                          <div className="h-1.5 rounded-full bg-red-100 overflow-hidden">
-                            <div className="h-full rounded-full bg-gradient-to-r from-red-600 to-orange-400" style={{ width: `${Math.min(100, Math.round((realDeg / objDeg) * 100))}%` }} />
+                      {objDeg != null && objDeg > 0 && (() => {
+                        const stalled = isActive && ecoules >= 2 && realDeg === 0;
+                        return (
+                          <div className={cn("rounded-xl p-3 space-y-1", stalled ? "bg-rose-50 ring-1 ring-rose-300" : "bg-red-50")}>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Beer className="w-3 h-3" />Dégustations
+                              {stalled && <AlertCircle className="w-3 h-3 text-rose-600 ml-auto" />}
+                            </p>
+                            <p className="font-bold text-sm text-red-700">{fmt(realDeg)} <span className="font-normal text-muted-foreground text-xs">/ {fmt(objDeg)}</span></p>
+                            <div className="h-1.5 rounded-full bg-red-100 overflow-hidden">
+                              <div className="h-full rounded-full bg-gradient-to-r from-red-600 to-orange-400" style={{ width: `${Math.min(100, Math.round((realDeg / objDeg) * 100))}%` }} />
+                            </div>
+                            {stalled && <p className="text-[10px] text-rose-600 font-semibold">Aucune activité depuis {ecoules} jours</p>}
                           </div>
-                        </div>
-                      )}
-                      {objVen != null && objVen > 0 && (
-                        <div className="rounded-xl bg-amber-50 p-3 space-y-1">
-                          <p className="text-xs text-muted-foreground flex items-center gap-1"><ShoppingCart className="w-3 h-3" />Ventes</p>
-                          <p className="font-bold text-sm text-amber-700">{fmt(realVen)} <span className="font-normal text-muted-foreground text-xs">/ {fmt(objVen)}</span></p>
-                          <div className="h-1.5 rounded-full bg-amber-100 overflow-hidden">
-                            <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400" style={{ width: `${Math.min(100, Math.round((realVen / objVen) * 100))}%` }} />
+                        );
+                      })()}
+                      {objVen != null && objVen > 0 && (() => {
+                        const stalled = isActive && ecoules >= 2 && realVen === 0;
+                        return (
+                          <div className={cn("rounded-xl p-3 space-y-1", stalled ? "bg-rose-50 ring-1 ring-rose-300" : "bg-amber-50")}>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <ShoppingCart className="w-3 h-3" />Ventes
+                              {stalled && <AlertCircle className="w-3 h-3 text-rose-600 ml-auto" />}
+                            </p>
+                            <p className="font-bold text-sm text-amber-700">{fmt(realVen)} <span className="font-normal text-muted-foreground text-xs">/ {fmt(objVen)}</span></p>
+                            <div className="h-1.5 rounded-full bg-amber-100 overflow-hidden">
+                              <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400" style={{ width: `${Math.min(100, Math.round((realVen / objVen) * 100))}%` }} />
+                            </div>
+                            {stalled && <p className="text-[10px] text-rose-600 font-semibold">Aucune activité depuis {ecoules} jours</p>}
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -366,27 +419,49 @@ export default function CompanyDashboardPage() {
       </div>
 
       {/* ── Progression journalière des distributions ── */}
-      <Card className="border-0 shadow-md rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white overflow-hidden">
-        <CardHeader className="pb-2 border-b border-white/5">
+      <Card className="border-0 shadow-md shadow-slate-100/80 rounded-2xl overflow-hidden">
+        <CardHeader className="pb-2 border-b border-slate-50">
           <CardTitle className="text-sm font-bold flex items-center justify-between">
-            <span className="flex items-center gap-2 text-white">
-              <div className="w-6 h-6 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-                <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: hex(RED, 0.12) }}>
+                <TrendingUp className="w-3.5 h-3.5" style={{ color: RED }} />
               </div>
               Progression journalière des distributions
             </span>
-            <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5 bg-white/5 rounded-lg px-2.5 py-1">
-              <RefreshCw className="w-3 h-3" />
-              {lastRefresh.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-            </span>
+            <div className="flex items-center gap-2">
+              <Select value={period} onValueChange={(v) => setPeriod(v as typeof period)}>
+                <SelectTrigger className="h-7 w-32 text-xs rounded-lg border-slate-200 font-medium">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Aujourd&apos;hui</SelectItem>
+                  <SelectItem value="7">7 jours</SelectItem>
+                  <SelectItem value="30">30 jours</SelectItem>
+                  <SelectItem value="custom">Personnalisé</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 bg-slate-50 rounded-lg px-2.5 py-1">
+                <RefreshCw className="w-3 h-3" />
+                {lastRefresh.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
           </CardTitle>
+          {period === "custom" && (
+            <div className="flex items-center gap-1.5 pt-2">
+              <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                className="h-8 rounded-lg border border-slate-200 px-2 text-xs text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">→</span>
+              <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                className="h-8 rounded-lg border border-slate-200 px-2 text-xs text-muted-foreground" />
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {totalTastings === 0 && (
             <div className="flex flex-col items-center justify-center h-60 gap-3">
-              <TrendingUp className="w-10 h-10 text-slate-600" />
-              <p className="text-slate-400 text-sm">Aucune distribution enregistrée pour le moment</p>
-              <p className="text-slate-500 text-xs">Les données apparaîtront dès la première activité</p>
+              <TrendingUp className="w-10 h-10 text-slate-200" />
+              <p className="text-muted-foreground text-sm">Aucune distribution enregistrée pour le moment</p>
+              <p className="text-muted-foreground text-xs">Les données apparaîtront dès la première activité</p>
             </div>
           )}
           {totalTastings > 0 && (
@@ -396,21 +471,21 @@ export default function CompanyDashboardPage() {
                   <AreaChart data={dailyData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
                     <defs>
                       <linearGradient id="gTastingsCo" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.6} />
-                        <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                        <stop offset="0%" stopColor={RED} stopOpacity={0.5} />
+                        <stop offset="100%" stopColor={RED} stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="gSalesCo" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={AMBER} stopOpacity={0.5} />
                         <stop offset="100%" stopColor={AMBER} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(255,255,255,0.1)", strokeWidth: 2 }} />
-                    <Area type="monotone" dataKey="tastings" stroke="#06b6d4" strokeWidth={2.5}
+                    <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(0,0,0,0.06)", strokeWidth: 2 }} />
+                    <Area type="monotone" dataKey="tastings" stroke={RED} strokeWidth={2.5}
                       fill="url(#gTastingsCo)" name="Distributions" dot={false}
-                      activeDot={{ r: 5, fill: "#06b6d4", stroke: "#fff", strokeWidth: 2 }} />
+                      activeDot={{ r: 5, fill: RED, stroke: "#fff", strokeWidth: 2 }} />
                     <Area type="monotone" dataKey="sales" stroke={AMBER} strokeWidth={2.5}
                       fill="url(#gSalesCo)" name="Ventes" dot={false}
                       activeDot={{ r: 5, fill: AMBER, stroke: "#fff", strokeWidth: 2 }} />
@@ -419,12 +494,12 @@ export default function CompanyDashboardPage() {
               </div>
               <div className="flex items-center gap-6 mt-2 justify-center">
                 <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
-                  <span className="text-xs text-slate-400 font-medium">Distributions</span>
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: RED }} />
+                  <span className="text-xs text-muted-foreground font-medium">Distributions</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: AMBER }} />
-                  <span className="text-xs text-slate-400 font-medium">Ventes</span>
+                  <span className="text-xs text-muted-foreground font-medium">Ventes</span>
                 </div>
               </div>
             </>

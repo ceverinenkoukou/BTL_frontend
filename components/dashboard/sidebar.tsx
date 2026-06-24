@@ -33,10 +33,13 @@ import {
   ChevronDown,
   Tag,
   Download,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import type { CampagneList } from "@/lib/types/backend";
+import { HostessBottomNav } from "@/components/dashboard/bottom-nav";
 
 
 interface BeforeInstallPromptEvent extends Event {
@@ -60,7 +63,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard/stats", label: "Statistiques", icon: <BarChart3 className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/wheel", label: "Roue à cadeaux", icon: <Gift className="w-5 h-5" />, roles: ["Hotesse", "Superviseur"] },
   { href: "/dashboard/goodies", label: "Goodies", icon: <Gift className="w-5 h-5" />, roles: ["Administrateur"] },
-  { href: "/dashboard/sites", label: "Sites", icon: <MapPin className="w-5 h-5" />, roles: ["Administrateur"] },
+  { href: "/dashboard/sites", label: "Sites", icon: <MapPin className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
   { href: "/dashboard/objectifs", label: "Objectifs", icon: <Target className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/rapports", label: "Rapports journaliers", icon: <FileText className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
 ];
@@ -80,6 +83,7 @@ export function DashboardSidebar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [entrepriseCampaigns, setEntrepriseCampaigns] = useState<CampagneList[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -88,6 +92,18 @@ export function DashboardSidebar() {
     };
     window.addEventListener("beforeinstallprompt", handler);
     return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
   }, []);
 
   const handleInstall = async () => {
@@ -99,6 +115,7 @@ export function DashboardSidebar() {
 
   const userRole = user?.role || "Non defini";
   const isEntreprise = userRole === "Entreprise";
+  const isHostess = userRole === "Hotesse";
   const filteredAdminItems = adminNavItems.filter(
     (item) => !item.roles || item.roles.includes(userRole)
   );
@@ -234,26 +251,37 @@ export function DashboardSidebar() {
 
   return (
     <>
-      {/* Mobile Header */}
+      {/* Mobile Header — minimal pour l'hôtesse (logo + nom + réseau, pas de menu) */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-sidebar border-b border-sidebar-border px-4 py-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <img src="/LOGO-MHEDIA-01.svg" alt="Mhedia BTL" className="h-8 w-auto" style={{ filter: 'brightness(0) invert(1)' }} />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img src="/LOGO-MHEDIA-01.svg" alt="Mhedia BTL" className="h-8 w-auto shrink-0" style={{ filter: 'brightness(0) invert(1)' }} />
+            {isHostess && (
+              <span className="text-sidebar-foreground/80 text-xs font-medium truncate">{user?.name}</span>
+            )}
           </div>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="text-sidebar-foreground"
-          >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </Button>
+          {isHostess ? (
+            <span title={isOnline ? "Connecté" : "Hors ligne"} className="shrink-0">
+              {isOnline
+                ? <Wifi className="w-4 h-4 text-emerald-400" />
+                : <WifiOff className="w-4 h-4 text-amber-400" />}
+            </span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="text-sidebar-foreground"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </Button>
+          )}
         </div>
       </header>
 
       {/* Mobile Menu Overlay */}
-      {mobileMenuOpen && (
+      {mobileMenuOpen && !isHostess && (
         <div
           className="lg:hidden fixed inset-0 z-40 bg-black/50"
           onClick={() => setMobileMenuOpen(false)}
@@ -287,7 +315,7 @@ export function DashboardSidebar() {
           <img src="/LOGO-MHEDIA-01.svg" alt="Mhedia BTL" className="h-10 w-auto" style={{ filter: 'brightness(0) invert(1)', opacity: 0.92 }} />
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-4">
+        <nav className="flex-1 min-h-0 overflow-y-auto p-4">
           <NavLinks />
         </nav>
 
@@ -301,6 +329,8 @@ export function DashboardSidebar() {
           <UserMenu user={user} signOut={signOut} getInitials={getInitials} />
         </div>
       </aside>
+
+      {isHostess && <HostessBottomNav />}
     </>
   );
 }

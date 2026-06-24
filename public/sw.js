@@ -3,6 +3,17 @@
  * Strategy: Cache-first for static assets, Network-first for API/pages
  */
 
+// In development (localhost), unregister immediately to avoid stale bundle caching.
+if (self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1") {
+  self.addEventListener("install", () => self.skipWaiting());
+  self.addEventListener("activate", async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+    await self.registration.unregister();
+    self.clients.matchAll().then(clients => clients.forEach(c => c.navigate(c.url)));
+  });
+} else {
+
 const CACHE_NAME = "mhedia-btl-v3";
 const OFFLINE_URL = "/offline";
 
@@ -98,3 +109,5 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(request))
   );
 });
+
+} // end else (production only)

@@ -5,7 +5,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import api, { invalidateCache } from "@/lib/api";
 import type {
   Degustation, CreateDegustationPayload, SiteList, MonSiteInfo,
-  TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion,
+  TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion, Genre,
 } from "@/lib/types/backend";
 import { enregistrerGainPromotion } from "@/lib/services/promotionService";
 import { Button } from "@/components/ui/button";
@@ -30,9 +30,10 @@ import {
   Plus, UtensilsCrossed, Loader2, CheckCircle2,
   Frown, Meh, Smile, Laugh, Heart,
   Download, Search, Calendar, UserRound, Package, TrendingUp, X, MapPin,
-  Gift, Ticket,
+  Gift, Ticket, List as ListIcon, LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 const AGE_OPTIONS: { value: TrancheAge; label: string }[] = [
   { value: "MOINS_18", label: "Moins de 18 ans" },
@@ -40,6 +41,11 @@ const AGE_OPTIONS: { value: TrancheAge; label: string }[] = [
   { value: "26_35",    label: "26 – 35 ans" },
   { value: "36_50",    label: "36 – 50 ans" },
   { value: "PLUS_50",  label: "Plus de 50 ans" },
+];
+
+const GENRE_OPTIONS: { value: Genre; label: string }[] = [
+  { value: "HOMME", label: "Homme" },
+  { value: "FEMME", label: "Femme" },
 ];
 
 const INTENT_OPTIONS: { value: IntentionAchat; label: string; color: string }[] = [
@@ -60,6 +66,7 @@ const EMPTY_FORM = {
   site: "",
   produit: "",
   tranche_age: "" as TrancheAge | "",
+  genre: "" as Genre | "",
   note_gout: 0,
   note_ambiance: 0,
   intention_achat: "" as IntentionAchat | "",
@@ -86,6 +93,13 @@ const PROMO_TYPE_STYLES: Record<TypePromotion, { bg: string; border: string; tex
     icon: "🎲",
     label: "À gagner",
   },
+  TIRAGE: {
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+    icon: "🎡",
+    label: "Tirage à la roue",
+  },
 };
 
 export default function TastingsPage() {
@@ -98,6 +112,7 @@ export default function TastingsPage() {
   const [saving, setSaving] = useState(false);
   const [loadingSite, setLoadingSite] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [selectedTasting, setSelectedTasting] = useState<Degustation | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const activeSiteRef = useRef<string>("");
@@ -168,7 +183,7 @@ export default function TastingsPage() {
     e.preventDefault();
     const needsNote     = siteInfo?.note_gout_active;
   const needsAmbiance = siteInfo?.note_ambiance_active;
-  if (!form.site || !form.produit || !form.tranche_age || (needsNote && !form.note_gout) || (needsAmbiance && !form.note_ambiance) || !form.intention_achat) {
+  if (!form.site || !form.produit || !form.tranche_age || !form.genre || (needsNote && !form.note_gout) || (needsAmbiance && !form.note_ambiance) || !form.intention_achat) {
       toast.error("Veuillez remplir tous les champs obligatoires.");
       return;
     }
@@ -179,6 +194,7 @@ export default function TastingsPage() {
         site: form.site,
         produit: form.produit,
         tranche_age: form.tranche_age as TrancheAge,
+        genre: form.genre as Genre,
         ...(siteInfo?.note_gout_active     ? { note_gout:     form.note_gout     || null } : {}),
         ...(siteInfo?.note_ambiance_active ? { note_ambiance: form.note_ambiance || null } : {}),
         intention_achat: form.intention_achat as IntentionAchat,
@@ -262,46 +278,36 @@ export default function TastingsPage() {
 
       {/* ── Hero banner ── */}
       {isAdmin ? (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 text-white shadow-2xl shadow-indigo-200">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
-          <div className="absolute -right-12 -top-12 w-52 h-52 rounded-full bg-white/10 blur-3xl" />
-          <div className="absolute right-28 -bottom-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" />
-          <div className="relative z-10 p-6 md:p-8">
-            <div className="flex items-start justify-between gap-4 mb-6">
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                    <UtensilsCrossed className="w-4.5 h-4.5" />
-                  </div>
-                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Dégustations</h1>
+        <>
+          <PageHeader
+            title="Dégustations"
+            description="Suivi en temps réel de toutes les dégustations"
+            icon={<UtensilsCrossed className="w-5 h-5" />}
+            ctaSlot={
+              <Button onClick={downloadCSV} className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm">
+                <Download className="w-4 h-4 mr-2" /><span className="hidden sm:inline">Exporter CSV</span>
+              </Button>
+            }
+          />
+
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Dégustations", value: stats.total,               sub: "enregistrées", icon: "🍷" },
+              { label: "Achats",       value: stats.purchased,           sub: "réalisés",     icon: "🛒" },
+              { label: "Conversion",   value: `${stats.conversionRate}%`,sub: "taux",         icon: "📈" },
+              { label: "Note moyenne", value: stats.avgRating,           sub: "/ 5",          icon: "⭐" },
+            ].map((s, i) => (
+              <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3.5">
+                <div className="text-base mb-1">{s.icon}</div>
+                <div className="text-xl font-bold leading-none text-foreground">
+                  {s.value}<span className="text-xs font-normal text-muted-foreground ml-1">{s.sub}</span>
                 </div>
-                <p className="text-white/65 text-sm ml-12">Suivi en temps réel de toutes les dégustations</p>
+                <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button onClick={downloadCSV}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 text-sm font-semibold transition-colors backdrop-blur-sm">
-                  <Download className="w-4 h-4" /><span className="hidden sm:inline">Exporter CSV</span>
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: "Dégustations", value: stats.total,               sub: "enregistrées", icon: "🍷" },
-                { label: "Achats",       value: stats.purchased,           sub: "réalisés",     icon: "🛒" },
-                { label: "Conversion",   value: `${stats.conversionRate}%`,sub: "taux",         icon: "📈" },
-                { label: "Note moyenne", value: stats.avgRating,           sub: "/ 5",          icon: "⭐" },
-              ].map((s, i) => (
-                <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
-                  <div className="text-base mb-1">{s.icon}</div>
-                  <div className="text-xl font-bold leading-none">
-                    {s.value}<span className="text-xs font-normal text-white/55 ml-1">{s.sub}</span>
-                  </div>
-                  <div className="text-xs text-white/60 mt-1">{s.label}</div>
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
-        </div>
+        </>
       ) : (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -352,6 +358,16 @@ export default function TastingsPage() {
             <Download className="w-4 h-4" />CSV ({filtered.length})
           </button>
         )}
+        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+          <button type="button" onClick={() => setViewMode("list")} title="Vue liste"
+            className={cn("p-1.5 rounded-lg transition-colors", viewMode === "list" ? "bg-white shadow-sm text-indigo-600" : "text-muted-foreground hover:text-foreground")}>
+            <ListIcon className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={() => setViewMode("grid")} title="Vue grille"
+            className={cn("p-1.5 rounded-lg transition-colors", viewMode === "grid" ? "bg-white shadow-sm text-indigo-600" : "text-muted-foreground hover:text-foreground")}>
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* ── Tastings grid ── */}
@@ -381,6 +397,38 @@ export default function TastingsPage() {
             <p className="text-xs text-muted-foreground">
               {isHostess ? "Commencez par enregistrer une dégustation" : "Aucune dégustation ne correspond à votre recherche"}
             </p>
+          </div>
+        ) : viewMode === "list" ? (
+          <div className="divide-y divide-slate-100 rounded-xl border border-slate-100 overflow-hidden">
+            {filtered.map(t => {
+              const intent = INTENT_OPTIONS.find(i => i.value === t.intention_achat);
+              const rating = RATING_ICONS_5.find(r => r.rating === t.note_gout);
+              return (
+                <button key={t.id} type="button" onClick={() => setSelectedTasting(t)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 bg-white hover:bg-slate-50 text-left transition-colors">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-base shrink-0">
+                    {rating?.icon}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">{t.produit_nom}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {t.site_nom}{!isHostess && t.hotesse_nom ? ` · ${t.hotesse_nom}` : ""} · {t.campagne_nom}
+                    </p>
+                  </div>
+                  <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium border shrink-0 hidden sm:inline-flex", intent?.color)}>
+                    {intent?.label}
+                  </span>
+                  {t.a_achete && (
+                    <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                      Achat ✓
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground shrink-0 w-12 text-right">
+                    {new Date(t.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -471,12 +519,21 @@ export default function TastingsPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>Tranche d&apos;âge *</Label>
-                <Select value={form.tranche_age} onValueChange={v => setForm(f => ({ ...f, tranche_age: v as TrancheAge }))}>
-                  <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
-                  <SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Tranche d&apos;âge *</Label>
+                  <Select value={form.tranche_age} onValueChange={v => setForm(f => ({ ...f, tranche_age: v as TrancheAge }))}>
+                    <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+                    <SelectContent>{AGE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Genre *</Label>
+                  <Select value={form.genre} onValueChange={v => setForm(f => ({ ...f, genre: v as Genre }))}>
+                    <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+                    <SelectContent>{GENRE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {siteInfo?.note_ambiance_active && (
@@ -682,7 +739,7 @@ export default function TastingsPage() {
                           )}>
                             <span className="text-xl">🚫</span>
                           </div>
-                          <span className="font-medium text-sm">Aucune promotion applicable</span>
+                          <span className="font-medium text-sm">Vente hors offre promotionnelle</span>
                           {form.promotion_selectionnee === "" && (
                             <CheckCircle2 className="w-5 h-5 text-slate-500 ml-auto" />
                           )}

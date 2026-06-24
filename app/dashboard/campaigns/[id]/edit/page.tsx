@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import api, { invalidateCache } from "@/lib/api";
-import type { CampagneDetail, TypeCampagne, TypeRecompense } from "@/lib/types/backend";
+import type { CampagneDetail, TypeCampagne, TypeRecompense, JourAnimation, SiteList } from "@/lib/types/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Save, UtensilsCrossed, ShoppingCart, Target, X, Gift, Tag } from "lucide-react";
+import { ArrowLeft, Loader2, Save, UtensilsCrossed, ShoppingCart, Target, X, Gift, Tag, Clock, Trash2, Plus, Calendar } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import {
+  Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
 const TYPE_CAMPAGNE_COLORS: Record<TypeCampagne, string> = {
   DEGUSTATION:       "#0d9488",
@@ -34,6 +38,46 @@ export default function EditCampaignPage() {
   const [saving,  setSaving]    = useState(false);
   const [campaign, setCampaign] = useState<CampagneDetail | null>(null);
 
+  // Planning
+  const [joursAnimation, setJoursAnimation] = useState<JourAnimation[]>([]);
+  const [campaignSites, setCampaignSites] = useState<SiteList[]>([]);
+  const [planForm, setPlanForm] = useState({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00", site: "" });
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planError, setPlanError] = useState("");
+
+  const fetchPlanning = async () => {
+    try {
+      const res = await api.get<JourAnimation[]>(`/jours-animation/?campagne=${id}`);
+      setJoursAnimation(Array.isArray(res.data) ? res.data : []);
+    } catch { /* silent */ }
+  };
+
+  const handleAddJour = async () => {
+    if (!planForm.date) { setPlanError("La date est requise."); return; }
+    setSavingPlan(true); setPlanError("");
+    try {
+      await api.post("/jours-animation/", {
+        campagne: id,
+        site: planForm.site || null,
+        date: planForm.date,
+        heure_ouverture: planForm.heure_ouverture,
+        heure_fermeture: planForm.heure_fermeture,
+      });
+      setPlanForm({ date: "", heure_ouverture: "08:00", heure_fermeture: "18:00", site: "" });
+      fetchPlanning();
+    } catch (e: any) {
+      const d = e?.response?.data;
+      setPlanError(d?.date?.[0] || d?.heure_fermeture?.[0] || d?.non_field_errors?.[0] || d?.detail || "Erreur lors de l'ajout.");
+    } finally { setSavingPlan(false); }
+  };
+
+  const handleDeleteJour = async (jourId: string) => {
+    try {
+      await api.delete(`/jours-animation/${jourId}/`);
+      fetchPlanning();
+    } catch { toast.error("Impossible de supprimer ce jour."); }
+  };
+
   const [form, setForm] = useState({
     nom:                    "",
     description:            "",
@@ -52,8 +96,14 @@ export default function EditCampaignPage() {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await api.get<CampagneDetail>(`/campagnes/${id}/`);
+        const [campRes, sitesRes] = await Promise.all([
+          api.get<CampagneDetail>(`/campagnes/${id}/`),
+          api.get<SiteList[]>(`/sites/?campagne=${id}`).catch(() => ({ data: [] })),
+        ]);
+        const data = campRes.data;
+        const sData = Array.isArray(sitesRes.data) ? sitesRes.data : [];
         setCampaign(data);
+        setCampaignSites(sData.filter((s: SiteList) => s.campagne === id));
         setForm({
           nom:                   data.nom,
           description:           data.description ?? "",
@@ -68,6 +118,7 @@ export default function EditCampaignPage() {
           objectif_degustations: data.objectif_degustations?.toString() ?? "",
           objectif_ventes:       data.objectif_ventes?.toString() ?? "",
         });
+        fetchPlanning();
       } catch {
         toast.error("Impossible de charger la campagne.");
       } finally {
@@ -136,6 +187,19 @@ export default function EditCampaignPage() {
     <div className="max-w-2xl mx-auto space-y-6 pb-16">
 
       {/* Header */}
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link href="/dashboard/campaigns">Campagnes</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link href={`/dashboard/campaigns/${id}`}>{campaign.nom}</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem><BreadcrumbPage>Modifier</BreadcrumbPage></BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="flex items-center gap-3">
         <Link href={`/dashboard/campaigns/${id}`}
           className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 transition-colors shrink-0">
@@ -312,6 +376,85 @@ export default function EditCampaignPage() {
           </Button>
         </div>
       </form>
+
+      {/* Planning — jours animés (hors formulaire, CRUD direct) */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+        <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0"><Clock className="w-3.5 h-3.5 text-indigo-600" /></div>
+          Planning — jours animés ({joursAnimation.length})
+        </h3>
+
+        {joursAnimation.length > 0 ? (
+          <div className="space-y-2">
+            {joursAnimation.map(j => (
+              <div key={j.id} className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-xl">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="text-xs font-semibold text-foreground">
+                    {new Date(j.date + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{j.heure_ouverture.slice(0, 5)}–{j.heure_fermeture.slice(0, 5)}</span>
+                  {j.site_nom && (
+                    <span className="text-xs px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-600 border border-violet-100 truncate">{j.site_nom}</span>
+                  )}
+                </div>
+                <button onClick={() => handleDeleteJour(j.id)}
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors shrink-0">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground italic text-center py-2">Aucun jour animé défini</p>
+        )}
+
+        <div className="pt-3 border-t border-slate-100 space-y-3">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ajouter un jour</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="col-span-2">
+              <Label className="text-xs text-muted-foreground">Date</Label>
+              <Input type="date" value={planForm.date}
+                min={campaign?.date_debut} max={campaign?.date_fin}
+                onChange={e => setPlanForm(f => ({ ...f, date: e.target.value }))}
+                className="h-8 text-xs mt-0.5" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Ouverture</Label>
+              <Input type="time" value={planForm.heure_ouverture}
+                onChange={e => setPlanForm(f => ({ ...f, heure_ouverture: e.target.value }))}
+                className="h-8 text-xs mt-0.5" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Fermeture</Label>
+              <Input type="time" value={planForm.heure_fermeture}
+                onChange={e => setPlanForm(f => ({ ...f, heure_fermeture: e.target.value }))}
+                className="h-8 text-xs mt-0.5" />
+            </div>
+            {campaignSites.length > 0 && (
+              <div className="col-span-2">
+                <Label className="text-xs text-muted-foreground">Site (optionnel)</Label>
+                <Select value={planForm.site} onValueChange={v => setPlanForm(f => ({ ...f, site: v === "__all__" ? "" : v }))}>
+                  <SelectTrigger className="h-8 text-xs mt-0.5">
+                    <SelectValue placeholder="Tous les sites" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Tous les sites</SelectItem>
+                    {campaignSites.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          {planError && <p className="text-xs text-rose-500">{planError}</p>}
+          <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleAddJour} disabled={savingPlan}>
+            {savingPlan ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+            Ajouter
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

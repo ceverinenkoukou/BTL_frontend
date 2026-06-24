@@ -18,7 +18,11 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/dashboard/page-header";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Accordion, AccordionItem, AccordionTrigger, AccordionContent,
+} from "@/components/ui/accordion";
 import {
   Plus, Search, Calendar, Target, MoreVertical, Eye, Trash2,
   Loader2, Building2, Sparkles, Users, ChevronRight, ChevronLeft,
@@ -75,7 +79,14 @@ const PROMO_TYPE_COLORS: Record<TypePromoRule, { bg: string; border: string; tex
     border: "border-amber-200",
     text: "text-amber-700",
     dot: "bg-amber-500",
-    label: "À gagner (tirage)",
+    label: "À gagner / Bon cadeau",
+  },
+  TIRAGE: {
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+    dot: "bg-purple-500",
+    label: "Tirage à la roue",
   },
 };
 
@@ -89,13 +100,19 @@ const STATUS_CFG: Record<string, { label: string; badge: string; strip: string }
 
 const DEFAULT_STATUS_CFG = { label: "—", badge: "bg-slate-100 text-slate-500 border border-slate-200", strip: "from-slate-300 to-slate-200" };
 
-type SiteEntry  = { nom: string; ville: string; emplacement_precis: string; superviseurs_ids: string[]; hotesses_ids: string[] };
-type TypePromoRule = "OFFERT" | "GAGNE";
+type SiteEntry  = { id: string; nom: string; ville: string; emplacement_precis: string; superviseurs_ids: string[]; hotesses_ids: string[] };
+type TypePromoRule = "OFFERT" | "GAGNE" | "TIRAGE";
 type ReglePromo = { quantite_requise: string; recompense_description: string; type_promotion: TypePromoRule };
 
-const EMPTY_SITE:  SiteEntry  = { nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [] };
+// id stable par site (indépendant de la position dans le tableau), nécessaire
+// pour piloter l'accordéon sans que l'ouverture/fermeture ne se désynchronise
+// lors de l'ajout/suppression d'un site.
+const makeSite = (): SiteEntry => ({
+  id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `site-${Date.now()}-${Math.random()}`,
+  nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [],
+});
 const EMPTY_REGLE: ReglePromo = { quantite_requise: "", recompense_description: "", type_promotion: "OFFERT" };
-const EMPTY_FORM = { nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, note_gout_active: false, note_gout_max: 5 as 5 | 10, note_ambiance_active: false, note_ambiance_max: 5 as 5 | 10, objectif_degustations: "", objectif_ventes: "", regles_promotions: [] as ReglePromo[], sites: [{ ...EMPTY_SITE }] as SiteEntry[] };
+const makeEmptyForm = () => ({ nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, note_gout_active: false, note_gout_max: 5 as 5 | 10, note_ambiance_active: false, note_ambiance_max: 5 as 5 | 10, objectif_degustations: "", objectif_ventes: "", regles_promotions: [] as ReglePromo[], sites: [makeSite()] as SiteEntry[] });
 
 export default function CampaignsPage() {
   const { user } = useAuth();
@@ -107,9 +124,13 @@ export default function CampaignsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
-  const [form, setForm] = useState({ ...EMPTY_FORM, sites: [{ ...EMPTY_SITE }] as SiteEntry[] });
+  const [form, setForm] = useState(makeEmptyForm());
+  const [openSites, setOpenSites] = useState<string[]>([form.sites[0].id]);
+  const [step1Touched, setStep1Touched] = useState<Record<string, boolean>>({});
+  const [teamFilter, setTeamFilter] = useState<Record<string, string>>({});
 
   const isAdmin = user?.role === "Administrateur";
+  const isHostess = user?.role === "Hotesse";
   const canManage = user?.role && ["Administrateur", "Superviseur"].includes(user.role);
 
   const hotesses = staff.filter(m => m.role === "Hotesse");
@@ -239,23 +260,40 @@ export default function CampaignsPage() {
 
   const resetForm = () => {
     setStep(1);
-    setForm({ ...EMPTY_FORM, sites: [{ ...EMPTY_SITE }] });
+    const fresh = makeEmptyForm();
+    setForm(fresh);
+    setOpenSites([fresh.sites[0].id]);
+    setStep1Touched({});
+    setTeamFilter({});
   };
 
+  // Validation dérivée de l'étape 1 — recalculée à chaque rendu, affichée
+  // uniquement pour les champs déjà "touched" (blur ou tentative de "Suivant").
+  const step1Errors: Record<string, string> = {};
+  if (!form.nom.trim()) step1Errors.nom = "Le nom de la campagne est requis.";
+  if (!form.entreprise) step1Errors.entreprise = "Sélectionnez une entreprise.";
+  if (!form.date_debut) step1Errors.date_debut = "La date de début est requise.";
+  if (!form.date_fin) step1Errors.date_fin = "La date de fin est requise.";
+  else if (form.date_debut && form.date_fin < form.date_debut) step1Errors.date_fin = "Doit être après la date de début.";
+
+  const touchAllStep1 = () => setStep1Touched({ nom: true, entreprise: true, date_debut: true, date_fin: true });
+
   const handleStep1Next = () => {
-    if (!form.nom.trim() || !form.entreprise || !form.date_debut || !form.date_fin) {
-      toast.error("Nom, entreprise et dates sont requis.");
-      return;
-    }
-    if (form.date_fin < form.date_debut) {
-      toast.error("La date de fin doit être après la date de début.");
-      return;
-    }
+    touchAllStep1();
+    if (Object.keys(step1Errors).length > 0) return;
     setStep(2);
   };
 
-  const addSite = () => setForm(f => ({ ...f, sites: [...f.sites, { ...EMPTY_SITE }] }));
-  const removeSite = (idx: number) => setForm(f => ({ ...f, sites: f.sites.filter((_, i) => i !== idx) }));
+  const addSite = () => {
+    const site = makeSite();
+    setForm(f => ({ ...f, sites: [...f.sites, site] }));
+    setOpenSites(prev => [...prev, site.id]);
+  };
+  const removeSite = (idx: number) => {
+    const removedId = form.sites[idx]?.id;
+    setForm(f => ({ ...f, sites: f.sites.filter((_, i) => i !== idx) }));
+    if (removedId) setOpenSites(prev => prev.filter(id => id !== removedId));
+  };
   const updateSite = (idx: number, patch: Partial<SiteEntry>) =>
     setForm(f => ({ ...f, sites: f.sites.map((s, i) => i === idx ? { ...s, ...patch } : s) }));
   const toggleTeam = (siteIdx: number, role: "superviseurs_ids" | "hotesses_ids", id: string) =>
@@ -273,9 +311,98 @@ export default function CampaignsPage() {
   const updateRegle = (idx: number, patch: Partial<ReglePromo>) =>
     setForm(f => ({ ...f, regles_promotions: f.regles_promotions.map((r, i) => i === idx ? { ...r, ...patch } : r) }));
 
+  // Recherche rapide dans les listes superviseurs/hôtesses — affichée seulement
+  // si la liste correspondante dépasse 5 personnes (sinon inutile).
+  const TEAM_SEARCH_THRESHOLD = 5;
+  const filterTeam = (list: TeamMember[], key: string) => {
+    const q = (teamFilter[key] ?? "").trim().toLowerCase();
+    return q ? list.filter(m => m.name.toLowerCase().includes(q)) : list;
+  };
+
+  function renderSiteFields(site: SiteEntry, idx: number) {
+    const supKey = `${site.id}:sup`;
+    const hotKey = `${site.id}:hot`;
+    const filteredSup = filterTeam(superviseurs, supKey);
+    const filteredHot = filterTeam(hotesses, hotKey);
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Nom du site *</Label>
+            <input className="flex h-8 w-full rounded-lg border border-input bg-white px-3 text-sm shadow-sm" placeholder="Ex: Carrefour Centre" value={site.nom} onChange={e => updateSite(idx, { nom: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Ville</Label>
+            <input className="flex h-8 w-full rounded-lg border border-input bg-white px-3 text-sm shadow-sm" placeholder="Libreville" value={site.ville} onChange={e => updateSite(idx, { ville: e.target.value })} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Emplacement précis (optionnel)</Label>
+          <input className="flex h-8 w-full rounded-lg border border-input bg-white px-3 text-sm shadow-sm" placeholder="Ex: Allée centrale, stand 3" value={site.emplacement_precis} onChange={e => updateSite(idx, { emplacement_precis: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Superviseurs <span className="text-[#006776]">({site.superviseurs_ids.length})</span></Label>
+            {superviseurs.length > TEAM_SEARCH_THRESHOLD && (
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                <input
+                  className="flex h-7 w-full rounded-lg border border-input bg-white pl-6 pr-2 text-xs shadow-sm"
+                  placeholder="Rechercher..."
+                  value={teamFilter[supKey] ?? ""}
+                  onChange={e => setTeamFilter(f => ({ ...f, [supKey]: e.target.value }))}
+                />
+              </div>
+            )}
+            <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg bg-white border border-input p-2">
+              {superviseurs.length === 0
+                ? <p className="text-xs text-muted-foreground p-1">Aucun superviseur</p>
+                : filteredSup.length === 0
+                ? <p className="text-xs text-muted-foreground p-1">Aucun résultat</p>
+                : filteredSup.map(s => (
+                  <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
+                    <Checkbox checked={site.superviseurs_ids.includes(s.id)} onCheckedChange={() => toggleTeam(idx, "superviseurs_ids", s.id)} className="data-[state=checked]:bg-[#006776] data-[state=checked]:border-[#006776]" />
+                    <span className="text-xs truncate">{s.name}</span>
+                  </label>
+                ))
+              }
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground">Hôtesses <span className="text-[#006776]">({site.hotesses_ids.length})</span></Label>
+            {hotesses.length > TEAM_SEARCH_THRESHOLD && (
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                <input
+                  className="flex h-7 w-full rounded-lg border border-input bg-white pl-6 pr-2 text-xs shadow-sm"
+                  placeholder="Rechercher..."
+                  value={teamFilter[hotKey] ?? ""}
+                  onChange={e => setTeamFilter(f => ({ ...f, [hotKey]: e.target.value }))}
+                />
+              </div>
+            )}
+            <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg bg-white border border-input p-2">
+              {hotesses.length === 0
+                ? <p className="text-xs text-muted-foreground p-1">Aucune hôtesse</p>
+                : filteredHot.length === 0
+                ? <p className="text-xs text-muted-foreground p-1">Aucun résultat</p>
+                : filteredHot.map(h => (
+                  <label key={h.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
+                    <Checkbox checked={site.hotesses_ids.includes(h.id)} onCheckedChange={() => toggleTeam(idx, "hotesses_ids", h.id)} className="data-[state=checked]:bg-[#006776] data-[state=checked]:border-[#006776]" />
+                    <span className="text-xs truncate">{h.name}</span>
+                  </label>
+                ))
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const campaignFormContent = (
-    <div className="mt-2">
-      <div className="flex items-center gap-3 mb-5">
+    <div className="mt-2 flex flex-col flex-1 min-h-0">
+      <div className="flex items-center gap-3 mb-5 shrink-0">
         <div className="flex items-center gap-2">
           <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors", step === 1 ? "bg-[#006776] text-white" : "bg-emerald-500 text-white")}>
             {step === 1 ? "1" : <Check className="w-3.5 h-3.5" />}
@@ -290,19 +417,33 @@ export default function CampaignsPage() {
       </div>
 
       {step === 1 && (
-        <div className="flex flex-col gap-0">
-          <div className="space-y-4 max-h-[58vh] overflow-y-auto pr-1 pb-1">
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="space-y-4 flex-1 min-h-0 overflow-y-auto pr-1 pb-1">
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Nom *</Label>
-              <input className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 py-1 text-sm shadow-sm" value={form.nom} onChange={e => setForm(f => ({ ...f, nom: e.target.value }))} placeholder="Ex: Tournée Libreville Sud" />
+              <input
+                className={cn("flex h-9 w-full rounded-xl border bg-transparent px-3 py-1 text-sm shadow-sm",
+                  step1Touched.nom && step1Errors.nom ? "border-rose-400 focus-visible:ring-rose-300" : "border-input")}
+                value={form.nom}
+                onChange={e => setForm(f => ({ ...f, nom: e.target.value }))}
+                onBlur={() => setStep1Touched(t => ({ ...t, nom: true }))}
+                placeholder="Ex: Tournée Libreville Sud" />
+              {step1Touched.nom && step1Errors.nom && <p className="text-xs text-rose-600">{step1Errors.nom}</p>}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Entreprise *</Label>
-              <Select value={form.entreprise} onValueChange={v => setForm(f => ({ ...f, entreprise: v }))}>
-                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Sélectionner" /></SelectTrigger>
+              <Select
+                value={form.entreprise}
+                onValueChange={v => setForm(f => ({ ...f, entreprise: v }))}
+                onOpenChange={open => { if (!open) setStep1Touched(t => ({ ...t, entreprise: true })); }}
+              >
+                <SelectTrigger className={cn("rounded-xl", step1Touched.entreprise && step1Errors.entreprise ? "border-rose-400" : "")}>
+                  <SelectValue placeholder="Sélectionner" />
+                </SelectTrigger>
                 <SelectContent>{entreprises.map(e => <SelectItem key={e.id} value={e.id}>{e.nom_commercial}</SelectItem>)}</SelectContent>
               </Select>
+              {step1Touched.entreprise && step1Errors.entreprise && <p className="text-xs text-rose-600">{step1Errors.entreprise}</p>}
             </div>
           </div>
           <div className="space-y-1.5">
@@ -312,11 +453,25 @@ export default function CampaignsPage() {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date de début *</Label>
-              <input type="date" className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 py-1 text-sm shadow-sm" value={form.date_debut} onChange={e => setForm(f => ({ ...f, date_debut: e.target.value }))} />
+              <input
+                type="date"
+                className={cn("flex h-9 w-full rounded-xl border bg-transparent px-3 py-1 text-sm shadow-sm",
+                  step1Touched.date_debut && step1Errors.date_debut ? "border-rose-400 focus-visible:ring-rose-300" : "border-input")}
+                value={form.date_debut}
+                onChange={e => setForm(f => ({ ...f, date_debut: e.target.value }))}
+                onBlur={() => setStep1Touched(t => ({ ...t, date_debut: true }))} />
+              {step1Touched.date_debut && step1Errors.date_debut && <p className="text-xs text-rose-600">{step1Errors.date_debut}</p>}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date de fin *</Label>
-              <input type="date" className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 py-1 text-sm shadow-sm" value={form.date_fin} onChange={e => setForm(f => ({ ...f, date_fin: e.target.value }))} />
+              <input
+                type="date"
+                className={cn("flex h-9 w-full rounded-xl border bg-transparent px-3 py-1 text-sm shadow-sm",
+                  step1Touched.date_fin && step1Errors.date_fin ? "border-rose-400 focus-visible:ring-rose-300" : "border-input")}
+                value={form.date_fin}
+                onChange={e => setForm(f => ({ ...f, date_fin: e.target.value }))}
+                onBlur={() => setStep1Touched(t => ({ ...t, date_fin: true }))} />
+              {step1Touched.date_fin && step1Errors.date_fin && <p className="text-xs text-rose-600">{step1Errors.date_fin}</p>}
             </div>
           </div>
           {/* Type de campagne - couleurs cohérentes avec [id]/page.tsx */}
@@ -497,6 +652,12 @@ export default function CampaignsPage() {
                               {PROMO_TYPE_COLORS.GAGNE.label}
                             </span>
                           </SelectItem>
+                          <SelectItem value="TIRAGE">
+                            <span className="flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${PROMO_TYPE_COLORS.TIRAGE.dot}`} />
+                              {PROMO_TYPE_COLORS.TIRAGE.label}
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <button
@@ -544,10 +705,15 @@ export default function CampaignsPage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                         Le client reçoit immédiatement la récompense
                       </span>
+                    ) : regle.type_promotion === "TIRAGE" ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                        Le client tourne la roue pour gagner un goodie
+                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        Le client participe au tirage pour gagner un goodie + 1 produit
+                        Le client reçoit un bon cadeau / récompense à gagner
                       </span>
                     )}
                   </div>
@@ -573,7 +739,11 @@ export default function CampaignsPage() {
                   </span>
                   {" • "}
                   <span style={{ color: PROMO_TYPE_COLORS.GAGNE.text }}>
-                    {form.regles_promotions.filter(r => r.type_promotion === "GAGNE").length} tirage(s)
+                    {form.regles_promotions.filter(r => r.type_promotion === "GAGNE").length} bon(s) cadeau
+                  </span>
+                  {" • "}
+                  <span style={{ color: PROMO_TYPE_COLORS.TIRAGE.text }}>
+                    {form.regles_promotions.filter(r => r.type_promotion === "TIRAGE").length} tirage(s) roue
                   </span>
                 </p>
               )}
@@ -581,7 +751,7 @@ export default function CampaignsPage() {
           )}
 
           </div>{/* end scrollable */}
-          <div className="flex justify-end pt-3 border-t border-slate-100 mt-3">
+          <div className="shrink-0 flex justify-end pt-3 border-t border-slate-100 mt-3">
             <Button type="button" onClick={handleStep1Next} className="rounded-xl bg-[#006776] hover:bg-[#00566a] text-white">
               Suivant : Sites <ChevronRight className="w-4 h-4 ml-2" />
             </Button>
@@ -590,67 +760,45 @@ export default function CampaignsPage() {
       )}
 
       {step === 2 && (
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
-            {form.sites.map((site, idx) => (
-              <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wide text-[#006776]">Site {idx + 1}</span>
-                  {form.sites.length > 1 && (
-                    <button type="button" onClick={() => removeSite(idx)} className="text-slate-400 hover:text-rose-500 transition-colors"><X className="w-4 h-4" /></button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Nom du site *</Label>
-                    <input className="flex h-8 w-full rounded-lg border border-input bg-white px-3 text-sm shadow-sm" placeholder="Ex: Carrefour Centre" value={site.nom} onChange={e => updateSite(idx, { nom: e.target.value })} />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Ville</Label>
-                    <input className="flex h-8 w-full rounded-lg border border-input bg-white px-3 text-sm shadow-sm" placeholder="Libreville" value={site.ville} onChange={e => updateSite(idx, { ville: e.target.value })} />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Emplacement précis (optionnel)</Label>
-                  <input className="flex h-8 w-full rounded-lg border border-input bg-white px-3 text-sm shadow-sm" placeholder="Ex: Allée centrale, stand 3" value={site.emplacement_precis} onChange={e => updateSite(idx, { emplacement_precis: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-muted-foreground">Superviseurs <span className="text-[#006776]">({site.superviseurs_ids.length})</span></Label>
-                    <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg bg-white border border-input p-2">
-                      {superviseurs.length === 0
-                        ? <p className="text-xs text-muted-foreground p-1">Aucun superviseur</p>
-                        : superviseurs.map(s => (
-                          <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
-                            <Checkbox checked={site.superviseurs_ids.includes(s.id)} onCheckedChange={() => toggleTeam(idx, "superviseurs_ids", s.id)} className="data-[state=checked]:bg-[#006776] data-[state=checked]:border-[#006776]" />
-                            <span className="text-xs truncate">{s.name}</span>
-                          </label>
-                        ))
-                      }
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-muted-foreground">Hôtesses <span className="text-[#006776]">({site.hotesses_ids.length})</span></Label>
-                    <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg bg-white border border-input p-2">
-                      {hotesses.length === 0
-                        ? <p className="text-xs text-muted-foreground p-1">Aucune hôtesse</p>
-                        : hotesses.map(h => (
-                          <label key={h.id} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
-                            <Checkbox checked={site.hotesses_ids.includes(h.id)} onCheckedChange={() => toggleTeam(idx, "hotesses_ids", h.id)} className="data-[state=checked]:bg-[#006776] data-[state=checked]:border-[#006776]" />
-                            <span className="text-xs truncate">{h.name}</span>
-                          </label>
-                        ))
-                      }
-                    </div>
-                  </div>
-                </div>
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          <div className="space-y-3 flex-1 min-h-0 overflow-y-auto pr-1">
+            {form.sites.length > 1 ? (
+              <Accordion type="multiple" value={openSites} onValueChange={setOpenSites} className="space-y-2">
+                {form.sites.map((site, idx) => (
+                  <AccordionItem key={site.id} value={site.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 border-b-0">
+                    <AccordionTrigger className="hover:no-underline py-3">
+                      <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#006776]">
+                        Site {idx + 1}
+                        {site.nom.trim() && <span className="text-slate-500 font-normal normal-case">— {site.nom.trim()}</span>}
+                      </span>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      <div className="flex justify-end -mt-1 mb-2">
+                        <span
+                          role="button" tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removeSite(idx); }}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); removeSite(idx); } }}
+                          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />Retirer ce site
+                        </span>
+                      </div>
+                      {renderSiteFields(site, idx)}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <span className="text-xs font-bold uppercase tracking-wide text-[#006776]">Site 1</span>
+                {renderSiteFields(form.sites[0], 0)}
               </div>
-            ))}
+            )}
           </div>
-          <button type="button" onClick={addSite} className="flex items-center gap-2 text-sm text-[#006776] hover:text-[#00566a] font-semibold mt-3 w-full justify-center rounded-xl border-2 border-dashed border-[#006776]/30 hover:border-[#006776]/60 py-2.5 transition-all">
+          <button type="button" onClick={addSite} className="shrink-0 flex items-center gap-2 text-sm text-[#006776] hover:text-[#00566a] font-semibold mt-3 w-full justify-center rounded-xl border-2 border-dashed border-[#006776]/30 hover:border-[#006776]/60 py-2.5 transition-all">
             <Plus className="w-4 h-4" />Ajouter un site
           </button>
-          <div className="flex justify-between pt-4 border-t border-slate-100 mt-3">
+          <div className="shrink-0 flex justify-between pt-4 border-t border-slate-100 mt-3">
             <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" />Retour</Button>
             <Button type="submit" disabled={saving} className="rounded-xl bg-[#006776] hover:bg-[#00566a] text-white">
               {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Création...</> : "Créer la campagne"}
@@ -665,47 +813,43 @@ export default function CampaignsPage() {
     <div className="space-y-6">
       {/* ── Hero banner ── */}
       {isAdmin ? (
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-blue-600 to-violet-500 p-6 md:p-8 text-white shadow-2xl shadow-indigo-200">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_60%)]" />
-          <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
-          <div className="relative z-10 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Sparkles className="w-4 h-4 text-yellow-200" />
-                <span className="text-white/70 text-xs font-medium uppercase tracking-wider">Administration</span>
-              </div>
-              <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Campagnes marketing</h1>
-              <p className="text-white/70 mt-1 text-sm">Gérez et suivez toutes vos campagnes terrain</p>
-            </div>
-            <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
-              <DialogTrigger asChild>
-                <Button className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm w-fit shrink-0">
-                  <Plus className="w-4 h-4 mr-2" />Nouvelle campagne
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-                <DialogHeader>
-                  <DialogTitle>Nouvelle campagne</DialogTitle>
-                </DialogHeader>
-                {campaignFormContent}
-              </DialogContent>
-            </Dialog>
-          </div>
-          <div className="relative z-10 grid grid-cols-4 gap-3 mt-6">
+        <>
+          <Dialog open={dialogOpen} onOpenChange={open => { setDialogOpen(open); if (!open) resetForm(); }}>
+            <PageHeader
+              title="Campagnes marketing"
+              description="Gérez et suivez toutes vos campagnes terrain"
+              icon={<Sparkles className="w-5 h-5" />}
+              ctaSlot={
+                <DialogTrigger asChild>
+                  <Button className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm w-fit shrink-0">
+                    <Plus className="w-4 h-4 mr-2" />Nouvelle campagne
+                  </Button>
+                </DialogTrigger>
+              }
+            />
+            <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+              <DialogHeader>
+                <DialogTitle>Nouvelle campagne</DialogTitle>
+              </DialogHeader>
+              {campaignFormContent}
+            </DialogContent>
+          </Dialog>
+
+          {/* KPI cards */}
+          <div className="grid grid-cols-4 gap-3">
             {[
               { label: "Total",      value: statCounts.total, },
               { label: "En cours",   value: statCounts.active, },
               { label: "À venir",    value: statCounts.upcoming, },
               { label: "Terminées",  value: statCounts.done, },
             ].map((s, i) => (
-              <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
-                {/* <div className="text-xs mb-0.5">{s.icon}</div> */}
-                <div className="text-xl font-bold">{s.value}</div>
-                <div className="text-xs text-white/65">{s.label}</div>
+              <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 text-center">
+                <div className="text-xl font-bold text-foreground">{s.value}</div>
+                <div className="text-xs text-muted-foreground">{s.label}</div>
               </div>
             ))}
           </div>
-        </div>
+        </>
       ) : (() => {
         const brandCamp = campaigns[0];
         const primary   = brandCamp?.couleur_primaire   ?? "#006776";
@@ -870,13 +1014,22 @@ export default function CampaignsPage() {
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
-                    <Button size="sm" variant="outline" asChild
-                      style={{ borderColor: `${p1}60`, color: p1 }}
-                      className="hover:opacity-80">
-                      <Link href={`/dashboard/campaigns/${campaign.id}`}>
-                        <Eye className="w-3.5 h-3.5 mr-1.5" />Voir détails
-                      </Link>
-                    </Button>
+                    {isHostess && statusKey === "planifiee" ? (
+                      <div className="text-xs text-muted-foreground">
+                        <Button size="sm" variant="outline" disabled className="opacity-60">
+                          <Eye className="w-3.5 h-3.5 mr-1.5" />Voir détails
+                        </Button>
+                        <p className="mt-1">Disponible le {new Date(campaign.date_debut).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}</p>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" asChild
+                        style={{ borderColor: `${p1}60`, color: p1 }}
+                        className="hover:opacity-80">
+                        <Link href={`/dashboard/campaigns/${campaign.id}`}>
+                          <Eye className="w-3.5 h-3.5 mr-1.5" />Voir détails
+                        </Link>
+                      </Button>
+                    )}
                     {canManage && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

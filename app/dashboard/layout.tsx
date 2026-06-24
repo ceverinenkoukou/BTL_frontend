@@ -1,6 +1,7 @@
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { BrandingProvider } from "@/components/providers/branding-provider";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
+import { DashboardMain } from "@/components/dashboard/dashboard-main";
 
 export default function DashboardLayout({
   children,
@@ -12,9 +13,7 @@ export default function DashboardLayout({
       <BrandingProvider>
         <div className="min-h-screen bg-background">
           <DashboardSidebar />
-          <main className="lg:pl-64 pt-14 lg:pt-0">
-            <div className="p-4 md:p-6 lg:p-8 page-enter">{children}</div>
-          </main>
+          <DashboardMain>{children}</DashboardMain>
         </div>
       </BrandingProvider>
     </AuthProvider>
