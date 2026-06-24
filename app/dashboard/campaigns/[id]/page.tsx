@@ -53,7 +53,7 @@ function initials(name: string) {
  * que sur ces sites — sinon enregistrer-gain la rejette (400) alors que la
  * dégustation a déjà été créée, ce qui produit des ventes orphelines. */
 function isPromoEligibleForSite(promo: Promotion, siteId: string): boolean {
-  return promo.is_active && (promo.sites.length === 0 || (!!siteId && promo.sites.includes(siteId)));
+  return promo.is_active && ((promo.sites?.length ?? 0) === 0 || (!!siteId && !!promo.sites?.includes(siteId)));
 }
 
 function fmtXOF(n: number) {

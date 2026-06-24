@@ -1,4 +1,4 @@
-import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList } from "@/lib/types/backend";
+import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour } from "@/lib/types/backend";
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -22,6 +22,7 @@ export function buildCondensedBulletinHtml(
   bulletins: RapportJournalierBulletin[],
   config: RapportJournalierConfig,
   campagne: CampagneList,
+  livraisons: LivraisonGoodiesJour[] = [],
 ): string {
   const colorPrimary = campagne.couleur_primaire || "#0f766e";
   const colorSecondary = campagne.couleur_secondaire || "#0d9488";
@@ -37,11 +38,15 @@ export function buildCondensedBulletinHtml(
   // Champs optionnels / défensif : si le backend déployé est plus ancien que
   // ce générateur (nouveaux champs pas encore renvoyés par l'API), on dégrade
   // proprement au lieu de planter en plein milieu de la génération.
+  //
+  // Une dégustation est toujours une vente (avec ou sans goodie) : chaque
+  // enregistrement Degustation correspond à un client. On utilise donc
+  // nb_degustations comme nombre de ventes (source la plus fiable), plutôt
+  // que de sommer deux compteurs qui devraient déjà être égaux.
   const totalDeg = bulletins.reduce((s, b) => s + (b.nb_degustations ?? 0), 0);
-  const totalVentes = bulletins.reduce((s, b) => s + (b.nb_ventes ?? 0), 0);
-  const totalGoodies = bulletins.reduce((s, b) => s + (b.nb_goodies ?? 0), 0);
   const totalCA = bulletins.reduce((s, b) => s + Number(b.chiffre_affaires || 0), 0);
   const totalHorsPromo = bulletins.reduce((s, b) => s + (b.ventes_hors_promo ?? 0), 0);
+  const totalPersonnesTouchees = bulletins.reduce((s, b) => s + (b.nombre_personnes_touchees ?? 0), 0);
 
   const genreTotal = bulletins.reduce((acc, b) => {
     acc.hommes += b.genre_breakdown?.hommes ?? 0;
@@ -64,13 +69,37 @@ export function buildCondensedBulletinHtml(
   const avgGout = notesGout.length ? notesGout.reduce((a, v) => a + v, 0) / notesGout.length : null;
   const avgAmbiance = notesAmbiance.length ? notesAmbiance.reduce((a, v) => a + v, 0) / notesAmbiance.length : null;
 
+  // UGs : calculées à partir des LivraisonGoodiesJour (site + date), PAS en
+  // sommant les bulletins individuels. Le bulletin individuel attribue les
+  // gains à une hôtesse précise (pour éviter les doublons quand plusieurs
+  // hôtesses partagent un site) et exclut les gains sans dégustation liée
+  // dès qu'il y a plus d'une hôtesse sur le site — ce qui fait disparaître
+  // la majorité des gains historiques une fois sommés. LivraisonGoodiesJour
+  // (via la propriété gains_du_jour, non filtrée par hôtesse) donne le vrai
+  // total, comme sur la page Ventes.
+  const siteIds = new Set(bulletins.map(b => b.site));
+  const dateSet = new Set(dates);
+  const relevantLivraisons = livraisons.filter(l => siteIds.has(l.site) && dateSet.has(l.date));
+
   const ugsRecusMap = new Map<string, number>();
   const ugsDistribuesMap = new Map<string, number>();
   const ugsRestantsMap = new Map<string, number>();
-  bulletins.forEach(b => {
-    (b.ugs_recus ?? []).forEach(u => ugsRecusMap.set(u.goodie, (ugsRecusMap.get(u.goodie) ?? 0) + u.quantite));
-    (b.ugs_distribues ?? []).forEach(u => ugsDistribuesMap.set(u.goodie, (ugsDistribuesMap.get(u.goodie) ?? 0) + u.quantite));
-    (b.ugs_restants ?? []).forEach(u => ugsRestantsMap.set(u.goodie, u.quantite)); // snapshot courant, pas cumulatif
+  relevantLivraisons.forEach(l => {
+    ugsRecusMap.set(l.goodie_nom, (ugsRecusMap.get(l.goodie_nom) ?? 0) + l.quantite_apportee);
+    ugsDistribuesMap.set(l.goodie_nom, (ugsDistribuesMap.get(l.goodie_nom) ?? 0) + l.gains_du_jour);
+  });
+  ugsRecusMap.forEach((recus, goodieNom) => {
+    ugsRestantsMap.set(goodieNom, Math.max(0, recus - (ugsDistribuesMap.get(goodieNom) ?? 0)));
+  });
+
+  // Total goodies distribués : même raisonnement que ci-dessus, nb_goodies
+  // (calculé par nuit avec le même filtre par hôtesse) sous-compte sur les
+  // sites à plusieurs hôtesses. On utilise le total UGs distribués, fiable.
+  const totalGoodies = [...ugsDistribuesMap.values()].reduce((s, v) => s + v, 0);
+
+  const goodiesParSite = new Map<string, number>();
+  relevantLivraisons.forEach(l => {
+    goodiesParSite.set(l.site, (goodiesParSite.get(l.site) ?? 0) + l.gains_du_jour);
   });
 
   const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnement: string; gratuites: number }>();
@@ -82,14 +111,12 @@ export function buildCondensedBulletinHtml(
     entry.gratuites += b.nombre_boissons_gratuites ?? 0;
   });
 
-  const parSite = new Map<string, { siteNom: string; deg: number; ventes: number; ca: number; goodies: number }>();
+  const parSite = new Map<string, { siteNom: string; deg: number; ca: number }>();
   bulletins.forEach(b => {
-    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ventes: 0, ca: 0, goodies: 0 });
+    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ca: 0 });
     const e = parSite.get(b.site)!;
     e.deg += b.nb_degustations ?? 0;
-    e.ventes += b.nb_ventes ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
-    e.goodies += b.nb_goodies ?? 0;
   });
 
   const avis = bulletins.filter(b => b.avis_consommateurs).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.avis_consommateurs! }));
@@ -99,17 +126,17 @@ export function buildCondensedBulletinHtml(
 
   sections.push(`
     <div class="kpis">
-      <div class="kpi"><div class="l">Dégustations</div><div class="v">${totalDeg}</div></div>
-      <div class="kpi"><div class="l">Ventes</div><div class="v">${totalVentes}</div></div>
+      <div class="kpi"><div class="l">Dégustations / Ventes</div><div class="v">${totalDeg}</div></div>
       ${config.show_ventes_detail ? `<div class="kpi"><div class="l">Hors promo</div><div class="v">${totalHorsPromo}</div></div>` : ""}
       <div class="kpi"><div class="l">Goodies</div><div class="v">${totalGoodies}</div></div>
       <div class="kpi"><div class="l">Chiffre d'affaires</div><div class="v">${esc(fmtXOF(totalCA))}</div></div>
+      ${config.show_personnes_touchees ? `<div class="kpi"><div class="l">Personnes touchées</div><div class="v">${totalPersonnesTouchees}</div></div>` : ""}
     </div>`);
 
   sections.push(`
     <h2 class="section-title">Détail par site</h2>
-    <table><thead><tr><th>Site</th><th class="r">Dégustations</th><th class="r">Ventes</th><th class="r">Goodies</th><th class="r">CA</th></tr></thead>
-    <tbody>${[...parSite.values()].map(e => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${e.ventes}</td><td class="r">${e.goodies}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
+    <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th><th class="r">Goodies</th><th class="r">CA</th></tr></thead>
+    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
 
   if (config.show_genre) {
     sections.push(`

@@ -17,7 +17,7 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import api from "@/lib/api";
-import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList } from "@/lib/types/backend";
+import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
 import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
 import { buildBulletinHtml } from "@/lib/services/rapportBulletinHtml";
@@ -195,17 +195,19 @@ function RapportsPageContent() {
     }
     setCondensedLoading(true);
     try {
-      const [bulletins, configRes] = await Promise.all([
+      const [bulletins, configRes, livraisonsRes] = await Promise.all([
         Promise.all(filtered.map(r => getBulletin(r.id))),
         api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
           `/rapport-journalier-configs/par-campagne/?campagne=${filterCampagne}`
         ).then(r => r.data).catch(() => null),
+        api.get<LivraisonGoodiesJour[]>(`/livraisons-goodies/?campagne=${filterCampagne}`)
+          .then(r => unwrapList<LivraisonGoodiesJour>(r.data)).catch(() => []),
       ]);
 
       const config: RapportJournalierConfig =
         configRes && !("defaults" in configRes) ? configRes : { ...DEFAULT_RAPPORT_JOURNALIER_CONFIG };
 
-      const html = buildCondensedBulletinHtml(bulletins, config, campagne);
+      const html = buildCondensedBulletinHtml(bulletins, config, campagne, livraisonsRes);
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const win = window.open(url, "_blank");
