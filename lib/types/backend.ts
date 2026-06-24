@@ -398,6 +398,8 @@ export interface VenteStats {
 export interface GainGoodie {
   id: string;
   campagne_nom: string;
+  site: string;
+  site_nom: string;
   goodie_nom: string;
   hotesse_nom: string;
   created_at: string;
