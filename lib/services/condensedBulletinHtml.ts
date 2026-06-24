@@ -1,4 +1,4 @@
-import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour } from "@/lib/types/backend";
+import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour, GainGoodie } from "@/lib/types/backend";
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -23,6 +23,7 @@ export function buildCondensedBulletinHtml(
   config: RapportJournalierConfig,
   campagne: CampagneList,
   livraisons: LivraisonGoodiesJour[] = [],
+  gainGoodies: GainGoodie[] = [],
 ): string {
   const colorPrimary = campagne.couleur_primaire || "#0f766e";
   const colorSecondary = campagne.couleur_secondaire || "#0d9488";
@@ -69,16 +70,25 @@ export function buildCondensedBulletinHtml(
   const avgGout = notesGout.length ? notesGout.reduce((a, v) => a + v, 0) / notesGout.length : null;
   const avgAmbiance = notesAmbiance.length ? notesAmbiance.reduce((a, v) => a + v, 0) / notesAmbiance.length : null;
 
-  // UGs : calculées à partir des LivraisonGoodiesJour (site + date), PAS en
-  // sommant les bulletins individuels. Le bulletin individuel attribue les
-  // gains à une hôtesse précise (pour éviter les doublons quand plusieurs
-  // hôtesses partagent un site) et exclut les gains sans dégustation liée
-  // dès qu'il y a plus d'une hôtesse sur le site — ce qui fait disparaître
-  // la majorité des gains historiques une fois sommés. LivraisonGoodiesJour
-  // (via la propriété gains_du_jour, non filtrée par hôtesse) donne le vrai
-  // total, comme sur la page Ventes.
+  // UGs distribués / Goodies : comptés directement depuis GainGoodie (un gain
+  // = un client gagnant), PAS depuis les bulletins individuels ni depuis
+  // LivraisonGoodiesJour. Le bulletin individuel attribue chaque gain à une
+  // hôtesse précise (pour éviter les doublons sur les sites à plusieurs
+  // hôtesses) et exclut les gains sans dégustation liée dans ce cas — la
+  // majorité des gains historiques disparaissent en sommant. Quant à
+  // LivraisonGoodiesJour, il ne contient un goodie que si une livraison a
+  // été explicitement enregistrée ce jour-là : si la campagne n'utilise pas
+  // ce suivi (stock alloué une fois à la création), il reste vide même si
+  // des gains existent réellement. GainGoodie (filtré par site + date) donne
+  // le vrai total, comme sur la page Ventes.
   const siteIds = new Set(bulletins.map(b => b.site));
+  const siteNoms = new Set(bulletins.map(b => b.site_nom));
   const dateSet = new Set(dates);
+  const relevantGains = gainGoodies.filter(g =>
+    g.campagne_nom === campagne.nom &&
+    (siteIds.has(g.site) || siteNoms.has(g.site_nom)) &&
+    dateSet.has(g.created_at.slice(0, 10))
+  );
   const relevantLivraisons = livraisons.filter(l => siteIds.has(l.site) && dateSet.has(l.date));
 
   const ugsRecusMap = new Map<string, number>();
@@ -86,20 +96,19 @@ export function buildCondensedBulletinHtml(
   const ugsRestantsMap = new Map<string, number>();
   relevantLivraisons.forEach(l => {
     ugsRecusMap.set(l.goodie_nom, (ugsRecusMap.get(l.goodie_nom) ?? 0) + l.quantite_apportee);
-    ugsDistribuesMap.set(l.goodie_nom, (ugsDistribuesMap.get(l.goodie_nom) ?? 0) + l.gains_du_jour);
+  });
+  relevantGains.forEach(g => {
+    ugsDistribuesMap.set(g.goodie_nom, (ugsDistribuesMap.get(g.goodie_nom) ?? 0) + 1);
   });
   ugsRecusMap.forEach((recus, goodieNom) => {
     ugsRestantsMap.set(goodieNom, Math.max(0, recus - (ugsDistribuesMap.get(goodieNom) ?? 0)));
   });
 
-  // Total goodies distribués : même raisonnement que ci-dessus, nb_goodies
-  // (calculé par nuit avec le même filtre par hôtesse) sous-compte sur les
-  // sites à plusieurs hôtesses. On utilise le total UGs distribués, fiable.
-  const totalGoodies = [...ugsDistribuesMap.values()].reduce((s, v) => s + v, 0);
+  const totalGoodies = relevantGains.length;
 
   const goodiesParSite = new Map<string, number>();
-  relevantLivraisons.forEach(l => {
-    goodiesParSite.set(l.site, (goodiesParSite.get(l.site) ?? 0) + l.gains_du_jour);
+  relevantGains.forEach(g => {
+    goodiesParSite.set(g.site, (goodiesParSite.get(g.site) ?? 0) + 1);
   });
 
   const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnement: string; gratuites: number }>();
