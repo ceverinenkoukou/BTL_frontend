@@ -37,11 +37,16 @@ export function buildCondensedBulletinHtml(
   // Champs optionnels / défensif : si le backend déployé est plus ancien que
   // ce générateur (nouveaux champs pas encore renvoyés par l'API), on dégrade
   // proprement au lieu de planter en plein milieu de la génération.
+  //
+  // Une dégustation est toujours une vente (avec ou sans goodie) : chaque
+  // enregistrement Degustation correspond à un client. On utilise donc
+  // nb_degustations comme nombre de ventes (source la plus fiable), plutôt
+  // que de sommer deux compteurs qui devraient déjà être égaux.
   const totalDeg = bulletins.reduce((s, b) => s + (b.nb_degustations ?? 0), 0);
-  const totalVentes = bulletins.reduce((s, b) => s + (b.nb_ventes ?? 0), 0);
   const totalGoodies = bulletins.reduce((s, b) => s + (b.nb_goodies ?? 0), 0);
   const totalCA = bulletins.reduce((s, b) => s + Number(b.chiffre_affaires || 0), 0);
   const totalHorsPromo = bulletins.reduce((s, b) => s + (b.ventes_hors_promo ?? 0), 0);
+  const totalPersonnesTouchees = bulletins.reduce((s, b) => s + (b.nombre_personnes_touchees ?? 0), 0);
 
   const genreTotal = bulletins.reduce((acc, b) => {
     acc.hommes += b.genre_breakdown?.hommes ?? 0;
@@ -82,12 +87,11 @@ export function buildCondensedBulletinHtml(
     entry.gratuites += b.nombre_boissons_gratuites ?? 0;
   });
 
-  const parSite = new Map<string, { siteNom: string; deg: number; ventes: number; ca: number; goodies: number }>();
+  const parSite = new Map<string, { siteNom: string; deg: number; ca: number; goodies: number }>();
   bulletins.forEach(b => {
-    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ventes: 0, ca: 0, goodies: 0 });
+    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ca: 0, goodies: 0 });
     const e = parSite.get(b.site)!;
     e.deg += b.nb_degustations ?? 0;
-    e.ventes += b.nb_ventes ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
     e.goodies += b.nb_goodies ?? 0;
   });
@@ -99,17 +103,17 @@ export function buildCondensedBulletinHtml(
 
   sections.push(`
     <div class="kpis">
-      <div class="kpi"><div class="l">Dégustations</div><div class="v">${totalDeg}</div></div>
-      <div class="kpi"><div class="l">Ventes</div><div class="v">${totalVentes}</div></div>
+      <div class="kpi"><div class="l">Dégustations / Ventes</div><div class="v">${totalDeg}</div></div>
       ${config.show_ventes_detail ? `<div class="kpi"><div class="l">Hors promo</div><div class="v">${totalHorsPromo}</div></div>` : ""}
       <div class="kpi"><div class="l">Goodies</div><div class="v">${totalGoodies}</div></div>
       <div class="kpi"><div class="l">Chiffre d'affaires</div><div class="v">${esc(fmtXOF(totalCA))}</div></div>
+      ${config.show_personnes_touchees ? `<div class="kpi"><div class="l">Personnes touchées</div><div class="v">${totalPersonnesTouchees}</div></div>` : ""}
     </div>`);
 
   sections.push(`
     <h2 class="section-title">Détail par site</h2>
-    <table><thead><tr><th>Site</th><th class="r">Dégustations</th><th class="r">Ventes</th><th class="r">Goodies</th><th class="r">CA</th></tr></thead>
-    <tbody>${[...parSite.values()].map(e => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${e.ventes}</td><td class="r">${e.goodies}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
+    <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th><th class="r">Goodies</th><th class="r">CA</th></tr></thead>
+    <tbody>${[...parSite.values()].map(e => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${e.goodies}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
 
   if (config.show_genre) {
     sections.push(`
