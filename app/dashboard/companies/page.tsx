@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 type ProductEntry = {
   existingId?:     string;                  // id du produit existant (édition)
@@ -334,37 +335,24 @@ export default function CompaniesPage() {
   return (
     <div className="space-y-6">
 
-      {/* ── Hero banner — Sky/Blue ── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-indigo-600 text-white shadow-2xl shadow-sky-200">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_65%)]" />
-        <div className="absolute -right-14 -top-14 w-56 h-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute right-32 -bottom-8 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
-        <div className="relative z-10 p-6 md:p-8">
-          <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                  <Building2 className="w-4 h-4" />
-                </div>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Entreprises</h1>
-              </div>
-              <p className="text-white/65 text-sm ml-12">Gérez vos clients et leurs produits associés</p>
-            </div>
+      <PageHeader
+        title="Entreprises"
+        description="Gérez vos clients et leurs produits associés"
+        icon={<Building2 className="w-5 h-5" />}
+      />
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-md">
+        {[
+          { icon: "🏢", label: "Entreprises", value: kpis.companies },
+          { icon: "📦", label: "Produits",    value: kpis.products  },
+        ].map((s, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3.5 py-3">
+            <div className="text-base mb-1">{s.icon}</div>
+            <div className="text-2xl font-bold leading-none text-foreground">{s.value}</div>
+            <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
           </div>
-          {/* KPI chips */}
-          <div className="grid grid-cols-2 gap-3 max-w-xs">
-            {[
-              { icon: "🏢", label: "Entreprises", value: kpis.companies },
-              { icon: "📦", label: "Produits",    value: kpis.products  },
-            ].map((s, i) => (
-              <div key={i} className="bg-white/18 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
-                <div className="text-base mb-1">{s.icon}</div>
-                <div className="text-2xl font-bold leading-none">{s.value}</div>
-                <div className="text-xs text-white/60 mt-1">{s.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* ── Action bar ── */}

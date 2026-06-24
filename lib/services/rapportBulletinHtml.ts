@@ -49,6 +49,22 @@ export function buildBulletinHtml(
       </div>`);
   }
 
+  if (config.show_stock_boissons) {
+    sections.push(`
+      <div class="section">
+        <h2>Stock de boissons du site</h2>
+        <p class="big">${bulletin.stock_boissons ?? "—"}</p>
+      </div>`);
+  }
+
+  if (config.show_boissons_gratuites) {
+    sections.push(`
+      <div class="section">
+        <h2>Boissons gratuites</h2>
+        <p class="big">${bulletin.nombre_boissons_gratuites ?? "—"}</p>
+      </div>`);
+  }
+
   if (config.show_ventes_detail) {
     sections.push(`
       <div class="section">

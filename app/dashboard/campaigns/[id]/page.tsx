@@ -9,7 +9,7 @@ import type {
   CampagneDetail, Degustation, Vente, SiteList, MonSiteInfo,
   CreateDegustationPayload, TrancheAge, IntentionAchat, TypeConditionnement, Genre,
   CampagneRapportSites, TypePromotion, Goodie, JourAnimation, RapportConfig,
-  Pointage, LivraisonGoodiesJour,
+  Pointage, LivraisonGoodiesJour, DonneesSiteJour,
 } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
@@ -122,6 +122,8 @@ const EMPTY_DEG_FORM = {
   intention_achat: "" as IntentionAchat | "",
   nom_client:      "",
   promotion_selectionnee: "" as string | "",
+  conditionnement: "UNITE" as TypeConditionnement,
+  quantite:        1,
 };
 
 const GENRE_OPTIONS: { value: Genre; label: string }[] = [
@@ -210,6 +212,14 @@ export default function CampaignDetailPage() {
   const [livraisonForm, setLivraisonForm] = useState({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
   const [livraisonSite, setLivraisonSite] = useState("");
   const [savingLivraison, setSavingLivraison] = useState(false);
+
+  // ── Données du site / jour : stock de boissons, boissons gratuites (admin/superviseur) ──
+  const [donneesSiteJour, setDonneesSiteJour] = useState<DonneesSiteJour[]>([]);
+  const [donneesSiteForm, setDonneesSiteForm] = useState({
+    site: "", date: new Date().toISOString().slice(0, 10),
+    stock_boissons: "", nombre_boissons_gratuites: "",
+  });
+  const [savingDonneesSite, setSavingDonneesSite] = useState(false);
 
   // ── Planning (jours animés) ──
   const [joursAnimation, setJoursAnimation] = useState<JourAnimation[]>([]);
@@ -312,6 +322,10 @@ export default function CampaignDetailPage() {
           const livrRes = await api.get<LivraisonGoodiesJour[]>(`/livraisons-goodies/?campagne=${id}`);
           setLivraisons(Array.isArray(livrRes.data) ? livrRes.data : []);
         } catch { setLivraisons([]); }
+        try {
+          const dsjRes = await api.get<DonneesSiteJour[]>(`/donnees-site-jour/?campagne=${id}`);
+          setDonneesSiteJour(Array.isArray(dsjRes.data) ? dsjRes.data : []);
+        } catch { setDonneesSiteJour([]); }
       }
 
       // Charger la config rapport (admin + superviseur)
@@ -410,6 +424,29 @@ export default function CampaignDetailPage() {
     } catch { toast.error("Erreur lors de l'enregistrement."); }
     finally { setSavingLivraison(false); }
   }, [livraisonForm, livraisonSite]);
+
+  // ── Données du site / jour : stock de boissons, boissons gratuites (admin/superviseur) ──
+  const handleSubmitDonneesSiteJour = useCallback(async () => {
+    if (!donneesSiteForm.site || !donneesSiteForm.date) {
+      toast.error("Sélectionnez un site et une date."); return;
+    }
+    setSavingDonneesSite(true);
+    try {
+      const res = await api.post<DonneesSiteJour>("/donnees-site-jour/", {
+        site: donneesSiteForm.site,
+        date: donneesSiteForm.date,
+        stock_boissons: donneesSiteForm.stock_boissons === "" ? null : Number(donneesSiteForm.stock_boissons),
+        nombre_boissons_gratuites: donneesSiteForm.nombre_boissons_gratuites === "" ? null : Number(donneesSiteForm.nombre_boissons_gratuites),
+      });
+      setDonneesSiteJour(prev => {
+        const idx = prev.findIndex(d => d.site === res.data.site && d.date === res.data.date);
+        if (idx >= 0) { const n = [...prev]; n[idx] = res.data; return n; }
+        return [res.data, ...prev];
+      });
+      toast.success("Données du site enregistrées !");
+    } catch { toast.error("Erreur lors de l'enregistrement."); }
+    finally { setSavingDonneesSite(false); }
+  }, [donneesSiteForm]);
 
   const openTeamDialog = useCallback(async () => {
     try {
@@ -788,6 +825,10 @@ export default function CampaignDetailPage() {
         intention_achat: isPromoMode ? "ELEVEE" : (showTasting ? degForm.intention_achat as IntentionAchat : "MOYENNE"),
         a_achete,
         nom_client: degForm.nom_client.trim() || undefined,
+        ...(isPromoMode && !degForm.promotion_selectionnee && {
+          conditionnement: degForm.conditionnement,
+          quantite: degForm.quantite,
+        }),
       };
       const { data: created } = await api.post<Degustation>("/degustations/", payload);
 
@@ -913,6 +954,7 @@ export default function CampaignDetailPage() {
     total_amount: parseFloat(v.prix_total ?? "0"),
     validated: true,
     created_at: v.created_at,
+    type_vente: v.type_vente,
   })) : [], [ventes, campaign]);
 
   const teamForReport = useMemo(() => campaign ? campaign.hotesses.map(h => ({
@@ -987,7 +1029,11 @@ export default function CampaignDetailPage() {
                 <Link href="/dashboard/campaigns" className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors">
                   <ArrowLeft className="w-4 h-4" />
                 </Link>
-                <span className="text-white/50 text-xs hidden sm:block">Campagnes / {campaign.nom}</span>
+                <nav aria-label="breadcrumb" className="text-xs hidden sm:block">
+                  <Link href="/dashboard/campaigns" className="text-white/50 hover:text-white/80 transition-colors">Campagnes</Link>
+                  <span className="text-white/50"> / </span>
+                  <span className="text-white/80">{campaign.nom}</span>
+                </nav>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold px-3 py-1 rounded-full bg-white/20 border border-white/30">{campaign.type_campagne_display}</span>
@@ -1413,6 +1459,59 @@ export default function CampaignDetailPage() {
                 )}
               </div>
             )}
+
+            {/* ── Stock de boissons & boissons gratuites du site (admin) ── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+              <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-sky-100 flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-sky-600" /></div>
+                Stock de boissons & boissons gratuites (jour)
+              </h3>
+              <div className="space-y-2.5 pt-1">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Site</Label>
+                    <Select value={donneesSiteForm.site} onValueChange={v => setDonneesSiteForm(f => ({ ...f, site: v }))}>
+                      <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue placeholder="Site" /></SelectTrigger>
+                      <SelectContent>{campaignSites.map(s => <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Date</Label>
+                    <Input type="date" className="h-8 text-xs mt-0.5" value={donneesSiteForm.date} onChange={e => setDonneesSiteForm(f => ({ ...f, date: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
+                    <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.stock_boissons} onChange={e => setDonneesSiteForm(f => ({ ...f, stock_boissons: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Boissons gratuites</Label>
+                    <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.nombre_boissons_gratuites} onChange={e => setDonneesSiteForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
+                  </div>
+                </div>
+                <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitDonneesSiteJour} disabled={savingDonneesSite}>
+                  {savingDonneesSite ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                  Enregistrer
+                </Button>
+              </div>
+              {donneesSiteJour.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100 max-h-48 overflow-y-auto">
+                  {donneesSiteJour.slice(0, 10).map(d => (
+                    <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">{d.site_nom}</p>
+                        <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 text-right">
+                        <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
+                        <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Config rapport + bouton export PDF */}
             <ReportConfigPanel
@@ -2214,8 +2313,39 @@ export default function CampaignDetailPage() {
                   </div>
                   <label className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-white hover:border-slate-300 cursor-pointer">
                     <input type="checkbox" className="w-5 h-5 rounded border-gray-300" checked={degForm.promotion_selectionnee === ""} onChange={(e) => { if (e.target.checked) setDegForm(f => ({ ...f, promotion_selectionnee: "" })); }} />
-                    <span className="text-sm font-medium text-slate-700">Aucune promotion applicable</span>
+                    <span className="text-sm font-medium text-slate-700">Vente hors offre promotionnelle</span>
                   </label>
+                </div>
+              )}
+
+              {/* Quantité vendue (vente hors offre promotionnelle) */}
+              {showPromos && !degForm.promotion_selectionnee && (
+                <div className="space-y-3 pt-3 border-t border-slate-100">
+                  <Label className="text-sm font-semibold text-slate-600">Quantité vendue (hors promo) *</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">Conditionnement</Label>
+                      <Select value={degForm.conditionnement} onValueChange={v => setDegForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">Quantité</Label>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setDegForm(f => ({ ...f, quantite: Math.max(1, f.quantite - 1) }))}
+                          className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">−</button>
+                        <Input type="number" min="1" value={degForm.quantite}
+                          onChange={e => setDegForm(f => ({ ...f, quantite: Math.max(1, parseInt(e.target.value) || 1) }))}
+                          className="w-16 text-center font-semibold h-9" />
+                        <button type="button" onClick={() => setDegForm(f => ({ ...f, quantite: f.quantite + 1 }))}
+                          className="w-9 h-9 rounded-lg border-2 border-input flex items-center justify-center text-lg font-bold hover:bg-muted">+</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2289,6 +2419,59 @@ export default function CampaignDetailPage() {
             )}
           </div>
         )}
+
+        {/* ── Stock de boissons & boissons gratuites du site (superviseur) ── */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+          <h3 className="font-semibold text-sm text-foreground flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-sky-100 flex items-center justify-center shrink-0"><Package className="w-3.5 h-3.5 text-sky-600" /></div>
+            Stock de boissons & boissons gratuites (jour)
+          </h3>
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs text-muted-foreground">Site</Label>
+                <Select value={donneesSiteForm.site} onValueChange={v => setDonneesSiteForm(f => ({ ...f, site: v }))}>
+                  <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue placeholder="Site" /></SelectTrigger>
+                  <SelectContent>{campaignSites.map(s => <SelectItem key={s.id} value={s.id}>{s.nom}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Date</Label>
+                <Input type="date" className="h-8 text-xs mt-0.5" value={donneesSiteForm.date} onChange={e => setDonneesSiteForm(f => ({ ...f, date: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
+                <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.stock_boissons} onChange={e => setDonneesSiteForm(f => ({ ...f, stock_boissons: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Boissons gratuites</Label>
+                <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.nombre_boissons_gratuites} onChange={e => setDonneesSiteForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
+              </div>
+            </div>
+            <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitDonneesSiteJour} disabled={savingDonneesSite}>
+              {savingDonneesSite ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              Enregistrer
+            </Button>
+          </div>
+          {donneesSiteJour.length > 0 && (
+            <div className="space-y-1.5 pt-2 border-t border-slate-100 max-h-48 overflow-y-auto">
+              {donneesSiteJour.slice(0, 10).map(d => (
+                <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-foreground truncate">{d.site_nom}</p>
+                    <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
+                    <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Config rapport PDF — superviseur uniquement */}
         <ReportConfigPanel

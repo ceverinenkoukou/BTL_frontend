@@ -14,6 +14,8 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 import api from "@/lib/api";
 import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
@@ -54,9 +56,9 @@ export default function RapportsPage() {
   const [generating, setGenerating] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterSite, setFilterSite] = useState("all");
-  const [filterCampagne, setFilterCampagne] = useState("all");
-  const [filterDate, setFilterDate] = useState("");
+  const [filterSite, setFilterSite] = useUrlState("site", "all");
+  const [filterCampagne, setFilterCampagne] = useUrlState("campagne", "all");
+  const [filterDate, setFilterDate] = useUrlState("date", "");
   const [genDate, setGenDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [editingRapport, setEditingRapport] = useState<RapportJournalier | null>(null);
@@ -177,18 +179,11 @@ export default function RapportsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <FileText className="w-6 h-6 text-primary" />
-            Rapports journaliers
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {rapports.length} rapport{rapports.length !== 1 ? "s" : ""} générés
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Rapports journaliers"
+        description={`${rapports.length} rapport${rapports.length !== 1 ? "s" : ""} générés`}
+        icon={<FileText className="w-5 h-5" />}
+      />
 
       {/* Totals */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -330,7 +325,16 @@ export default function RapportsPage() {
                     {r.nb_goodies}
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-violet-600">
-                    {fmtXOF(r.chiffre_affaires)}
+                    {r.nb_ventes > 0 && Number(r.chiffre_affaires) === 0 ? (
+                      <span
+                        className="text-muted-foreground cursor-help"
+                        title="Aucun prix configuré pour ce produit/site — le chiffre d'affaires n'a pas pu être calculé."
+                      >
+                        —
+                      </span>
+                    ) : (
+                      fmtXOF(r.chiffre_affaires)
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <Button

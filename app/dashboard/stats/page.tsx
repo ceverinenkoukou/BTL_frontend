@@ -8,6 +8,9 @@ import {
 } from "@/components/ui/select";
 import { Download, BarChart3, TrendingUp, Users, ShoppingCart, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useUrlState } from "@/lib/hooks/useUrlState";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { Button } from "@/components/ui/button";
 import {
   BarChart,
   Bar,
@@ -52,7 +55,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 export default function StatsPage() {
   const { user } = useAuth();
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
-  const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
+  const [selectedCampaign, setSelectedCampaign] = useUrlState("campagne", "all");
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalTastings: 0,
@@ -198,58 +201,47 @@ export default function StatsPage() {
   return (
     <div className="space-y-6">
 
-      {/* ── Hero banner — Orange/Amber ── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-orange-600 via-amber-500 to-yellow-400 text-white shadow-2xl shadow-orange-200">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_65%)]" />
-        <div className="absolute -right-14 -top-14 w-56 h-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute right-32 -bottom-8 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
-        <div className="relative z-10 p-6 md:p-8">
-          <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                  <BarChart3 className="w-4 h-4" />
-                </div>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Statistiques</h1>
-              </div>
-              <p className="text-white/65 text-sm ml-12">Analysez les performances de vos campagnes</p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-                <SelectTrigger className="w-44 bg-white/20 border-white/30 text-white placeholder:text-white/60 rounded-xl text-sm [&>svg]:text-white">
-                  <SelectValue placeholder="Toutes" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Toutes les campagnes</SelectItem>
-                  {campaigns.map(c => <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <button
-                onClick={handleExport}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-orange-600 hover:bg-white/90 text-sm font-bold transition-colors shadow-sm"
-              >
-                <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Exporter</span>
-              </button>
-            </div>
+      <PageHeader
+        title="Statistiques"
+        description="Analysez les performances de vos campagnes"
+        icon={<BarChart3 className="w-5 h-5" />}
+        ctaSlot={
+          <div className="flex items-center gap-2 shrink-0">
+            <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+              <SelectTrigger className="w-56 min-w-[14rem] bg-white/20 border-white/30 text-white placeholder:text-white/60 rounded-xl text-sm [&>svg]:text-white">
+                <SelectValue placeholder="Toutes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes les campagnes</SelectItem>
+                {campaigns.map(c => <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={handleExport}
+              className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              <span className="hidden sm:inline">Exporter</span>
+            </Button>
           </div>
-          {/* KPI chips */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            {[
-              { icon: "🍷", label: "Dégustations",    value: stats.totalTastings,      sub: ""             },
-              { icon: "🛒", label: "Ventes",           value: stats.totalSales,         sub: ""             },
-              { icon: "📈", label: "Conversion",       value: `${stats.conversionRate}%`, sub: ""           },
-              { icon: "⭐", label: "Note moyenne",     value: `${stats.avgRating}/5`,   sub: ""             },
-              { icon: "💰", label: "Chiffre d'aff.",  value: fmt(stats.totalRevenue),  sub: ""             },
-            ].map((s, i) => (
-              <div key={i} className="bg-white/18 backdrop-blur-sm rounded-xl p-3.5 border border-white/20 col-span-1">
-                <div className="text-base mb-1">{s.icon}</div>
-                <div className="text-xl font-bold leading-none">{s.value}</div>
-                <div className="text-xs text-white/60 mt-1">{s.label}</div>
-              </div>
-            ))}
+        }
+      />
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {[
+          { icon: "🍷", label: "Dégustations",    value: stats.totalTastings        },
+          { icon: "🛒", label: "Ventes",           value: stats.totalSales           },
+          { icon: "📈", label: "Conversion",       value: `${stats.conversionRate}%` },
+          { icon: "⭐", label: "Note moyenne",     value: `${stats.avgRating}/5`     },
+          { icon: "💰", label: "Chiffre d'aff.",  value: fmt(stats.totalRevenue)    },
+        ].map((s, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3.5">
+            <div className="text-base mb-1">{s.icon}</div>
+            <div className="text-xl font-bold leading-none text-foreground">{s.value}</div>
+            <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
           </div>
-        </div>
+        ))}
       </div>
 
       {/* ── Charts Row 1 : Tendance + Âge ── */}

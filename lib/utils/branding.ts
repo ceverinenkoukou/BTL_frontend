@@ -47,6 +47,24 @@ export function adjustBrightness(hex: string, percent: number): string {
   return `#${toHex(adj(r))}${toHex(adj(g))}${toHex(adj(b))}`;
 }
 
+/**
+ * Dérive une palette de `count` teintes cohérentes avec les couleurs de
+ * marque (primaire/secondaire), pour les graphiques multi-séries (pie,
+ * barres groupées, etc.) qui ont besoin de plus de 2 couleurs.
+ */
+export function buildChartPalette(primary: string, secondary: string, count = 5): string[] {
+  const base = [primary, secondary];
+  const palette: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const source = base[i % 2];
+    // Alterne primaire/secondaire en les éclaircissant progressivement
+    // par paire pour obtenir des teintes distinctes mais homogènes.
+    const step = Math.floor(i / 2);
+    palette.push(step === 0 ? source : adjustBrightness(source, step * 20));
+  }
+  return palette;
+}
+
 export interface BrandingConfig {
   couleur_primaire: string;
   couleur_secondaire: string;

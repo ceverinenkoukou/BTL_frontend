@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
 import type {
@@ -39,7 +40,10 @@ import {
   Package,
   Activity,
   Beer,
+  FileText,
+  ChevronDown,
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   AreaChart,
   Area,
@@ -136,6 +140,7 @@ export default function CompanyCampaignDetailPage() {
   const [siteDetails, setSiteDetails] = useState<SiteDetail[]>([]);
   const [gainsPromotions, setGainsPromotions] = useState<GainPromotion[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
+  const [showAllActions, setShowAllActions] = useState(false);
   const promoChartRef = useRef<HTMLDivElement>(null);
 
   const fetchCampaignData = useCallback(async () => {
@@ -343,6 +348,11 @@ export default function CompanyCampaignDetailPage() {
         <div className="absolute -right-8 -top-8 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
+            <nav aria-label="breadcrumb" className="text-xs mb-2">
+              <Link href="/dashboard/company" className="text-white/60 hover:text-white/90 transition-colors">Mes campagnes</Link>
+              <span className="text-white/60"> / </span>
+              <span className="text-white/90">{campaign.nom}</span>
+            </nav>
             <div className="flex items-center gap-2 mb-2">
               <Badge className="bg-white/25 text-white border-white/40 text-xs backdrop-blur-sm">
                 {campaign.type_campagne_display}
@@ -373,12 +383,21 @@ export default function CompanyCampaignDetailPage() {
               </SelectContent>
             </Select>
             <Button size="sm" onClick={handleExport} disabled={!selectedDate} className="gap-1 bg-white/25 hover:bg-white/35 text-white border-0">
-              <Download className="w-4 h-4" /> CSV
+              <Download className="w-4 h-4" /> Exporter (CSV)
             </Button>
           </div>
         </div>
       </div>
 
+      <Tabs defaultValue="global" className="gap-4">
+        <TabsList className="sticky top-0 z-10 w-full justify-start overflow-x-auto bg-background/95 backdrop-blur-sm border border-slate-100 rounded-xl h-auto p-1 gap-1">
+          <TabsTrigger value="global" className="gap-1.5 rounded-lg"><BarChart3 className="w-4 h-4" />Vue globale</TabsTrigger>
+          <TabsTrigger value="sites" className="gap-1.5 rounded-lg"><MapPin className="w-4 h-4" />Sites</TabsTrigger>
+          <TabsTrigger value="actions" className="gap-1.5 rounded-lg"><Activity className="w-4 h-4" />Actions</TabsTrigger>
+          <TabsTrigger value="rapports" className="gap-1.5 rounded-lg"><FileText className="w-4 h-4" />Rapports</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="global" className="space-y-6">
       {/* ── Colored Stat Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {showTasting && (
@@ -532,7 +551,7 @@ export default function CompanyCampaignDetailPage() {
                     }}>
                     {promo.type_promotion === "OFFERT" ? "🎁 Offert" : "🏆 À gagner"}
                   </Badge>
-                  <p className="font-medium text-sm">Acheter <span className="text-blue-700 font-bold">{promo.quantite_requise}</span> produit{promo.quantite_requise > 1 ? "s" : ""}</p>
+                  <p className="font-medium text-sm">Achetez <span className="text-blue-700 font-bold">{promo.quantite_requise}</span> produit{promo.quantite_requise > 1 ? "s" : ""}</p>
                   <p className="text-sm text-muted-foreground">→ {promo.recompense_description}</p>
                 </div>
               ))}
@@ -547,7 +566,8 @@ export default function CompanyCampaignDetailPage() {
             <BarChart3 className="w-4 h-4 text-red-500" /> Évolution sur 14 jours
           </CardTitle>
         </CardHeader>
-        <CardContent><div className="h-80">
+        <CardContent><div className="overflow-x-auto">
+        <div className="h-80 min-w-[600px]">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={dailyData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
               <defs>
@@ -557,7 +577,7 @@ export default function CompanyCampaignDetailPage() {
                 {showPromotions && <linearGradient id="gradPromos" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COLORS.info} stopOpacity={0.5}/><stop offset="100%" stopColor={COLORS.info} stopOpacity={0}/></linearGradient>}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-              <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
               <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(0,0,0,0.06)", strokeWidth: 2 }} />
               {showTasting && <Area type="monotone" dataKey="degustations" stroke={COLORS.primary} strokeWidth={2} fill="url(#gradTastings)" name="Dégustations" dot={false} activeDot={{ r: 5 }} />}
@@ -567,9 +587,11 @@ export default function CompanyCampaignDetailPage() {
               <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "16px" }} />
             </AreaChart>
           </ResponsiveContainer>
-        </div></CardContent>
+        </div></div></CardContent>
       </Card>
+        </TabsContent>
 
+        <TabsContent value="sites" className="space-y-6">
       {/* ── Performance par site — tableau ── */}
       {rapport && rapport.sites.length > 0 && (() => {
         const maxDeg = Math.max(1, ...rapport.sites.map(s => s.degustations));
@@ -701,11 +723,13 @@ export default function CompanyCampaignDetailPage() {
           </Card>
         );
       })()}
+        </TabsContent>
 
+        <TabsContent value="actions" className="space-y-6">
       {/* ── Dernières actions sur les sites ── */}
       {(tastings.length > 0 || ventes.length > 0) && (() => {
         const actions = [
-          ...tastings.slice(-30).map(t => ({
+          ...tastings.slice(-50).map(t => ({
             id: t.id, type: "deg" as const,
             label: t.produit_nom,
             site: t.site_nom,
@@ -713,7 +737,7 @@ export default function CompanyCampaignDetailPage() {
             meta: t.a_achete ? "acheté" : `note ${t.note_gout}/5`,
             date: t.created_at,
           })),
-          ...ventes.slice(-30).map(v => ({
+          ...ventes.slice(-50).map(v => ({
             id: v.id, type: "vente" as const,
             label: v.produit_nom,
             site: v.site_nom,
@@ -721,7 +745,63 @@ export default function CompanyCampaignDetailPage() {
             meta: v.prix_total ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(Number(v.prix_total)) : "",
             date: v.created_at,
           })),
-        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 20);
+        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        if (!showAllActions) {
+          const recent = actions.slice(0, 10);
+          return (
+            <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+              <CardHeader className="pb-3 bg-gradient-to-r from-slate-50 to-white">
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-500" /> Dernières actions
+                  <Badge className="ml-auto bg-slate-100 text-slate-600 border-0 text-xs font-normal">{actions.length} au total</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                <div className="rounded-xl border border-slate-100 overflow-hidden">
+                  {recent.map((a, i) => (
+                    <div key={a.id} className={`flex items-center gap-3 px-3 py-2.5 ${
+                      i < recent.length - 1 ? "border-b border-slate-50" : ""
+                    } ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                        a.type === "deg" ? "bg-red-100" : "bg-amber-100"
+                      }`}>
+                        {a.type === "deg"
+                          ? <Beer className="w-3.5 h-3.5 text-red-500" />
+                          : <ShoppingCart className="w-3.5 h-3.5 text-amber-500" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-semibold text-foreground truncate">{a.label}</p>
+                          <Badge className={`text-[9px] border-0 shrink-0 ${
+                            a.type === "deg" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"
+                          }`}>
+                            {a.type === "deg" ? "Dégust." : "Vente"}
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground truncate">{a.site} · {a.agent} · {a.meta}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Date(a.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {actions.length > 10 && (
+                  <button type="button" onClick={() => setShowAllActions(true)}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-700 py-2 rounded-lg hover:bg-emerald-50 transition-colors">
+                    Voir tout ({actions.length}) <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </CardContent>
+            </Card>
+          );
+        }
 
         const siteNames = [...new Set(actions.map(a => a.site))];
 
@@ -731,6 +811,10 @@ export default function CompanyCampaignDetailPage() {
               <CardTitle className="text-base font-semibold flex items-center gap-2">
                 <Activity className="w-4 h-4 text-emerald-500" /> Dernières actions sur les sites
                 <Badge className="ml-auto bg-slate-100 text-slate-600 border-0 text-xs font-normal">{actions.length} action{actions.length > 1 ? "s" : ""}</Badge>
+                <button type="button" onClick={() => setShowAllActions(false)}
+                  className="text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1">
+                  Réduire <ChevronDown className="w-3.5 h-3.5 rotate-180" />
+                </button>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
@@ -786,7 +870,16 @@ export default function CompanyCampaignDetailPage() {
           </Card>
         );
       })()}
+        </TabsContent>
 
+        <TabsContent value="rapports" className="space-y-6">
+      {!showPromotions && (
+        <Card className="border-0 shadow-sm rounded-2xl">
+          <CardContent className="p-10 text-center text-sm text-muted-foreground">
+            Aucun rapport téléchargeable pour cette campagne pour le moment.
+          </CardContent>
+        </Card>
+      )}
       {/* ── Écoulements des offres promotionnelles par jour ── */}
       {showPromotions && promoChartData.length > 0 && (
         <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
@@ -796,7 +889,7 @@ export default function CompanyCampaignDetailPage() {
                 <Tag className="w-4 h-4 text-blue-500" /> Écoulements des offres promotionnelles par jour
               </CardTitle>
               <Button size="sm" variant="outline" onClick={handleExportPromoPdf} className="gap-1.5 text-xs">
-                <Download className="w-3.5 h-3.5" /> PDF
+                <Download className="w-3.5 h-3.5" /> Exporter (PDF)
               </Button>
             </div>
           </CardHeader>
@@ -828,7 +921,9 @@ export default function CompanyCampaignDetailPage() {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
 
+        <TabsContent value="sites" className="space-y-6">
       {/* ── Détails des sites (équipe + perf journalière + goodies) ── */}
       {rapport && rapport.sites.length > 0 && (
         <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
@@ -983,6 +1078,8 @@ export default function CompanyCampaignDetailPage() {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

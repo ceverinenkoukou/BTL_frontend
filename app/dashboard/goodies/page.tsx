@@ -22,6 +22,8 @@ import { toast } from "sonner";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 
 interface GoodieFormData {
   nom: string;
@@ -52,8 +54,8 @@ export default function GoodiesPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterCampaign, setFilterCampaign] = useState<string>("all");
-  const [filterCompany, setFilterCompany] = useState<string>("all");
+  const [filterCampaign, setFilterCampaign] = useUrlState("campagne", "all");
+  const [filterCompany, setFilterCompany] = useUrlState("entreprise", "all");
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -197,33 +199,24 @@ export default function GoodiesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Hero banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-fuchsia-600 via-pink-500 to-rose-400 text-white shadow-2xl shadow-fuchsia-200">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.18),transparent_65%)]" />
-        <div className="absolute -right-14 -top-14 w-56 h-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute right-32 -bottom-8 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
-        <div className="relative z-10 p-6 md:p-8">
-          <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                  <Gift className="w-4 h-4" />
-                </div>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Gestion des Goodies</h1>
-              </div>
-              <p className="text-white/65 text-sm ml-12">Enregistrement et suivi des goodies par campagne</p>
-            </div>
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <DialogTrigger asChild>
-                <Button 
-                  onClick={openCreateDialog}
-                  className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Nouveau Goodie
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <PageHeader
+          title="Gestion des Goodies"
+          description="Enregistrement et suivi des goodies par campagne"
+          icon={<Gift className="w-5 h-5" />}
+          ctaSlot={
+            <DialogTrigger asChild>
+              <Button
+                onClick={openCreateDialog}
+                className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Nouveau Goodie
+              </Button>
+            </DialogTrigger>
+          }
+        />
+        <DialogContent className="max-w-lg">
                 <DialogHeader>
                   <DialogTitle>{editingGoodie ? "Modifier le Goodie" : "Nouveau Goodie"}</DialogTitle>
                 </DialogHeader>
@@ -319,25 +312,22 @@ export default function GoodiesPage() {
                   </div>
                 </form>
               </DialogContent>
-            </Dialog>
-          </div>
+      </Dialog>
 
-          {/* KPI chips */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { icon: "🎁", label: "Goodies", value: stats.totalGoodies },
-              { icon: "🎯", label: "Campagnes", value: stats.totalCampaignsWithGoodies },
-              { icon: "📦", label: "Stock total", value: stats.totalStock },
-              { icon: "✅", label: "Distribués", value: stats.totalDistribue },
-            ].map((s, i) => (
-              <div key={i} className="bg-white/18 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
-                <div className="text-base mb-1">{s.icon}</div>
-                <div className="text-2xl font-bold leading-none">{s.value}</div>
-                <div className="text-xs text-white/60 mt-1">{s.label}</div>
-              </div>
-            ))}
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { icon: "🎁", label: "Goodies", value: stats.totalGoodies },
+          { icon: "🎯", label: "Campagnes", value: stats.totalCampaignsWithGoodies },
+          { icon: "📦", label: "Stock total", value: stats.totalStock },
+          { icon: "✅", label: "Distribués", value: stats.totalDistribue },
+        ].map((s, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3.5">
+            <div className="text-base mb-1">{s.icon}</div>
+            <div className="text-2xl font-bold leading-none text-foreground">{s.value}</div>
+            <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
           </div>
-        </div>
+        ))}
       </div>
 
       {/* Filters */}

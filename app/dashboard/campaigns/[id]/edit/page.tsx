@@ -13,6 +13,9 @@ import { toast } from "sonner";
 import { ArrowLeft, Loader2, Save, UtensilsCrossed, ShoppingCart, Target, X, Gift, Tag, Clock, Trash2, Plus, Calendar } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import {
+  Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
 const TYPE_CAMPAGNE_COLORS: Record<TypeCampagne, string> = {
   DEGUSTATION:       "#0d9488",
@@ -184,6 +187,19 @@ export default function EditCampaignPage() {
     <div className="max-w-2xl mx-auto space-y-6 pb-16">
 
       {/* Header */}
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link href="/dashboard/campaigns">Campagnes</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link href={`/dashboard/campaigns/${id}`}>{campaign.nom}</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem><BreadcrumbPage>Modifier</BreadcrumbPage></BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="flex items-center gap-3">
         <Link href={`/dashboard/campaigns/${id}`}
           className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 transition-colors shrink-0">

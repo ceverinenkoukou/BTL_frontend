@@ -69,6 +69,7 @@ type ReportCampaign = Campaign & {
 type ReportSale = Sale & {
   notes?: string;
   goodies_given?: number;
+  type_vente?: "NORMAL" | "GRATUIT" | "PROMOTION";
 };
 type HostessStat = {
   id: string;
@@ -490,7 +491,8 @@ function generatePDF({
   const isGMS  = campaign.id === GMS_ID;
   const isCHR  = campaign.id === CHR_ID;
   const isPromo = isGMS || isCHR;
-  const TASTING_LABEL = "Consommations";
+  const TASTING_LABEL = "Ventes";
+  const OFFERED_LABEL = "Produits offerts";
 
   // ── Helpers internes ──────────────────────────────────────
   function newPage() {
@@ -670,16 +672,18 @@ function generatePDF({
   // Totaux globaux
   const totalTastings = tastings.length;
   const totalSales    = sales.length;
+  const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").length;
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
   const totalGoodies  = hostessStats.reduce((a, h) => a + h.goodiesCount, 0);
 
   sectionTitle("Synthèse globale");
   const kpis = [
-    cfg.show_kpi_degustations ? { value: fmt(totalTastings),             label: TASTING_LABEL }          : null,
-    cfg.show_kpi_ventes       ? { value: fmt(totalSales),                label: "Distributions" }        : null,
-    cfg.show_kpi_ca           ? { value: `${totalRevenue.toFixed(0)} €`, label: "Chiffre d'affaires" }   : null,
-    cfg.show_kpi_goodies      ? { value: fmt(totalGoodies),              label: "Goodies distribués" }   : null,
-    cfg.show_kpi_sites        ? { value: fmt(siteStats.length),          label: "Sites actifs" }         : null,
+    cfg.show_kpi_degustations    ? { value: fmt(totalTastings),          label: TASTING_LABEL }          : null,
+    cfg.show_kpi_ventes          ? { value: fmt(totalSales),             label: OFFERED_LABEL }          : null,
+    cfg.show_kpi_ventes_hors_promo ? { value: fmt(totalVentesHorsPromo), label: "Ventes hors promo" }    : null,
+    cfg.show_kpi_ca              ? { value: `${totalRevenue.toFixed(0)} €`, label: "Chiffre d'affaires" } : null,
+    cfg.show_kpi_goodies         ? { value: fmt(totalGoodies),           label: "Goodies distribués" }   : null,
+    cfg.show_kpi_sites           ? { value: fmt(siteStats.length),       label: "Sites actifs" }         : null,
   ].filter(Boolean) as { value: string | number; label: string }[];
   if (kpis.length > 0) kpiRow(kpis);
 
@@ -728,7 +732,7 @@ function generatePDF({
   const tickLabel  = isGMS ? "Tickets tombola"   : isCHR ? "Tirages tombola"     : "Tickets";
   if (cfg.show_section_gains_goodies) {
   sectionTitle("Détail des gains de goodies");
-  const gainsHead = ["Site", TASTING_LABEL, "Distributions",
+  const gainsHead = ["Site", TASTING_LABEL, OFFERED_LABEL,
     ...(cfg.show_col_goodies ? ["Goodies"] : []),
     ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
   ];
@@ -800,7 +804,7 @@ function generatePDF({
     // ── Offres par hôtesse ──────────────────────────────
     if (cfg.show_section_offres_par_hotesse && cfg.show_equipe_hotesses) {
       sectionTitle("Offres promotionnelles par hôtesse");
-      const hotOffrHead = ["Hôtesse", "Site", TASTING_LABEL, "Distributions", "Qté totale",
+      const hotOffrHead = ["Hôtesse", "Site", TASTING_LABEL, OFFERED_LABEL, "Qté totale",
         ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
         ...(cfg.show_col_goodies ? ["Goodies"] : []),
       ];
@@ -839,7 +843,7 @@ function generatePDF({
     if (cfg.show_section_perf_sites) {
       sectionTitle("Performances par site");
       const siteObj = Math.max(1, Math.ceil(campaign.sales_objective / (siteStats.length || 1)));
-      const sitePerfHead = ["Site", "Localisation", TASTING_LABEL, "Distributions",
+      const sitePerfHead = ["Site", "Localisation", TASTING_LABEL, OFFERED_LABEL,
         ...(cfg.show_col_performance ? ["Objectif", "Taux"] : []),
         ...(cfg.show_col_ca ? ["CA (€)"] : []),
         ...(cfg.show_col_goodies ? ["Goodies"] : []),
@@ -883,7 +887,7 @@ function generatePDF({
     newPage();
     if (cfg.show_section_offres_promo) {
       sectionTitle("Détail des offres promotionnelles par site");
-      const entOffrHead = ["Site", TASTING_LABEL, "Distributions",
+      const entOffrHead = ["Site", TASTING_LABEL, OFFERED_LABEL,
         ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
       ];
       table(

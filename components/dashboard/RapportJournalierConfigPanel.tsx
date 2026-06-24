@@ -17,6 +17,8 @@ type Props = {
 const ITEMS: { field: keyof RapportJournalierConfigPayload; label: string; hint?: string }[] = [
   { field: "show_pointage",              label: "Heures d'arrivée / départ",        hint: "Reprises automatiquement du pointage de l'hôtesse" },
   { field: "show_stock",                 label: "Stock magasin en début de journée", hint: "Saisie manuelle" },
+  { field: "show_stock_boissons",        label: "Stock de boissons du site",        hint: "Saisie manuelle" },
+  { field: "show_boissons_gratuites",    label: "Nombre de boissons gratuites",     hint: "Saisie manuelle" },
   { field: "show_ventes_detail",         label: "Détail des ventes",                hint: "Ventes promo / hors promo" },
   { field: "show_ugs_recus",             label: "UGs (goodies) reçus" },
   { field: "show_ugs_distribues",        label: "UGs (goodies) distribués" },
@@ -66,6 +68,8 @@ export default function RapportJournalierConfigPanel({ campaignId, onConfigChang
       const payload: RapportJournalierConfigPayload = {
         show_pointage: config.show_pointage,
         show_stock: config.show_stock,
+        show_stock_boissons: config.show_stock_boissons,
+        show_boissons_gratuites: config.show_boissons_gratuites,
         show_ventes_detail: config.show_ventes_detail,
         show_ugs_recus: config.show_ugs_recus,
         show_ugs_distribues: config.show_ugs_distribues,

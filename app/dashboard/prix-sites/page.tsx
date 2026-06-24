@@ -14,6 +14,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import api from "@/lib/api";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 import type {
   SiteProduitPrix, CreateSiteProduitPrixPayload, SiteList, Produit, CampagneList,
 } from "@/lib/types/backend";
@@ -48,8 +50,8 @@ export default function PrixSitesPage() {
   const [form, setForm] = useState<CreateSiteProduitPrixPayload>(EMPTY_FORM);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterCampagne, setFilterCampagne] = useState("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterCampagne, setFilterCampagne] = useUrlState("campagne", "all");
+  const [filterSite, setFilterSite] = useUrlState("site", "all");
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -136,24 +138,18 @@ export default function PrixSitesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Tag className="w-6 h-6 text-primary" />
-            Prix par site
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Écrase le prix indicatif du produit pour le calcul du CA sur un site donné.
-            {" "}{prix.length} entrée{prix.length !== 1 ? "s" : ""}.
-          </p>
-        </div>
-        {isAdmin && (
-          <Button onClick={openCreate} className="gap-2">
-            <Plus className="w-4 h-4" /> Nouveau prix
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Prix par site"
+        description={`Écrase le prix indicatif du produit pour le calcul du CA sur un site donné. ${prix.length} entrée${prix.length !== 1 ? "s" : ""}.`}
+        icon={<Tag className="w-5 h-5" />}
+        ctaSlot={
+          isAdmin ? (
+            <Button onClick={openCreate} className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm">
+              <Plus className="w-4 h-4 mr-2" /> Nouveau prix
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
@@ -196,9 +192,14 @@ export default function PrixSitesPage() {
           <Tag className="w-10 h-10 mx-auto mb-3 opacity-30" />
           <p className="font-medium">Aucun prix spécifique configuré</p>
           {isAdmin && (
-            <p className="text-sm mt-1">
-              Sans configuration, le prix indicatif du produit est utilisé pour le CA.
-            </p>
+            <>
+              <p className="text-sm mt-1">
+                Sans configuration, le prix indicatif du produit est utilisé pour le CA.
+              </p>
+              <Button onClick={openCreate} className="mt-4 gap-2">
+                <Plus className="w-4 h-4" /> Nouveau prix
+              </Button>
+            </>
           )}
         </div>
       ) : (

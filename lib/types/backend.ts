@@ -546,6 +546,34 @@ export interface RapportJournalierBulletin extends RapportJournalier {
     occurrences: number;
     total_offert: number;
   }[];
+  // Saisies par site/jour (indépendantes de l'hôtesse), voir DonneesSiteJour
+  stock_boissons: number | null;
+  nombre_boissons_gratuites: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// DonneesSiteJour
+// ---------------------------------------------------------------------------
+
+export interface DonneesSiteJour {
+  id: string;
+  site: string;
+  site_nom: string;
+  campagne: string;
+  campagne_nom: string;
+  date: string;
+  stock_boissons: number | null;
+  nombre_boissons_gratuites: number | null;
+  enregistre_par: string | null;
+  enregistre_par_nom: string | null;
+  created_at: string;
+}
+
+export interface UpsertDonneesSiteJourPayload {
+  site: string;
+  date: string;
+  stock_boissons?: number | null;
+  nombre_boissons_gratuites?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +587,8 @@ export interface RapportJournalierConfig {
   configure_par_nom: string | null;
   show_pointage: boolean;
   show_stock: boolean;
+  show_stock_boissons: boolean;
+  show_boissons_gratuites: boolean;
   show_ventes_detail: boolean;
   show_ugs_recus: boolean;
   show_ugs_distribues: boolean;
@@ -583,6 +613,8 @@ export const DEFAULT_RAPPORT_JOURNALIER_CONFIG: RapportJournalierConfig = {
   configure_par_nom: null,
   show_pointage: true,
   show_stock: true,
+  show_stock_boissons: true,
+  show_boissons_gratuites: true,
   show_ventes_detail: true,
   show_ugs_recus: true,
   show_ugs_distribues: true,
@@ -631,6 +663,7 @@ export interface RapportConfig {
   // KPIs
   show_kpi_degustations: boolean;
   show_kpi_ventes: boolean;
+  show_kpi_ventes_hors_promo: boolean;
   show_kpi_ca: boolean;
   show_kpi_goodies: boolean;
   show_kpi_sites: boolean;
@@ -674,6 +707,7 @@ export const DEFAULT_RAPPORT_CONFIG: RapportConfig = {
   sous_titre_personnalise: null,
   show_kpi_degustations: true,
   show_kpi_ventes: true,
+  show_kpi_ventes_hors_promo: true,
   show_kpi_ca: true,
   show_kpi_goodies: true,
   show_kpi_sites: true,

@@ -15,13 +15,18 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { SalesTable } from "@/components/dashboard/SalesTable";
+import { useUrlState } from "@/lib/hooks/useUrlState";
+import { Button } from "@/components/ui/button";
 import {
   ShoppingCart, Download, Package, FileText, Building2, MapPin, Archive, Eye, Trash2, Calendar,
   AlertTriangle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
-
-type VenteEnrichie = Vente;
+import {
+  type VenteEnrichie, VenteTypeBadge, venteTypeMeta, fmt, getSaleRevenueAmount, sumSaleRevenue, formatSaleTotal,
+} from "@/lib/utils/ventes";
 
 interface ArchivedReport {
   id: string;
@@ -84,55 +89,20 @@ const VENTE_TYPE_OPTIONS: { value: VenteTypeFilter; label: string }[] = [
   { value: "GRATUIT", label: "Offerts goodie" },
 ];
 
-const venteTypeMeta: Record<Vente["type_vente"], { label: string; className: string }> = {
-  NORMAL: {
-    label: "Vente normale",
-    className: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  },
-  PROMOTION: {
-    label: "Offert promo",
-    className: "bg-blue-50 text-blue-700 border-blue-200",
-  },
-  GRATUIT: {
-    label: "Offert goodie",
-    className: "bg-amber-50 text-amber-700 border-amber-200",
-  },
-};
-
-function VenteTypeBadge({ type }: { type: Vente["type_vente"] }) {
-  const meta = venteTypeMeta[type] ?? venteTypeMeta.NORMAL;
-  return (
-    <span className={cn("text-[11px] px-2 py-0.5 rounded-full border font-semibold whitespace-nowrap", meta.className)}>
-      {meta.label}
-    </span>
-  );
-}
-
-const fmt = (n: number) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(n);
-
-const getSaleRevenueAmount = (sale: VenteEnrichie): number | null => {
-  if (sale.type_vente !== "NORMAL") return 0;
-  if (sale.prix_total === null || sale.prix_total === undefined) return null;
-  const amount = Number(sale.prix_total);
-  return Number.isFinite(amount) ? amount : null;
-};
-
-const sumSaleRevenue = (items: VenteEnrichie[]) =>
-  items.reduce((sum, sale) => sum + (getSaleRevenueAmount(sale) ?? 0), 0);
-
-const formatSaleTotal = (sale: VenteEnrichie) => {
-  const amount = getSaleRevenueAmount(sale);
-  return amount === null ? "Prix manquant" : fmt(amount);
-};
+// Helpers ventes (fmt, getSaleRevenueAmount, VenteTypeBadge...) déplacés dans
+// lib/utils/ventes.tsx pour être réutilisés par components/dashboard/SalesTable.tsx.
 
 export default function SalesPage() {
   const { user } = useAuth();
   const [sales, setSales] = useState<VenteEnrichie[]>([]);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
-  const [selectedSaleType, setSelectedSaleType] = useState<VenteTypeFilter>("all");
+  const [selectedCampaign, setSelectedCampaign] = useUrlState("campagne", "all");
+  const [selectedSaleType, setSelectedSaleType] = useUrlState("type", "all");
+  const [selectedHotesse, setSelectedHotesse] = useUrlState("hotesse", "all");
+  const [selectedSite, setSelectedSite] = useUrlState("site", "all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [archives, setArchives] = useState<ArchivedReport[]>([]);
   const [view, setView] = useState<'sales' | 'archives'>('sales');
 
@@ -158,10 +128,18 @@ export default function SalesPage() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { setArchives(loadArchives()); }, []);
 
+  const hotesseOptions = useMemo(() => [...new Set(sales.map(s => s.hotesse_nom))].sort(), [sales]);
+  const siteOptions = useMemo(() => [...new Set(sales.map(s => s.site_nom))].sort(), [sales]);
+
   const filtered = sales.filter(s => {
     const campaignMatches = selectedCampaign === "all" || s.campagne_nom === campaigns.find(c => c.id === selectedCampaign)?.nom;
     const typeMatches = selectedSaleType === "all" || s.type_vente === selectedSaleType;
-    return campaignMatches && typeMatches;
+    const hotesseMatches = selectedHotesse === "all" || s.hotesse_nom === selectedHotesse;
+    const siteMatches = selectedSite === "all" || s.site_nom === selectedSite;
+    const saleDate = s.created_at.slice(0, 10);
+    const fromMatches = !dateFrom || saleDate >= dateFrom;
+    const toMatches = !dateTo || saleDate <= dateTo;
+    return campaignMatches && typeMatches && hotesseMatches && siteMatches && fromMatches && toMatches;
   });
 
   const stats = {
@@ -687,43 +665,32 @@ export default function SalesPage() {
 
       {isAdmin ? (
         <>
-          {/* ── Admin hero banner ── */}
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-700 via-teal-600 to-cyan-500 text-white shadow-2xl shadow-emerald-200">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
-            <div className="absolute -right-12 -top-12 w-52 h-52 rounded-full bg-white/10 blur-3xl" />
-            <div className="absolute right-28 -bottom-8 w-28 h-28 rounded-full bg-white/10 blur-2xl" />
-            <div className="relative z-10 p-6 md:p-8">
-              <div className="flex items-start justify-between gap-4 mb-6">
-                <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                      <ShoppingCart className="w-4 h-4" />
-                    </div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Ventes</h1>
-                  </div>
-                  <p className="text-white/65 text-sm ml-12">Organisées par entreprise et campagne</p>
+          <PageHeader
+            title="Ventes"
+            description="Organisées par entreprise et campagne"
+            icon={<ShoppingCart className="w-5 h-5" />}
+            ctaSlot={
+              <Button onClick={handleExport} className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm">
+                <Download className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Exporter XLSX</span>
+              </Button>
+            }
+          />
+
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[
+              { icon: "🛒", label: "Total ventes",    value: stats.total,  sub: "filtrées"  },
+              { icon: "📦", label: "Unités vendues",  value: stats.unites, sub: "produits" },
+            ].map((s, i) => (
+              <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3.5">
+                <div className="text-base mb-1">{s.icon}</div>
+                <div className="text-xl font-bold leading-none text-foreground">
+                  {s.value}{s.sub && <span className="text-xs font-normal text-muted-foreground ml-1">{s.sub}</span>}
                 </div>
-                <button onClick={handleExport}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-emerald-700 hover:bg-white/90 text-sm font-bold transition-colors shadow-sm shrink-0">
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Exporter XLSX</span>
-                </button>
+                <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {[
-                  { icon: "🛒", label: "Total ventes",    value: stats.total,  sub: "filtrées"  },
-                  { icon: "📦", label: "Unités vendues",  value: stats.unites, sub: "produits" },
-                ].map((s, i) => (
-                  <div key={i} className="bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
-                    <div className="text-base mb-1">{s.icon}</div>
-                    <div className="text-xl font-bold leading-none">
-                      {s.value}{s.sub && <span className="text-xs font-normal text-white/55 ml-1">{s.sub}</span>}
-                    </div>
-                    <div className="text-xs text-white/60 mt-1">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
 
           {/* Tabs */}
@@ -770,6 +737,31 @@ export default function SalesPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Select value={selectedHotesse} onValueChange={setSelectedHotesse}>
+              <SelectTrigger className="w-48 rounded-xl border-slate-200">
+                <SelectValue placeholder="Toutes les hôtesses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes les hôtesses</SelectItem>
+                {hotesseOptions.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={selectedSite} onValueChange={setSelectedSite}>
+              <SelectTrigger className="w-48 rounded-xl border-slate-200">
+                <SelectValue placeholder="Tous les sites" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les sites</SelectItem>
+                {siteOptions.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="h-9 rounded-xl border border-slate-200 px-2.5 text-xs text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">→</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="h-9 rounded-xl border border-slate-200 px-2.5 text-xs text-muted-foreground" />
+            </div>
             <button onClick={handleExport}
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-semibold transition-colors">
               <Download className="w-4 h-4" />Exporter tout (XLSX)
@@ -908,51 +900,7 @@ export default function SalesPage() {
                               </span>
                             </div>
                           </div>
-                          <div className="rounded-xl border border-slate-100 overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="bg-slate-50 border-b border-slate-100">
-                                  {["Produit", "Type", "Site", "Hôtesse", "Qté", "Total"].map((h, i) => (
-                                    <th key={h} className={cn("px-3 py-2 text-xs font-semibold text-muted-foreground",
-                                      i < 4 ? "text-left" : "text-right")}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-50">
-                                {campSales.map(sale => (
-                                  <tr key={sale.id} className="bg-white hover:bg-slate-50/50 transition-colors">
-                                    <td className="px-3 py-2.5">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center shrink-0">
-                                          <Package className="w-3.5 h-3.5 text-emerald-600" />
-                                        </div>
-                                        <div>
-                                          <span className="font-medium text-foreground text-xs">{sale.produit_nom}</span>
-                                          <p className="text-xs text-muted-foreground">{sale.conditionnement_display}</p>
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2.5">
-                                      <VenteTypeBadge type={sale.type_vente} />
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                                      <div className="flex items-center gap-1">
-                                        <MapPin className="w-3 h-3" />{sale.site_nom}
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{sale.hotesse_nom}</td>
-                                    <td className="px-3 py-2.5 text-right font-medium">{sale.quantite}</td>
-                                    <td className={cn(
-                                      "px-3 py-2.5 text-right font-bold text-xs",
-                                      getSaleRevenueAmount(sale) === null ? "text-amber-700" : "text-emerald-700"
-                                    )}>
-                                      {formatSaleTotal(sale)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                          <SalesTable sales={campSales} />
                         </div>
                       );
                     })}
