@@ -215,6 +215,7 @@ export default function TastingsPage() {
             produit_id: form.produit,
             nom_client: form.nom_client.trim() || undefined,
             tranche_age: form.tranche_age || undefined,
+            degustation_id: created.id,
           });
           toast.success(`🎉 ${gainResult.recompense} enregistré !`);
         } catch (promoErr: unknown) {

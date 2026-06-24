@@ -192,6 +192,7 @@ export default function CampaignDetailPage() {
   const [wheelSpinning, setWheelSpinning] = useState(false);
   const [savingWheelGain, setSavingWheelGain] = useState(false);
   const [wheelOpen, setWheelOpen] = useState(false);
+  const [pendingDegustationId, setPendingDegustationId] = useState<string | null>(null);
   const [wonPrize, setWonPrize] = useState<WheelPrize | null>(null);
   const wheelCanvasRef = useRef<HTMLCanvasElement>(null);
   const wheelRotationRef = useRef(0);
@@ -728,6 +729,7 @@ export default function CampaignDetailPage() {
         site_id: siteId,
         nom_client: wheelClientName.trim() || undefined,
         promotion_id: activeWheelPromoId || undefined,
+        degustation_id: pendingDegustationId || undefined,
       });
       invalidateCache("/gains-goodies");
       invalidateCache("/goodies");
@@ -735,6 +737,7 @@ export default function CampaignDetailPage() {
       closeWheel();
       setWonPrize(null);
       wheelRotationRef.current = 0;
+      setPendingDegustationId(null);
       fetchAll();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -848,6 +851,7 @@ export default function CampaignDetailPage() {
               site_id: degForm.site,
               produit_id: degForm.produit,
               nom_client: degForm.nom_client.trim() || undefined,
+              degustation_id: created.id,
             });
             toast.success("Gain promotionnel enregistré ! 🎉");
           } catch (promoErr: unknown) {
@@ -859,6 +863,7 @@ export default function CampaignDetailPage() {
 
       setTastings(prev => [created, ...prev]);
       invalidateCache("/degustations");
+      setPendingDegustationId(created.id);
       const clientName = degForm.nom_client.trim();
       setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
       setDegStep(1);
