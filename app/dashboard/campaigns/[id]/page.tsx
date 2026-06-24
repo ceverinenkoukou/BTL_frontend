@@ -30,7 +30,7 @@ import {
   UtensilsCrossed, ShoppingCart, TrendingUp, BarChart3,
   Sparkles, Star, Plus, Loader2, CheckCircle2, Edit,
   Frown, Meh, Smile, Laugh, Heart, Gift, Trophy, RotateCcw, MapPin, Package, Tag, UserPlus,
-  Clock, Trash2,
+  Clock, Trash2, FerrisWheel,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import confetti from "canvas-confetti";
@@ -2217,7 +2217,7 @@ export default function CampaignDetailPage() {
                   <p className="text-xs text-muted-foreground text-right">{Math.min(100, Math.round((tastings.length / campaign.objectif_degustations) * 100))}% atteint</p>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p1, 0.07) }}><UtensilsCrossed className="w-4 h-4 shrink-0" style={{ color: p1 }} /><div><p className="text-sm font-semibold text-foreground">{tastings.length} dégustation{tastings.length !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Aucun objectif défini</p></div></div>
+                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p1, 0.07) }}><UtensilsCrossed className="w-4 h-4 shrink-0" style={{ color: p1 }} /><div><p className="text-sm font-semibold text-foreground">{tastings.length} dégustation{tastings.length !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Objectif libre</p></div></div>
               )}
               {showVente && campaign.objectif_ventes ? (
                 <div className="space-y-2">
@@ -2229,7 +2229,7 @@ export default function CampaignDetailPage() {
                   <p className="text-xs text-muted-foreground text-right">{Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100))}% atteint</p>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p2, 0.07) }}><ShoppingCart className="w-4 h-4 shrink-0" style={{ color: p2 }} /><div><p className="text-sm font-semibold text-foreground">{purchasedCount} vente{purchasedCount !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Aucun objectif défini</p></div></div>
+                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p2, 0.07) }}><ShoppingCart className="w-4 h-4 shrink-0" style={{ color: p2 }} /><div><p className="text-sm font-semibold text-foreground">{purchasedCount} vente{purchasedCount !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Objectif libre</p></div></div>
               )}
             </div>
           </div>
@@ -2660,6 +2660,18 @@ export default function CampaignDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* FAB Roue à cadeaux (hôtesse, campagnes à récompense Goodies) */}
+      {isHostess && showWheel && (
+        <Link
+          href="/dashboard/wheel"
+          className="fixed bottom-20 lg:bottom-6 right-5 z-40 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white transition-transform hover:scale-105"
+          style={{ background: `linear-gradient(135deg, ${p1}, ${p2})` }}
+          title="Roue à cadeaux"
+        >
+          <FerrisWheel className="w-6 h-6" />
+        </Link>
       )}
 
       {/* Confirmation plein écran après enregistrement (hôtesse) */}

@@ -104,6 +104,13 @@ type HotesseForm = {
 
 const emptyHotesseForm: HotesseForm = { email: "", name: "" };
 
+type SuperviseurForm = {
+  email: string;
+  name: string;
+};
+
+const emptySuperviseurForm: SuperviseurForm = { email: "", name: "" };
+
 function SitesPageContent() {
   const { user } = useAuth();
   const isAdmin = user?.role === "Administrateur";
@@ -128,13 +135,16 @@ function SitesPageContent() {
   const [campagneProduits, setCampagneProduits] = useState<Produit[]>([]);
   const [campagneGoodies, setCampagneGoodies] = useState<Goodie[]>([]);
 
-  // --- Hôtesses ---
+  // --- Équipe (superviseurs + hôtesses) ---
   const [hotelSite, setHotelSite] = useState<SiteList | null>(null);
   const [siteDetail, setSiteDetail] = useState<{ superviseurs: TeamMember[]; hotesses: TeamMember[] } | null>(null);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [allHotesses, setAllHotesses] = useState<TeamMember[]>([]);
   const [showHotesseForm, setShowHotesseForm] = useState(false);
   const [hotesseForm, setHotesseForm] = useState<HotesseForm>(emptyHotesseForm);
+  const [allSuperviseurs, setAllSuperviseurs] = useState<TeamMember[]>([]);
+  const [showSuperviseurForm, setShowSuperviseurForm] = useState(false);
+  const [superviseurForm, setSuperviseurForm] = useState<SuperviseurForm>(emptySuperviseurForm);
   const [savingTeam, setSavingTeam] = useState(false);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -565,13 +575,16 @@ function SitesPageContent() {
     ? sites.filter(site => site.campagne === offersSite.campagne)
     : [];
 
-  // --- Hôtesses handlers ---
+  // --- Équipe handlers (superviseurs + hôtesses) ---
   const openHotessesDialog = async (site: SiteList) => {
     setHotelSite(site);
     setSiteDetail(null);
     setAllHotesses([]);
+    setAllSuperviseurs([]);
     setShowHotesseForm(false);
     setHotesseForm(emptyHotesseForm);
+    setShowSuperviseurForm(false);
+    setSuperviseurForm(emptySuperviseurForm);
     setLoadingTeam(true);
     try {
       const [detailRes, usersRes] = await Promise.all([
@@ -581,6 +594,7 @@ function SitesPageContent() {
       setSiteDetail({ superviseurs: detailRes.data.superviseurs ?? [], hotesses: detailRes.data.hotesses ?? [] });
       const allStaff = unwrapList<TeamMember>(usersRes.data);
       setAllHotesses(allStaff.filter(u => u.role === "Hotesse"));
+      setAllSuperviseurs(allStaff.filter(u => u.role === "Superviseur"));
     } catch {
       toast.error("Erreur lors du chargement de l'équipe.");
     } finally {
@@ -640,6 +654,63 @@ function SitesPageContent() {
       }
     } catch {
       toast.error("Erreur lors de la création de l'hôtesse.");
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  const assignSuperviseurs = async (superviseursIds: string[]) => {
+    if (!hotelSite || !siteDetail) return;
+    setSavingTeam(true);
+    try {
+      await api.post(`/sites/${hotelSite.id}/manage-team/`, {
+        superviseurs_ids: superviseursIds,
+        hotesses_ids: siteDetail.hotesses.map(h => h.id),
+        notify: true,
+      });
+      setSiteDetail(prev => prev ? {
+        ...prev,
+        superviseurs: allSuperviseurs.filter(s => superviseursIds.includes(s.id)),
+      } : prev);
+      fetchAll();
+      toast.success("Superviseurs mis à jour.");
+    } catch {
+      toast.error("Erreur lors de l'assignation.");
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  const toggleSuperviseur = (superviseurId: string) => {
+    if (!siteDetail) return;
+    const current = siteDetail.superviseurs.map(s => s.id);
+    const next = current.includes(superviseurId)
+      ? current.filter(id => id !== superviseurId)
+      : [...current, superviseurId];
+    assignSuperviseurs(next);
+  };
+
+  const handleCreateSuperviseur = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!superviseurForm.email.trim() || !superviseurForm.name.trim()) return;
+    setSavingTeam(true);
+    try {
+      const { data: newUser } = await api.post<RemoteUser & { role_display: string }>("/users/", {
+        email: superviseurForm.email.trim(),
+        name: superviseurForm.name.trim(),
+        role: "Superviseur",
+      });
+      const newMember: TeamMember = { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role, role_display: newUser.role_display ?? "Superviseur" };
+      setAllSuperviseurs(prev => [...prev, newMember]);
+      setShowSuperviseurForm(false);
+      setSuperviseurForm(emptySuperviseurForm);
+      toast.success(`Superviseur ${newUser.name} créé. Il sera notifié par email.`);
+      if (siteDetail) {
+        const currentIds = siteDetail.superviseurs.map(s => s.id);
+        await assignSuperviseurs([...currentIds, newUser.id]);
+      }
+    } catch {
+      toast.error("Erreur lors de la création du superviseur.");
     } finally {
       setSavingTeam(false);
     }
@@ -793,7 +864,7 @@ function SitesPageContent() {
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => openHotessesDialog(site)} className="gap-2">
                               <Users className="w-4 h-4" />
-                              Hôtesses
+                              Équipe
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => openEditDialog(site)} className="gap-2">
                               <Edit2 className="w-4 h-4" />
@@ -1478,7 +1549,7 @@ function SitesPageContent() {
       <Dialog open={!!hotelSite} onOpenChange={open => !open && setHotelSite(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Gérer les hôtesses — {hotelSite?.nom}</DialogTitle>
+            <DialogTitle>Gérer l&apos;équipe — {hotelSite?.nom}</DialogTitle>
           </DialogHeader>
 
           {hotelSite && (
@@ -1491,6 +1562,100 @@ function SitesPageContent() {
               </div>
 
               <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-muted-foreground">Superviseurs du site</p>
+                <Button
+                  type="button" size="sm"
+                  variant={showSuperviseurForm ? "outline" : "default"}
+                  onClick={() => { setShowSuperviseurForm(v => !v); setSuperviseurForm(emptySuperviseurForm); }}
+                  className="gap-1.5"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Nouveau superviseur
+                </Button>
+              </div>
+
+              {showSuperviseurForm && (
+                <form onSubmit={handleCreateSuperviseur} className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-blue-800">Créer et affecter un superviseur</p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Nom complet</Label>
+                      <Input
+                        placeholder="Nom Prénom"
+                        className="h-9"
+                        value={superviseurForm.name}
+                        onChange={e => setSuperviseurForm(f => ({ ...f, name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Email</Label>
+                      <Input
+                        type="email"
+                        placeholder="superviseur@email.com"
+                        className="h-9"
+                        value={superviseurForm.email}
+                        onChange={e => setSuperviseurForm(f => ({ ...f, email: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="ghost"
+                      onClick={() => { setShowSuperviseurForm(false); setSuperviseurForm(emptySuperviseurForm); }}
+                    >Annuler</Button>
+                    <Button type="submit" size="sm" disabled={savingTeam || !superviseurForm.name.trim() || !superviseurForm.email.trim()}>
+                      {savingTeam && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+                      Créer et affecter
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {loadingTeam ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[30vh] overflow-auto pr-1">
+                  {allSuperviseurs.length === 0 ? (
+                    <div className="rounded-xl border py-8 text-center text-muted-foreground text-sm">
+                      Aucun superviseur enregistré.
+                    </div>
+                  ) : (
+                    allSuperviseurs.map(superviseur => {
+                      const assigned = siteDetail?.superviseurs.some(s => s.id === superviseur.id) ?? false;
+                      return (
+                        <label
+                          key={superviseur.id}
+                          className={cn(
+                            "flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer",
+                            assigned ? "bg-blue-50 border-blue-300" : "bg-background hover:bg-muted/40",
+                          )}
+                        >
+                          <Checkbox
+                            checked={assigned}
+                            disabled={savingTeam}
+                            onCheckedChange={() => toggleSuperviseur(superviseur.id)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-sm">{superviseur.name}</p>
+                            <p className="text-xs text-muted-foreground">{superviseur.email}</p>
+                          </div>
+                          {assigned && (
+                            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 text-xs">Affecté</Badge>
+                          )}
+                          {savingTeam && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Les superviseurs cochés sont directement affectés à ce site. Un email de notification leur sera envoyé si nouvellement ajoutés.
+              </p>
+
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                 <p className="text-sm font-medium text-muted-foreground">Hôtesses disponibles</p>
                 <Button
                   type="button" size="sm"
@@ -1544,7 +1709,7 @@ function SitesPageContent() {
                   <Loader2 className="w-6 h-6 animate-spin text-primary" />
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[50vh] overflow-auto pr-1">
+                <div className="space-y-2 max-h-[30vh] overflow-auto pr-1">
                   {allHotesses.length === 0 ? (
                     <div className="rounded-xl border py-8 text-center text-muted-foreground text-sm">
                       Aucune hôtesse enregistrée.
