@@ -1,4 +1,4 @@
-import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList } from "@/lib/types/backend";
+import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour } from "@/lib/types/backend";
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -22,6 +22,7 @@ export function buildCondensedBulletinHtml(
   bulletins: RapportJournalierBulletin[],
   config: RapportJournalierConfig,
   campagne: CampagneList,
+  livraisons: LivraisonGoodiesJour[] = [],
 ): string {
   const colorPrimary = campagne.couleur_primaire || "#0f766e";
   const colorSecondary = campagne.couleur_secondaire || "#0d9488";
@@ -69,13 +70,27 @@ export function buildCondensedBulletinHtml(
   const avgGout = notesGout.length ? notesGout.reduce((a, v) => a + v, 0) / notesGout.length : null;
   const avgAmbiance = notesAmbiance.length ? notesAmbiance.reduce((a, v) => a + v, 0) / notesAmbiance.length : null;
 
+  // UGs : calculées à partir des LivraisonGoodiesJour (site + date), PAS en
+  // sommant les bulletins individuels. Le bulletin individuel attribue les
+  // gains à une hôtesse précise (pour éviter les doublons quand plusieurs
+  // hôtesses partagent un site) et exclut les gains sans dégustation liée
+  // dès qu'il y a plus d'une hôtesse sur le site — ce qui fait disparaître
+  // la majorité des gains historiques une fois sommés. LivraisonGoodiesJour
+  // (via la propriété gains_du_jour, non filtrée par hôtesse) donne le vrai
+  // total, comme sur la page Ventes.
+  const siteIds = new Set(bulletins.map(b => b.site));
+  const dateSet = new Set(dates);
+  const relevantLivraisons = livraisons.filter(l => siteIds.has(l.site) && dateSet.has(l.date));
+
   const ugsRecusMap = new Map<string, number>();
   const ugsDistribuesMap = new Map<string, number>();
   const ugsRestantsMap = new Map<string, number>();
-  bulletins.forEach(b => {
-    (b.ugs_recus ?? []).forEach(u => ugsRecusMap.set(u.goodie, (ugsRecusMap.get(u.goodie) ?? 0) + u.quantite));
-    (b.ugs_distribues ?? []).forEach(u => ugsDistribuesMap.set(u.goodie, (ugsDistribuesMap.get(u.goodie) ?? 0) + u.quantite));
-    (b.ugs_restants ?? []).forEach(u => ugsRestantsMap.set(u.goodie, u.quantite)); // snapshot courant, pas cumulatif
+  relevantLivraisons.forEach(l => {
+    ugsRecusMap.set(l.goodie_nom, (ugsRecusMap.get(l.goodie_nom) ?? 0) + l.quantite_apportee);
+    ugsDistribuesMap.set(l.goodie_nom, (ugsDistribuesMap.get(l.goodie_nom) ?? 0) + l.gains_du_jour);
+  });
+  ugsRecusMap.forEach((recus, goodieNom) => {
+    ugsRestantsMap.set(goodieNom, Math.max(0, recus - (ugsDistribuesMap.get(goodieNom) ?? 0)));
   });
 
   const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnement: string; gratuites: number }>();
