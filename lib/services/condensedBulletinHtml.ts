@@ -48,8 +48,12 @@ export function buildCondensedBulletinHtml(
   // que de sommer deux compteurs qui devraient déjà être égaux.
   const totalDeg = bulletins.reduce((s, b) => s + (b.nb_degustations ?? 0), 0);
   const totalCA = bulletins.reduce((s, b) => s + Number(b.chiffre_affaires || 0), 0);
-  const totalHorsPromo = bulletins.reduce((s, b) => s + (b.ventes_hors_promo ?? 0), 0);
   const totalPersonnesTouchees = bulletins.reduce((s, b) => s + (b.nombre_personnes_touchees ?? 0), 0);
+  // totalHorsPromo : calculé plus bas directement depuis la table Vente
+  // (relevantVentes), PAS depuis les bulletins individuels — même raison que
+  // pour les goodies ci-dessous : un RapportJournalier manquant pour une
+  // hôtesse (tâche nocturne non exécutée, affectation changée depuis...) ne
+  // doit pas faire disparaître ses ventes hors promo du total condensé.
 
   const genreTotal = bulletins.reduce((acc, b) => {
     acc.hommes += b.genre_breakdown?.hommes ?? 0;
@@ -86,12 +90,23 @@ export function buildCondensedBulletinHtml(
   const siteIds = new Set(bulletins.map(b => b.site));
   const siteNoms = new Set(bulletins.map(b => b.site_nom));
   const dateSet = new Set(dates);
+  // Site id → nom (pour relier les Vente, qui ne portent que site_nom, aux
+  // clés par id utilisées par parSite/goodiesParSite).
+  const siteNomToId = new Map(bulletins.map(b => [b.site_nom, b.site]));
   const relevantGains = gainGoodies.filter(g =>
     g.campagne_nom === campagne.nom &&
     (siteIds.has(g.site) || siteNoms.has(g.site_nom)) &&
     dateSet.has(g.created_at.slice(0, 10))
   );
   const relevantLivraisons = livraisons.filter(l => siteIds.has(l.site) && dateSet.has(l.date));
+  // Ventes hors promo : directement depuis la table Vente (filtrée par
+  // campagne/site/date), pas depuis les bulletins individuels — cf. note
+  // plus haut sur totalHorsPromo.
+  const relevantVentesHorsPromo = ventes.filter(v =>
+    v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
+    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
+  );
+  const totalHorsPromo = relevantVentesHorsPromo.reduce((s, v) => s + v.quantite, 0);
 
   // Goodies (UGs) reçus/distribués/restants — détaillés par site et par
   // jour (une ligne par site+date+goodie), plutôt qu'agrégés globalement
@@ -139,8 +154,13 @@ export function buildCondensedBulletinHtml(
     if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, horsPromo: 0, ca: 0 });
     const e = parSite.get(b.site)!;
     e.deg += b.nb_degustations ?? 0;
-    e.horsPromo += b.ventes_hors_promo ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
+  });
+  relevantVentesHorsPromo.forEach(v => {
+    const siteId = siteNomToId.get(v.site_nom);
+    if (!siteId) return;
+    if (!parSite.has(siteId)) parSite.set(siteId, { siteNom: v.site_nom, deg: 0, horsPromo: 0, ca: 0 });
+    parSite.get(siteId)!.horsPromo += v.quantite;
   });
 
   // Détail des ventes (promo / hors promo) — une ligne par vente ou par
@@ -157,10 +177,9 @@ export function buildCondensedBulletinHtml(
   const relevantGainPromotions = gainPromotions.filter(g =>
     g.campagne === campagne.id && siteNoms.has(g.site_nom) && dateSet.has(g.created_at.slice(0, 10))
   );
-  const relevantVentes = ventes.filter(v =>
-    v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
-    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
-  );
+  // Même filtre que totalHorsPromo/parSite plus haut — réutilisé ici pour le
+  // détail ligne par ligne.
+  const relevantVentes = relevantVentesHorsPromo;
 
   // Un gain promo et sa vente d'achat (Vente.gain_promotion / GainPromotion.vente_achat)
   // sont deux enregistrements distincts pour le même évènement client : on les
