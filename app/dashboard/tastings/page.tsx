@@ -200,6 +200,7 @@ export default function TastingsPage() {
         intention_achat: form.intention_achat as IntentionAchat,
         a_achete: form.a_achete,
         nom_client: form.nom_client.trim() || undefined,
+        promotion_appliquee: hasPromotion,
         ...(form.a_achete && !hasPromotion && {
           conditionnement: form.conditionnement,
           quantite: form.quantite,

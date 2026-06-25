@@ -819,8 +819,11 @@ export default function CampaignDetailPage() {
     const baseValid = degForm.site && degForm.produit && degForm.tranche_age && degForm.genre;
     const noteRequired     = !!campaign?.note_gout_active;
     const ambianceRequired = !!campaign?.note_ambiance_active;
-    const hasActivePromos = (campaign?.promotions ?? []).some(p => isPromoEligibleForSite(p, degForm.site));
-    const promoChoiceValid = !isPromoMode || !hasActivePromos || degForm.promotion_selectionnee !== "";
+    // "Vente hors offre promotionnelle" est toujours disponible (cf. étape 3) :
+    // plus de pass-through quand aucune promo n'est éligible, pour forcer la
+    // saisie du conditionnement/quantité réel plutôt que de retomber sur le
+    // défaut UNITE/1 côté backend.
+    const promoChoiceValid = !isPromoMode || degForm.promotion_selectionnee !== "";
     const promoValid = (isPromoMode
       ? baseValid && (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance)
       : baseValid && (showTasting ? ((noteRequired ? degForm.note_gout : true) && (ambianceRequired ? degForm.note_ambiance : true) && degForm.intention_achat) : (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance))
@@ -832,6 +835,7 @@ export default function CampaignDetailPage() {
     setSavingDeg(true);
     try {
       const a_achete = isPromoMode ? true : false;
+      const willRegisterPromo = isPromoMode && degForm.promotion_selectionnee !== "" && degForm.promotion_selectionnee !== "__NONE__";
       const payload: CreateDegustationPayload = {
         site: degForm.site,
         produit: degForm.produit,
@@ -842,6 +846,7 @@ export default function CampaignDetailPage() {
         intention_achat: isPromoMode ? "ELEVEE" : (showTasting ? degForm.intention_achat as IntentionAchat : "MOYENNE"),
         a_achete,
         nom_client: degForm.nom_client.trim() || undefined,
+        promotion_appliquee: willRegisterPromo,
         ...(isPromoMode && degForm.promotion_selectionnee === "__NONE__" && {
           conditionnement: degForm.conditionnement,
           quantite: degForm.quantite,
@@ -850,7 +855,7 @@ export default function CampaignDetailPage() {
       const { data: created } = await api.post<Degustation>("/degustations/", payload);
 
       let selectedPromo = null;
-      if (isPromoMode && degForm.promotion_selectionnee && degForm.promotion_selectionnee !== "__NONE__") {
+      if (willRegisterPromo) {
         selectedPromo = campaign?.promotions?.find(p => p.id === degForm.promotion_selectionnee);
         if (selectedPromo) {
           try {
@@ -2391,29 +2396,39 @@ export default function CampaignDetailPage() {
               {/* ── Étape 3 : Offre (radio, rien coché par défaut) ── */}
               {degStep === 3 && showPromos && (
                 <div className="space-y-4">
-                  {(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).length > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2"><Label className="text-sm font-semibold text-blue-600">Offre promotionnelle applicable</Label><span className="text-xs text-muted-foreground">({(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).length} règle{(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).length > 1 ? "s" : ""})</span></div>
-                      <div className="space-y-2">
-                        {(campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site)).map((promo) => {
-                          const styles = PROMO_TYPE_STYLES[promo.type_promotion];
-                          const isChecked = degForm.promotion_selectionnee === promo.id;
-                          const willOpenWheel = promo.type_promotion === "TIRAGE" || promo.type_promotion === "GAGNE";
-                          return (
-                            <label key={promo.id} className={cn("flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all", isChecked ? `${styles.bg} ${styles.border} ${styles.text}` : "border-slate-200 bg-white hover:border-slate-300")}>
-                              <input type="radio" name="promotion_choice" className="mt-1 w-5 h-5 border-gray-300 text-blue-600 focus:ring-blue-500" checked={isChecked} onChange={() => setDegForm(f => ({ ...f, promotion_selectionnee: promo.id }))} />
-                              <div className="flex-1 flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center shrink-0"><span className="text-xl">{styles.icon}</span></div><div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}</span><span className="text-xs font-medium text-slate-500">→ {styles.label}</span>{willOpenWheel && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎡 Lance la roue</span>}</div><p className="font-semibold text-sm mt-1">{promo.recompense_description}</p></div></div>
-                              {isChecked && <CheckCircle2 className={cn("w-5 h-5 shrink-0", styles.text)} />}
-                            </label>
-                          );
-                        })}
+                  {(() => {
+                    const eligiblePromos = (campaign?.promotions ?? []).filter(p => isPromoEligibleForSite(p, degForm.site));
+                    return (
+                      <div className="space-y-3">
+                        {eligiblePromos.length > 0 && (
+                          <>
+                            <div className="flex items-center gap-2"><Label className="text-sm font-semibold text-blue-600">Offre promotionnelle applicable</Label><span className="text-xs text-muted-foreground">({eligiblePromos.length} règle{eligiblePromos.length > 1 ? "s" : ""})</span></div>
+                            <div className="space-y-2">
+                              {eligiblePromos.map((promo) => {
+                                const styles = PROMO_TYPE_STYLES[promo.type_promotion];
+                                const isChecked = degForm.promotion_selectionnee === promo.id;
+                                const willOpenWheel = promo.type_promotion === "TIRAGE" || promo.type_promotion === "GAGNE";
+                                return (
+                                  <label key={promo.id} className={cn("flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all", isChecked ? `${styles.bg} ${styles.border} ${styles.text}` : "border-slate-200 bg-white hover:border-slate-300")}>
+                                    <input type="radio" name="promotion_choice" className="mt-1 w-5 h-5 border-gray-300 text-blue-600 focus:ring-blue-500" checked={isChecked} onChange={() => setDegForm(f => ({ ...f, promotion_selectionnee: promo.id }))} />
+                                    <div className="flex-1 flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white/60 flex items-center justify-center shrink-0"><span className="text-xl">{styles.icon}</span></div><div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{promo.quantite_requise} acheté{promo.quantite_requise > 1 ? "s" : ""}</span><span className="text-xs font-medium text-slate-500">→ {styles.label}</span>{willOpenWheel && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">🎡 Lance la roue</span>}</div><p className="font-semibold text-sm mt-1">{promo.recompense_description}</p></div></div>
+                                    {isChecked && <CheckCircle2 className={cn("w-5 h-5 shrink-0", styles.text)} />}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                        {/* Toujours disponible, même sans promo éligible : une hôtesse doit
+                            pouvoir enregistrer une vente hors promo dans tous les cas (sinon
+                            la vente reste invisible des rapports, cf. conditionnement plus bas). */}
+                        <label className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-white hover:border-slate-300 cursor-pointer">
+                          <input type="radio" name="promotion_choice" className="w-5 h-5 border-gray-300" checked={degForm.promotion_selectionnee === "__NONE__"} onChange={() => setDegForm(f => ({ ...f, promotion_selectionnee: "__NONE__" }))} />
+                          <span className="text-sm font-medium text-slate-700">Vente hors offre promotionnelle</span>
+                        </label>
                       </div>
-                      <label className="flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 bg-white hover:border-slate-300 cursor-pointer">
-                        <input type="radio" name="promotion_choice" className="w-5 h-5 border-gray-300" checked={degForm.promotion_selectionnee === "__NONE__"} onChange={() => setDegForm(f => ({ ...f, promotion_selectionnee: "__NONE__" }))} />
-                        <span className="text-sm font-medium text-slate-700">Vente hors offre promotionnelle</span>
-                      </label>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Quantité vendue (vente hors offre promotionnelle) */}
                   {degForm.promotion_selectionnee === "__NONE__" && (

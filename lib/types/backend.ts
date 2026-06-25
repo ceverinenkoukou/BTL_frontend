@@ -337,6 +337,10 @@ export interface CreateDegustationPayload {
   a_achete: boolean;
   conditionnement?: TypeConditionnement;
   quantite?: number;
+  // true si un gain promotionnel va être enregistré juste après (POST
+  // /promotions/{id}/enregistrer-gain/) — évite que le backend crée une
+  // Vente NORMAL en double en l'absence de conditionnement.
+  promotion_appliquee?: boolean;
 }
 
 export interface MonSiteInfo {
