@@ -1,4 +1,4 @@
-import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente } from "@/lib/types/backend";
+import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente, Degustation } from "@/lib/types/backend";
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -26,6 +26,7 @@ export function buildCondensedBulletinHtml(
   gainGoodies: GainGoodie[] = [],
   gainPromotions: GainPromotion[] = [],
   ventes: Vente[] = [],
+  degustations: Degustation[] = [],
 ): string {
   const colorPrimary = campagne.couleur_primaire || "#0f766e";
   const colorSecondary = campagne.couleur_secondaire || "#0d9488";
@@ -50,10 +51,10 @@ export function buildCondensedBulletinHtml(
   const totalCA = bulletins.reduce((s, b) => s + Number(b.chiffre_affaires || 0), 0);
   const totalPersonnesTouchees = bulletins.reduce((s, b) => s + (b.nombre_personnes_touchees ?? 0), 0);
   // totalHorsPromo : calculé plus bas directement depuis la table Vente
-  // (relevantVentes), PAS depuis les bulletins individuels — même raison que
-  // pour les goodies ci-dessous : un RapportJournalier manquant pour une
-  // hôtesse (tâche nocturne non exécutée, affectation changée depuis...) ne
-  // doit pas faire disparaître ses ventes hors promo du total condensé.
+  // (relevantVentesHorsPromo), PAS depuis les bulletins individuels — même
+  // raison que pour les goodies ci-dessous : un RapportJournalier manquant
+  // pour une hôtesse (tâche nocturne non exécutée, affectation changée
+  // depuis...) ne doit pas faire disparaître ses ventes hors promo du total.
 
   const genreTotal = bulletins.reduce((acc, b) => {
     acc.hommes += b.genre_breakdown?.hommes ?? 0;
@@ -163,57 +164,45 @@ export function buildCondensedBulletinHtml(
     parSite.get(siteId)!.horsPromo += v.quantite;
   });
 
-  // Détail des ventes (promo / hors promo) — une ligne par vente ou par
-  // gain promotionnel, avec le client, le produit (le cas échéant), le
-  // conditionnement, la quantité achetée et — pour les gains promo —
-  // l'offre appliquée et la quantité réellement offerte. Une promotion
-  // n'est pas liée à un produit précis dans ce modèle de données (la règle
-  // est générique : "achetez X, obtenez Y offerts"), donc Produit reste
-  // vide sur ces lignes-là.
+  // Détail des dégustations — une ligne par dégustation du jour, sur TOUS
+  // les sites de la campagne (filtré uniquement par campagne + date, pas par
+  // siteNoms : un site sans bulletin généré ne doit pas perdre ses lignes).
+  // L'achat (le cas échéant) et son type (hors promo / promo / goodie) sont
+  // résolus via la Vente liée (Degustation.vente), puis le détail de l'offre
+  // via GainPromotion.vente_achat pour les ventes de type PROMOTION.
   type VenteRow = {
-    site: string; date: string; client: string; produit: string;
+    site: string; date: string; client: string; produit: string; achat: boolean;
     conditionnement: string; quantiteAchetee: number; offre: string; quantiteOfferte: number | null;
   };
-  const relevantGainPromotions = gainPromotions.filter(g =>
-    g.campagne === campagne.id && siteNoms.has(g.site_nom) && dateSet.has(g.created_at.slice(0, 10))
+  const ventesById = new Map(ventes.map(v => [v.id, v]));
+  const gainsByVenteId = new Map(
+    gainPromotions.filter(g => g.vente_achat).map(g => [g.vente_achat as string, g])
   );
-  // Même filtre que totalHorsPromo/parSite plus haut — réutilisé ici pour le
-  // détail ligne par ligne.
-  const relevantVentes = relevantVentesHorsPromo;
+  const relevantDegustations = degustations.filter(d =>
+    d.campagne_nom === campagne.nom && dateSet.has(d.created_at.slice(0, 10))
+  );
 
-  // Un gain promo et sa vente d'achat (Vente.gain_promotion / GainPromotion.vente_achat)
-  // sont deux enregistrements distincts pour le même évènement client : on les
-  // fusionne en une seule ligne plutôt que d'afficher l'achat et l'offre séparément.
-  const ventesById = new Map(relevantVentes.map(v => [v.id, v]));
-  const consumedVenteIds = new Set<string>();
-  const venteRows: VenteRow[] = [];
-
-  relevantGainPromotions.forEach(g => {
-    const vente = g.vente_achat ? ventesById.get(g.vente_achat) : undefined;
-    if (vente) {
-      consumedVenteIds.add(vente.id);
-      venteRows.push({
-        site: vente.site_nom, date: vente.created_at.slice(0, 10), client: vente.nom_client || g.nom_client || "—",
-        produit: vente.produit_nom, conditionnement: vente.conditionnement_display,
-        quantiteAchetee: vente.quantite, offre: g.promotion_description, quantiteOfferte: g.quantite_offerte,
-      });
-    } else {
-      // Pas de vente_achat liée (promo sans produit associé, ex: TIRAGE) :
-      // on affiche le gain seul avec les données qu'il porte directement.
-      venteRows.push({
-        site: g.site_nom, date: g.created_at.slice(0, 10), client: g.nom_client || "—",
-        produit: "—", conditionnement: g.conditionnement_display || g.conditionnement,
-        quantiteAchetee: g.quantite_produits_concernes, offre: g.promotion_description, quantiteOfferte: g.quantite_offerte,
-      });
+  const venteRows: VenteRow[] = relevantDegustations.map(d => {
+    if (!d.a_achete || !d.vente) {
+      return {
+        site: d.site_nom, date: d.created_at.slice(0, 10), client: d.nom_client || "—",
+        produit: d.produit_nom, achat: false,
+        conditionnement: "—", quantiteAchetee: 0, offre: "—", quantiteOfferte: null,
+      };
     }
-  });
-  relevantVentes.forEach(v => {
-    if (consumedVenteIds.has(v.id)) return;
-    venteRows.push({
-      site: v.site_nom, date: v.created_at.slice(0, 10), client: v.nom_client || "—",
-      produit: v.produit_nom, conditionnement: v.conditionnement_display, quantiteAchetee: v.quantite,
-      offre: "—", quantiteOfferte: null,
-    });
+    const venteFull = ventesById.get(d.vente.id);
+    const typeVente = venteFull?.type_vente;
+    const gain = gainsByVenteId.get(d.vente.id);
+    const offre = gain
+      ? gain.promotion_description
+      : typeVente === "GRATUIT" ? "Offert (goodie)" : "—";
+    return {
+      site: d.site_nom, date: d.created_at.slice(0, 10),
+      client: d.nom_client || venteFull?.nom_client || gain?.nom_client || "—",
+      produit: d.produit_nom, achat: true,
+      conditionnement: d.vente.conditionnement_display, quantiteAchetee: d.vente.quantite,
+      offre, quantiteOfferte: gain?.quantite_offerte ?? null,
+    };
   });
   venteRows.sort((a, b) => a.date === b.date ? a.site.localeCompare(b.site) : a.date.localeCompare(b.date));
 
@@ -238,9 +227,9 @@ export function buildCondensedBulletinHtml(
 
   if (config.show_ventes_detail && venteRows.length > 0) {
     sections.push(`
-      <h2 class="section-title">Détail des ventes (promo / hors promo)</h2>
-      <table><thead><tr><th>Site</th><th>Date</th><th>Client</th><th>Produit</th><th>Conditionnement</th><th class="r">Qté achetée</th><th>Offre appliquée</th><th class="r">Qté offerte</th></tr></thead>
-      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte ?? "—"}</td></tr>`).join("")}</tbody></table>`);
+      <h2 class="section-title">Détail des dégustations (achat / promo / hors promo)</h2>
+      <table><thead><tr><th>Site</th><th>Date</th><th>Client</th><th>Produit</th><th>Achat</th><th>Conditionnement</th><th class="r">Qté achetée</th><th>Offre appliquée</th><th class="r">Qté offerte</th></tr></thead>
+      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${r.achat ? "Oui" : "Non"}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte ?? "—"}</td></tr>`).join("")}</tbody></table>`);
   }
 
   if (config.show_genre) {

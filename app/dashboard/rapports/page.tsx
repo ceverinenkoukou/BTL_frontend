@@ -18,7 +18,7 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { cn } from "@/lib/utils";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import api, { invalidateCache } from "@/lib/api";
-import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente } from "@/lib/types/backend";
+import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente, Degustation } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
 import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
 import { buildBulletinHtml } from "@/lib/services/rapportBulletinHtml";
@@ -217,7 +217,7 @@ function RapportsPageContent() {
       // périmés si des données ont été corrigées juste avant de regénérer
       // (y compris en rouvrant une entrée archivée) — on force du frais.
       invalidateCache();
-      const [bulletinResults, configRes, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes] = await Promise.all([
+      const [bulletinResults, configRes, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes, degustationsRes] = await Promise.all([
         Promise.all(rapportIds.map(id => getBulletin(id).catch(() => null))),
         api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
           `/rapport-journalier-configs/par-campagne/?campagne=${campagneId}`
@@ -232,6 +232,12 @@ function RapportsPageContent() {
           .then(r => unwrapList<GainPromotion>(r.data)).catch(() => []),
         api.get<Vente[]>(`/ventes/?campagne=${campagneId}`)
           .then(r => unwrapList<Vente>(r.data)).catch(() => []),
+        // Pas de filtre serveur par campagne sur cette route non plus : filtré
+        // côté client dans buildCondensedBulletinHtml. Sert à construire le
+        // détail ligne par ligne sans dépendre des bulletins existants (un
+        // site sans RapportJournalier généré garde quand même ses lignes).
+        api.get<Degustation[]>(`/degustations/`)
+          .then(r => unwrapList<Degustation>(r.data)).catch(() => []),
       ]);
 
       const bulletins = bulletinResults.filter((b): b is NonNullable<typeof b> => b !== null);
@@ -246,7 +252,7 @@ function RapportsPageContent() {
       const config: RapportJournalierConfig =
         configRes && !("defaults" in configRes) ? configRes : { ...DEFAULT_RAPPORT_JOURNALIER_CONFIG };
 
-      const html = buildCondensedBulletinHtml(bulletins, config, campagne, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes);
+      const html = buildCondensedBulletinHtml(bulletins, config, campagne, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes, degustationsRes);
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const win = window.open(url, "_blank");
