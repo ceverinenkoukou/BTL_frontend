@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, type ComponentType } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -13,6 +13,7 @@ import type {
   Degustation,
   Vente,
   GainPromotion,
+  GainGoodie,
 } from "@/lib/types/backend";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,8 +40,6 @@ import {
   ArrowUp,
   Package,
   Activity,
-  Beer,
-  FileText,
   ChevronDown,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -49,6 +48,9 @@ import {
   Area,
   BarChart,
   Bar,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -56,7 +58,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { format, parseISO, subDays } from "date-fns";
+import { format, parseISO, subDays, differenceInCalendarDays } from "date-fns";
 import { fr } from "date-fns/locale";
 
 const COLORS = {
@@ -95,25 +97,46 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   );
 }
 
-function GaugeBar({ label, current, total, color, gradient }: {
-  label: string; current: number; total: number; color: string; gradient: string;
+function GaugeBar({ label, current, total, color, gradient, icon: Icon }: {
+  label: string; current: number; total: number; color: string; gradient: string; icon?: ComponentType<{ className?: string }>;
 }) {
   const pct = total > 0 ? Math.min(Math.round((current / total) * 100), 100) : 0;
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="text-sm font-bold" style={{ color }}>{fmt(current)} <span className="text-muted-foreground font-normal text-xs">/ {fmt(total)}</span></span>
+        <span className="text-sm font-medium text-foreground flex items-center gap-2">
+          {Icon && (
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: hex(color, 0.12) }}>
+              <Icon className="w-3.5 h-3.5" />
+            </span>
+          )}
+          {label}
+        </span>
+        <span className="text-xs font-bold px-2 py-1 rounded-full" style={{ background: hex(color, 0.12), color }}>{pct}%</span>
       </div>
-      <div className="h-4 bg-slate-100 rounded-full overflow-hidden relative">
+      <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-1000 ease-out bg-gradient-to-r ${gradient}`}
           style={{ width: `${pct}%` }}
         />
-        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-700">{pct}%</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span><span className="font-semibold" style={{ color }}>{fmt(current)}</span> réalisés</span>
+        <span>Objectif : {fmt(total)}</span>
       </div>
     </div>
   );
+}
+
+type ActionType = "deg" | "vente" | "promo" | "goodie";
+
+function actionStyle(type: ActionType) {
+  switch (type) {
+    case "deg": return { dot: "bg-red-100", text: "text-red-600" };
+    case "vente": return { dot: "bg-amber-100", text: "text-amber-600" };
+    case "promo": return { dot: "bg-blue-100", text: "text-blue-600" };
+    case "goodie": return { dot: "bg-emerald-100", text: "text-emerald-600" };
+  }
 }
 
 interface DailyData {
@@ -139,20 +162,21 @@ export default function CompanyCampaignDetailPage() {
   const [ventes, setVentes] = useState<Vente[]>([]);
   const [siteDetails, setSiteDetails] = useState<SiteDetail[]>([]);
   const [gainsPromotions, setGainsPromotions] = useState<GainPromotion[]>([]);
+  const [gainsGoodies, setGainsGoodies] = useState<GainGoodie[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [showAllActions, setShowAllActions] = useState(false);
-  const promoChartRef = useRef<HTMLDivElement>(null);
 
   const fetchCampaignData = useCallback(async () => {
     if (!campaignId) return;
     setLoading(true);
     try {
-      const [campRes, rapportRes, tastRes, ventesRes, gainsRes] = await Promise.all([
+      const [campRes, rapportRes, tastRes, ventesRes, gainsRes, gainsGoodiesRes] = await Promise.all([
         api.get<CampagneDetail>(`/campagnes/${campaignId}/`),
         api.get<CampagneRapportSites>(`/campagnes/${campaignId}/rapport-sites/`).catch(() => ({ data: null })),
         api.get<Degustation[]>(`/degustations/?campagne=${campaignId}`),
         api.get<Vente[]>(`/ventes/?campagne=${campaignId}`),
         api.get<GainPromotion[]>(`/gains-promotions/?campagne=${campaignId}`).catch(() => ({ data: [] })),
+        api.get<GainGoodie[]>(`/gains-goodies/?campagne=${campaignId}`).catch(() => ({ data: [] })),
       ]);
       setCampaign(campRes.data);
       setRapport(rapportRes.data as CampagneRapportSites | null);
@@ -160,6 +184,8 @@ export default function CompanyCampaignDetailPage() {
       setVentes(Array.isArray(ventesRes.data) ? ventesRes.data : (ventesRes.data as { results?: Vente[] }).results ?? []);
       const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data as { results?: GainPromotion[] }).results ?? [];
       setGainsPromotions(gainsData);
+      const gainsGoodiesData = Array.isArray(gainsGoodiesRes.data) ? gainsGoodiesRes.data : (gainsGoodiesRes.data as { results?: GainGoodie[] }).results ?? [];
+      setGainsGoodies(gainsGoodiesData);
 
       // Fetch site details with team info
       if (rapportRes.data && (rapportRes.data as CampagneRapportSites).sites?.length) {
@@ -192,6 +218,7 @@ export default function CompanyCampaignDetailPage() {
   }, [campaign]);
 
   const { showTasting, showVente, showGoodies, showPromotions } = showMetrics;
+  const showPacks = ventes.some(v => v.conditionnement === "PACK");
 
   const stats = useMemo(() => {
     const totalTastings = tastings.length;
@@ -206,8 +233,21 @@ export default function CompanyCampaignDetailPage() {
     const totalGoodiesAlloues = rapport?.sites?.reduce((sum, site) =>
       sum + (site.goodies ?? []).reduce((s, g) => s + g.quantite_initiale, 0), 0) ?? 0;
     const gainsPromotions = (rapport?.totaux as { gains_promotions?: number })?.gains_promotions ?? 0;
-    return { totalTastings, totalVentes, totalRevenue, conversionRate, avgRating, goodiesDistribues, totalGoodiesAlloues, gainsPromotions };
+    const totalPacks = ventes.filter(v => v.conditionnement === "PACK").length;
+    return { totalTastings, totalVentes, totalRevenue, conversionRate, avgRating, goodiesDistribues, totalGoodiesAlloues, gainsPromotions, totalPacks };
   }, [tastings, ventes, rapport]);
+
+  const dateInfo = useMemo(() => {
+    if (!campaign) return { joursEcoules: 0, joursRestants: 0, dureeJours: 0, nbEquipe: 0 };
+    const today = new Date();
+    const start = parseISO(campaign.date_debut);
+    const end = parseISO(campaign.date_fin);
+    const dureeJours = Math.max(1, differenceInCalendarDays(end, start) + 1);
+    const joursEcoules = Math.min(dureeJours, Math.max(0, differenceInCalendarDays(today, start) + 1));
+    const joursRestants = Math.max(0, differenceInCalendarDays(end, today));
+    const nbEquipe = (campaign.hotesses?.length ?? 0) + (campaign.superviseurs?.length ?? 0);
+    return { joursEcoules, joursRestants, dureeJours, nbEquipe };
+  }, [campaign]);
 
   const dailyData: DailyData[] = useMemo(() => {
     const days = 14;
@@ -244,76 +284,92 @@ export default function CompanyCampaignDetailPage() {
     }));
   }, [rapport, tastings, ventes, todayStr]);
 
-  const promoChartData = useMemo(() => {
-    if (!gainsPromotions.length) return [];
-    const map: Record<string, Record<string, number>> = {};
-    const promoLabels = new Set<string>();
-    gainsPromotions.forEach(g => {
-      const d = g.created_at.slice(0, 10);
-      const label = g.promotion_description;
-      promoLabels.add(label);
-      if (!map[d]) map[d] = {};
-      map[d][label] = (map[d][label] || 0) + 1;
+  const genreData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tastings.forEach(t => { counts[t.genre_display] = (counts[t.genre_display] ?? 0) + 1; });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [tastings]);
+
+  const ageData = useMemo(() => {
+    const order: string[] = [];
+    const counts: Record<string, number> = {};
+    tastings.forEach(t => {
+      if (!(t.tranche_age_display in counts)) order.push(t.tranche_age_display);
+      counts[t.tranche_age_display] = (counts[t.tranche_age_display] ?? 0) + 1;
     });
-    const labels = Array.from(promoLabels);
-    return Object.entries(map)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, counts]) => {
-        const row: Record<string, string | number> = {
-          date: format(parseISO(date), "dd MMM", { locale: fr }),
-        };
-        labels.forEach(l => { row[l] = counts[l] || 0; });
-        return row;
+    return order.sort().map(tranche => ({ tranche, total: counts[tranche] }));
+  }, [tastings]);
+
+  const produitsRanking = useMemo(() => {
+    if (!rapport) return [];
+    const map: Record<string, { degustations: number; ventes: number }> = {};
+    rapport.sites.forEach(site => {
+      (site.produits ?? []).forEach(p => {
+        if (!map[p.produit_nom]) map[p.produit_nom] = { degustations: 0, ventes: 0 };
+        map[p.produit_nom].degustations += p.degustations;
+        map[p.produit_nom].ventes += p.ventes;
       });
-  }, [gainsPromotions]);
+    });
+    return Object.entries(map)
+      .map(([nom, v]) => ({ nom, ...v, total: v.degustations + v.ventes }))
+      .sort((a, b) => b.total - a.total);
+  }, [rapport]);
 
-  const promoLabels = useMemo(() => {
-    const labels = new Set<string>();
-    gainsPromotions.forEach(g => labels.add(g.promotion_description));
-    return Array.from(labels);
-  }, [gainsPromotions]);
+  const mecaniquePromoSites = useMemo(() => {
+    if (!rapport) return [];
+    return rapport.sites
+      .map(site => ({
+        nom: site.nom,
+        vendus: ventes.filter(v => v.site_nom === site.nom && v.type_vente === "NORMAL").length,
+        offerts: gainsPromotions.filter(g => g.site_nom === site.nom && g.type_promotion === "OFFERT").length,
+        goodies: gainsPromotions.filter(g => g.site_nom === site.nom && g.type_promotion === "GAGNE").length,
+        tirages: gainsPromotions.filter(g => g.site_nom === site.nom && g.type_promotion === "TIRAGE").length,
+      }))
+      .filter(s => s.vendus + s.offerts + s.goodies + s.tirages > 0);
+  }, [rapport, ventes, gainsPromotions]);
 
-  const handleExportPromoPdf = useCallback(() => {
-    const el = promoChartRef.current;
-    if (!el) return;
-    const svgElement = el.querySelector("svg");
-    if (!svgElement) return;
+  const mecaniquePromoTotaux = useMemo(() => {
+    const vendus = ventes.filter(v => v.type_vente === "NORMAL").length;
+    const offerts = gainsPromotions.filter(g => g.type_promotion === "OFFERT").length;
+    const goodies = gainsPromotions.filter(g => g.type_promotion === "GAGNE").length;
+    const tirages = gainsPromotions.filter(g => g.type_promotion === "TIRAGE").length;
+    return { vendus, offerts, goodies, tirages };
+  }, [ventes, gainsPromotions]);
 
-    const svgData = new XMLSerializer().serializeToString(svgElement);
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    const img = new Image();
+  const [selectedMecaniqueSite, setSelectedMecaniqueSite] = useState<string>("");
 
-    const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
+  useEffect(() => {
+    if (!selectedMecaniqueSite && mecaniquePromoSites.length > 0) {
+      setSelectedMecaniqueSite(mecaniquePromoSites[0].nom);
+    }
+  }, [mecaniquePromoSites, selectedMecaniqueSite]);
 
-    img.onload = () => {
-      canvas.width = img.width * 2;
-      canvas.height = img.height * 2;
-      ctx!.fillStyle = "#ffffff";
-      ctx!.fillRect(0, 0, canvas.width, canvas.height);
-      ctx!.scale(2, 2);
-      ctx!.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
+  const mecaniqueSiteDaily = useMemo(() => {
+    if (!selectedMecaniqueSite) return [];
+    const dates = new Set<string>();
+    ventes.forEach(v => { if (v.site_nom === selectedMecaniqueSite) dates.add(v.created_at.slice(0, 10)); });
+    gainsPromotions.forEach(g => { if (g.site_nom === selectedMecaniqueSite) dates.add(g.created_at.slice(0, 10)); });
+    return Array.from(dates).sort().map(d => ({
+      date: format(parseISO(d), "dd MMM", { locale: fr }),
+      vendus: ventes.filter(v => v.site_nom === selectedMecaniqueSite && v.type_vente === "NORMAL" && v.created_at.slice(0, 10) === d).length,
+      offerts: gainsPromotions.filter(g => g.site_nom === selectedMecaniqueSite && g.type_promotion === "OFFERT" && g.created_at.slice(0, 10) === d).length,
+      goodies: gainsPromotions.filter(g => g.site_nom === selectedMecaniqueSite && g.type_promotion === "GAGNE" && g.created_at.slice(0, 10) === d).length,
+      tirages: gainsPromotions.filter(g => g.site_nom === selectedMecaniqueSite && g.type_promotion === "TIRAGE" && g.created_at.slice(0, 10) === d).length,
+    }));
+  }, [selectedMecaniqueSite, ventes, gainsPromotions]);
 
-      const imgData = canvas.toDataURL("image/png");
-      const printWindow = window.open("", "_blank");
-      if (printWindow) {
-        printWindow.document.write(`
-          <html><head><title>Écoulements promotionnels - ${campaign?.nom ?? ""}</title>
-          <style>body{margin:20px;font-family:sans-serif;text-align:center;}h2{margin-bottom:20px;}img{max-width:100%;}</style>
-          </head><body>
-          <h2>Écoulements des offres promotionnelles</h2>
-          <p style="color:#666;margin-bottom:16px;">${campaign?.nom ?? ""} — Exporté le ${format(new Date(), "dd/MM/yyyy à HH:mm", { locale: fr })}</p>
-          <img src="${imgData}" />
-          <script>setTimeout(()=>{window.print();window.close();},500)</script>
-          </body></html>
-        `);
-        printWindow.document.close();
+  const promoGainCounts = useMemo(() => {
+    const map: Record<string, { gains: number; unitesOffertes: number; tirages: number }> = {};
+    gainsPromotions.forEach(g => {
+      if (!map[g.promotion]) map[g.promotion] = { gains: 0, unitesOffertes: 0, tirages: 0 };
+      if (g.type_promotion === "TIRAGE") map[g.promotion].tirages += 1;
+      else {
+        map[g.promotion].gains += 1;
+        map[g.promotion].unitesOffertes += g.quantite_offerte;
       }
-    };
-    img.src = url;
-  }, [campaign]);
+    });
+    return map;
+  }, [gainsPromotions]);
 
   const handleExport = useCallback(() => {
     if (!selectedDate || !campaign) return;
@@ -367,6 +423,19 @@ export default function CompanyCampaignDetailPage() {
             <p className="text-white/80 text-sm mt-1">
               Du {format(parseISO(campaign.date_debut), "dd MMM yyyy", { locale: fr })} au {format(parseISO(campaign.date_fin), "dd MMM yyyy", { locale: fr })}
             </p>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              {[
+                { label: "j. écoulés", value: dateInfo.joursEcoules },
+                { label: "j. restants", value: dateInfo.joursRestants },
+                { label: "PDV actifs", value: rapport?.sites.length ?? 0 },
+                { label: "équipe", value: dateInfo.nbEquipe },
+              ].map((chip) => (
+                <div key={chip.label} className="flex items-center gap-1.5 bg-white/15 backdrop-blur-sm rounded-lg px-3 py-1.5">
+                  <span className="text-sm font-bold">{fmt(chip.value)}</span>
+                  <span className="text-xs text-white/70">{chip.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-xl p-2">
             <Calendar className="w-4 h-4 text-white/70 ml-2" />
@@ -394,7 +463,6 @@ export default function CompanyCampaignDetailPage() {
           <TabsTrigger value="global" className="gap-1.5 rounded-lg"><BarChart3 className="w-4 h-4" />Vue globale</TabsTrigger>
           <TabsTrigger value="sites" className="gap-1.5 rounded-lg"><MapPin className="w-4 h-4" />Sites</TabsTrigger>
           <TabsTrigger value="actions" className="gap-1.5 rounded-lg"><Activity className="w-4 h-4" />Actions</TabsTrigger>
-          <TabsTrigger value="rapports" className="gap-1.5 rounded-lg"><FileText className="w-4 h-4" />Rapports</TabsTrigger>
         </TabsList>
 
         <TabsContent value="global" className="space-y-6">
@@ -413,7 +481,7 @@ export default function CompanyCampaignDetailPage() {
                 </span>
               </div>
               <div className="text-2xl font-bold">{fmt(stats.totalTastings)}</div>
-              <p className="text-white/80 text-xs mt-1">Dégustations</p>
+              <p className="text-white/80 text-xs mt-1">Interactions consommateurs</p>
             </div>
           </div>
         )}
@@ -430,7 +498,7 @@ export default function CompanyCampaignDetailPage() {
                 </span>
               </div>
               <div className="text-2xl font-bold">{fmt(stats.totalVentes)}</div>
-              <p className="text-white/80 text-xs mt-1">Ventes / Distributions</p>
+              <p className="text-white/80 text-xs mt-1">Distributions réalisées</p>
             </div>
           </div>
         )}
@@ -464,7 +532,21 @@ export default function CompanyCampaignDetailPage() {
                 </span>
               </div>
               <div className="text-2xl font-bold">{fmt(stats.gainsPromotions)}</div>
-              <p className="text-white/80 text-xs mt-1">Canettes offertes</p>
+              <p className="text-white/80 text-xs mt-1">Récompenses offertes</p>
+            </div>
+          </div>
+        )}
+        {showPacks && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 via-purple-500 to-fuchsia-400 p-5 text-white shadow-xl shadow-violet-200/40 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
+            <div className="absolute -right-3 -bottom-3 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 bg-white/25 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  <Package className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="text-2xl font-bold">{fmt(stats.totalPacks)}</div>
+              <p className="text-white/80 text-xs mt-1">Packs distribués</p>
             </div>
           </div>
         )}
@@ -495,11 +577,12 @@ export default function CompanyCampaignDetailPage() {
         <CardContent className="p-5 space-y-5">
           {showVente && campaign.objectif_ventes && (
             <GaugeBar
-              label="Ventes / Distributions"
+              label="Distribution réalisée"
               current={stats.totalVentes}
               total={campaign.objectif_ventes}
               color={COLORS.secondary}
               gradient="from-amber-500 to-yellow-400"
+              icon={ShoppingCart}
             />
           )}
           {showTasting && campaign.objectif_degustations && (
@@ -509,6 +592,7 @@ export default function CompanyCampaignDetailPage() {
               total={campaign.objectif_degustations}
               color={COLORS.primary}
               gradient="from-red-500 to-orange-400"
+              icon={UtensilsCrossed}
             />
           )}
           {showGoodies && stats.totalGoodiesAlloues > 0 && (
@@ -518,15 +602,7 @@ export default function CompanyCampaignDetailPage() {
               total={stats.totalGoodiesAlloues}
               color={COLORS.success}
               gradient="from-emerald-500 to-teal-400"
-            />
-          )}
-          {showPromotions && (
-            <GaugeBar
-              label="Canettes offertes (Promotions)"
-              current={stats.gainsPromotions}
-              total={campaign.objectif_ventes ?? 50}
-              color={COLORS.info}
-              gradient="from-blue-500 to-cyan-400"
+              icon={Gift}
             />
           )}
         </CardContent>
@@ -542,19 +618,30 @@ export default function CompanyCampaignDetailPage() {
           </CardHeader>
           <CardContent className="p-4">
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {campaign.promotions.filter((p) => p.is_active).map((promo) => (
-                <div key={promo.id} className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-2">
-                  <Badge className="text-[10px]"
-                    style={{
-                      background: promo.type_promotion === "OFFERT" ? hex("#10B981", 0.2) : hex("#F59E0B", 0.2),
-                      color: promo.type_promotion === "OFFERT" ? "#10B981" : "#F59E0B",
-                    }}>
-                    {promo.type_promotion === "OFFERT" ? "🎁 Offert" : "🏆 À gagner"}
-                  </Badge>
-                  <p className="font-medium text-sm">Achetez <span className="text-blue-700 font-bold">{promo.quantite_requise}</span> produit{promo.quantite_requise > 1 ? "s" : ""}</p>
-                  <p className="text-sm text-muted-foreground">→ {promo.recompense_description}</p>
-                </div>
-              ))}
+              {campaign.promotions.filter((p) => p.is_active).map((promo) => {
+                const counts = promoGainCounts[promo.id] ?? { gains: 0, unitesOffertes: 0, tirages: 0 };
+                return (
+                  <div key={promo.id} className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-2">
+                    <Badge className="text-[10px]"
+                      style={{
+                        background: promo.type_promotion === "OFFERT" ? hex("#10B981", 0.2) : hex("#F59E0B", 0.2),
+                        color: promo.type_promotion === "OFFERT" ? "#10B981" : "#F59E0B",
+                      }}>
+                      {promo.type_promotion === "TIRAGE" ? "🎡 Tirage" : promo.type_promotion === "OFFERT" ? "🎁 Offert" : "🏆 À gagner"}
+                    </Badge>
+                    <p className="font-medium text-sm">Achetez <span className="text-blue-700 font-bold">{promo.quantite_requise}</span> produit{promo.quantite_requise > 1 ? "s" : ""}</p>
+                    <p className="text-sm text-muted-foreground">→ {promo.recompense_description}</p>
+                    <div className="flex items-center justify-between pt-1 border-t border-blue-100 text-xs">
+                      <span className="text-muted-foreground">
+                        {promo.type_promotion === "TIRAGE" ? "Tirages effectués" : "Gains enregistrés"}
+                      </span>
+                      <span className="font-bold text-blue-700">
+                        {fmt(promo.type_promotion === "TIRAGE" ? counts.tirages : counts.gains)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -580,18 +667,116 @@ export default function CompanyCampaignDetailPage() {
               <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
               <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} cursor={{ stroke: "rgba(0,0,0,0.06)", strokeWidth: 2 }} />
-              {showTasting && <Area type="monotone" dataKey="degustations" stroke={COLORS.primary} strokeWidth={2} fill="url(#gradTastings)" name="Dégustations" dot={false} activeDot={{ r: 5 }} />}
-              {showVente && <Area type="monotone" dataKey="ventes" stroke={COLORS.secondary} strokeWidth={2} fill="url(#gradVentes)" name="Ventes" dot={false} activeDot={{ r: 5 }} />}
-              {showGoodies && <Area type="monotone" dataKey="goodiesDistribues" stroke={COLORS.success} strokeWidth={2} fill="url(#gradGoodies)" name="Goodies" dot={false} activeDot={{ r: 5 }} />}
-              {showPromotions && <Area type="monotone" dataKey="gainsPromotions" stroke={COLORS.info} strokeWidth={2} fill="url(#gradPromos)" name="Canettes offertes" dot={false} activeDot={{ r: 5 }} />}
+              {showTasting && <Area key="degustations" type="monotone" dataKey="degustations" stroke={COLORS.primary} strokeWidth={2} fill="url(#gradTastings)" name="Dégustations" dot={false} activeDot={{ r: 5 }} />}
+              {showVente && <Area key="ventes" type="monotone" dataKey="ventes" stroke={COLORS.secondary} strokeWidth={2} fill="url(#gradVentes)" name="Ventes" dot={false} activeDot={{ r: 5 }} />}
+              {showGoodies && <Area key="goodiesDistribues" type="monotone" dataKey="goodiesDistribues" stroke={COLORS.success} strokeWidth={2} fill="url(#gradGoodies)" name="Goodies" dot={false} activeDot={{ r: 5 }} />}
+              {showPromotions && <Area key="gainsPromotions" type="monotone" dataKey="gainsPromotions" stroke={COLORS.info} strokeWidth={2} fill="url(#gradPromos)" name="Récompenses offertes" dot={false} activeDot={{ r: 5 }} />}
               <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "16px" }} />
             </AreaChart>
           </ResponsiveContainer>
         </div></div></CardContent>
       </Card>
+
+      {genreData.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-4">
+          <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Users className="w-4 h-4" style={{ color: p1 }} /> Profil consommateurs
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={genreData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
+                      {genreData.map((entry, idx) => (
+                        <Cell key={entry.name} fill={idx === 0 ? p1 : p2} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: "12px" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Users className="w-4 h-4" style={{ color: p1 }} /> Tranches d&apos;âge
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={ageData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                    <XAxis dataKey="tranche" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
+                    <Bar dataKey="total" name="Dégustations" fill={p1} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {produitsRanking.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Package className="w-4 h-4" style={{ color: p1 }} /> Performance produits
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(() => {
+              const max = Math.max(1, ...produitsRanking.map(p => p.total));
+              return produitsRanking.map(p => (
+                <div key={p.nom} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-foreground">{p.nom}</span>
+                    <span className="font-bold" style={{ color: p1 }}>{fmt(p.total)}</span>
+                  </div>
+                  <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${Math.round((p.total / max) * 100)}%`, background: `linear-gradient(90deg, ${p1}, ${p2})` }} />
+                  </div>
+                </div>
+              ));
+            })()}
+          </CardContent>
+        </Card>
+      )}
         </TabsContent>
 
         <TabsContent value="sites" className="space-y-6">
+      {/* ── Performance par site — graphique ── */}
+      {rapport && rapport.sites.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3 bg-gradient-to-r from-slate-50 to-white">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-red-500" /> Performance par site
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={rapport.sites.map(s => ({ nom: s.nom, degustations: s.degustations, ventes: s.ventes }))} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                  <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
+                  {showTasting && <Bar key="degustations" dataKey="degustations" name="Dégustations" fill={COLORS.primary} radius={[4, 4, 0, 0]} />}
+                  {showVente && <Bar key="ventes" dataKey="ventes" name="Ventes" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />}
+                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {/* ── Performance par site — tableau ── */}
       {rapport && rapport.sites.length > 0 && (() => {
         const maxDeg = Math.max(1, ...rapport.sites.map(s => s.degustations));
@@ -727,25 +912,48 @@ export default function CompanyCampaignDetailPage() {
 
         <TabsContent value="actions" className="space-y-6">
       {/* ── Dernières actions sur les sites ── */}
-      {(tastings.length > 0 || ventes.length > 0) && (() => {
+      {(tastings.length > 0 || ventes.length > 0 || gainsPromotions.length > 0 || gainsGoodies.length > 0) && (() => {
         const actions = [
           ...tastings.slice(-50).map(t => ({
-            id: t.id, type: "deg" as const,
-            label: t.produit_nom,
+            id: `deg-${t.id}`, type: "deg" as ActionType, emoji: "🍺",
+            label: t.produit_nom, badge: "Dégust.",
             site: t.site_nom,
             agent: t.hotesse_nom,
             meta: t.a_achete ? "acheté" : `note ${t.note_gout}/5`,
             date: t.created_at,
           })),
           ...ventes.slice(-50).map(v => ({
-            id: v.id, type: "vente" as const,
-            label: v.produit_nom,
+            id: `vente-${v.id}`, type: "vente" as ActionType, emoji: "🛒",
+            label: v.produit_nom, badge: "Vente",
             site: v.site_nom,
             agent: v.hotesse_nom,
             meta: v.prix_total ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "XOF", maximumFractionDigits: 0 }).format(Number(v.prix_total)) : "",
             date: v.created_at,
           })),
+          ...gainsPromotions.slice(-50).map(g => {
+            const emoji = g.type_promotion === "TIRAGE" ? "🎡" : g.type_promotion === "GAGNE" ? "🏆" : g.conditionnement === "PACK" ? "📦" : "🥤";
+            const label = g.type_promotion === "TIRAGE" ? "Ticket tombola" : g.type_promotion === "GAGNE" ? "Lot remporté" : g.conditionnement === "PACK" ? "Pack offert" : "Produit offert";
+            const badge = g.type_promotion === "TIRAGE" ? "Tirage" : g.type_promotion === "GAGNE" ? "Gain" : "Offert";
+            return {
+              id: `promo-${g.id}`, type: "promo" as ActionType, emoji,
+              label, badge,
+              site: g.site_nom,
+              agent: g.hotesse_nom,
+              meta: g.promotion_description,
+              date: g.created_at,
+            };
+          }),
+          ...gainsGoodies.slice(-50).map(g => ({
+            id: `goodie-${g.id}`, type: "goodie" as ActionType, emoji: "🎁",
+            label: "Goodie distribué", badge: "Goodie",
+            site: g.site_nom,
+            agent: g.hotesse_nom,
+            meta: g.goodie_nom,
+            date: g.created_at,
+          })),
         ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        const newestId = actions[0]?.id;
 
         if (!showAllActions) {
           const recent = actions.slice(0, 10);
@@ -759,38 +967,36 @@ export default function CompanyCampaignDetailPage() {
               </CardHeader>
               <CardContent className="p-4 space-y-3">
                 <div className="rounded-xl border border-slate-100 overflow-hidden">
-                  {recent.map((a, i) => (
-                    <div key={a.id} className={`flex items-center gap-3 px-3 py-2.5 ${
-                      i < recent.length - 1 ? "border-b border-slate-50" : ""
-                    } ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                        a.type === "deg" ? "bg-red-100" : "bg-amber-100"
-                      }`}>
-                        {a.type === "deg"
-                          ? <Beer className="w-3.5 h-3.5 text-red-500" />
-                          : <ShoppingCart className="w-3.5 h-3.5 text-amber-500" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-xs font-semibold text-foreground truncate">{a.label}</p>
-                          <Badge className={`text-[9px] border-0 shrink-0 ${
-                            a.type === "deg" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"
-                          }`}>
-                            {a.type === "deg" ? "Dégust." : "Vente"}
-                          </Badge>
+                  {recent.map((a, i) => {
+                    const style = actionStyle(a.type);
+                    return (
+                      <div key={a.id} className={`flex items-center gap-3 px-3 py-2.5 ${
+                        i < recent.length - 1 ? "border-b border-slate-50" : ""
+                      } ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-base ${style?.dot}`}>
+                          {a.emoji}
                         </div>
-                        <p className="text-[10px] text-muted-foreground truncate">{a.site} · {a.agent} · {a.meta}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-semibold text-foreground truncate">{a.label}</p>
+                            <Badge className={`text-[9px] border-0 shrink-0 ${style?.dot} ${style?.text}`}>{a.badge}</Badge>
+                            {a.id === newestId && (
+                              <Badge className="text-[9px] border-0 shrink-0 bg-emerald-500 text-white animate-pulse">Nouveau</Badge>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground truncate">{a.site} · {a.agent} · {a.meta}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-[10px] text-muted-foreground">
+                            {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {new Date(a.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(a.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {actions.length > 10 && (
                   <button type="button" onClick={() => setShowAllActions(true)}
@@ -830,38 +1036,36 @@ export default function CompanyCampaignDetailPage() {
                       <span className="text-[10px] text-muted-foreground ml-auto">{siteActions.length} action{siteActions.length > 1 ? "s" : ""}</span>
                     </div>
                     <div className="rounded-xl border border-slate-100 overflow-hidden">
-                      {siteActions.map((a, i) => (
-                        <div key={i} className={`flex items-center gap-3 px-3 py-2.5 ${
-                          i < siteActions.length - 1 ? "border-b border-slate-50" : ""
-                        } ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                            a.type === "deg" ? "bg-red-100" : "bg-amber-100"
-                          }`}>
-                            {a.type === "deg"
-                              ? <Beer className="w-3.5 h-3.5 text-red-500" />
-                              : <ShoppingCart className="w-3.5 h-3.5 text-amber-500" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <p className="text-xs font-semibold text-foreground truncate">{a.label}</p>
-                              <Badge className={`text-[9px] border-0 shrink-0 ${
-                                a.type === "deg" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"
-                              }`}>
-                                {a.type === "deg" ? "Dégust." : "Vente"}
-                              </Badge>
+                      {siteActions.map((a, i) => {
+                        const style = actionStyle(a.type);
+                        return (
+                          <div key={a.id} className={`flex items-center gap-3 px-3 py-2.5 ${
+                            i < siteActions.length - 1 ? "border-b border-slate-50" : ""
+                          } ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-base ${style?.dot}`}>
+                              {a.emoji}
                             </div>
-                            <p className="text-[10px] text-muted-foreground truncate">{a.agent} · {a.meta}</p>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs font-semibold text-foreground truncate">{a.label}</p>
+                                <Badge className={`text-[9px] border-0 shrink-0 ${style?.dot} ${style?.text}`}>{a.badge}</Badge>
+                                {a.id === newestId && (
+                                  <Badge className="text-[9px] border-0 shrink-0 bg-emerald-500 text-white animate-pulse">Nouveau</Badge>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-muted-foreground truncate">{a.agent} · {a.meta}</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[10px] text-muted-foreground">
+                                {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {new Date(a.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                              </p>
+                            </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-[10px] text-muted-foreground">
-                              {new Date(a.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              {new Date(a.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -870,57 +1074,6 @@ export default function CompanyCampaignDetailPage() {
           </Card>
         );
       })()}
-        </TabsContent>
-
-        <TabsContent value="rapports" className="space-y-6">
-      {!showPromotions && (
-        <Card className="border-0 shadow-sm rounded-2xl">
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            Aucun rapport téléchargeable pour cette campagne pour le moment.
-          </CardContent>
-        </Card>
-      )}
-      {/* ── Écoulements des offres promotionnelles par jour ── */}
-      {showPromotions && promoChartData.length > 0 && (
-        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Tag className="w-4 h-4 text-blue-500" /> Écoulements des offres promotionnelles par jour
-              </CardTitle>
-              <Button size="sm" variant="outline" onClick={handleExportPromoPdf} className="gap-1.5 text-xs">
-                <Download className="w-3.5 h-3.5" /> Exporter (PDF)
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div ref={promoChartRef} className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={promoChartData} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barSize={20}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
-                  <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-                  {promoLabels.map((label, idx) => {
-                    const colors = ["#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6"];
-                    return (
-                      <Bar
-                        key={label}
-                        dataKey={label}
-                        name={label}
-                        fill={colors[idx % colors.length]}
-                        radius={[4, 4, 0, 0]}
-                        stackId="promos"
-                      />
-                    );
-                  })}
-                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
         </TabsContent>
 
         <TabsContent value="sites" className="space-y-6">
@@ -1059,7 +1212,7 @@ export default function CompanyCampaignDetailPage() {
                       <div className="rounded-lg bg-blue-50/60 border border-blue-100 p-3">
                         <div className="flex items-center gap-2 mb-2">
                           <Package className="w-4 h-4 text-blue-600" />
-                          <p className="text-xs font-semibold text-blue-800">Canettes offertes sur ce site</p>
+                          <p className="text-xs font-semibold text-blue-800">Récompenses sur ce site</p>
                         </div>
                         <div className="space-y-1.5">
                           {site.promotions_stats.map((ps, idx) => (
@@ -1074,6 +1227,130 @@ export default function CompanyCampaignDetailPage() {
                   </div>
                 );
               })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Mécaniques promotionnelles ── */}
+      {showPromotions && mecaniquePromoSites.length > 0 && (
+        <Card className="border-0 shadow-lg rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Package className="w-4 h-4 text-blue-500" /> Mécaniques promotionnelles
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-center">
+                <p className="text-xl font-bold" style={{ color: COLORS.secondary }}>{fmt(mecaniquePromoTotaux.vendus)}</p>
+                <p className="text-[11px] text-muted-foreground">produits vendus</p>
+              </div>
+              {mecaniquePromoTotaux.offerts > 0 && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-center">
+                  <p className="text-xl font-bold" style={{ color: COLORS.info }}>{fmt(mecaniquePromoTotaux.offerts)}</p>
+                  <p className="text-[11px] text-muted-foreground">produits offerts</p>
+                </div>
+              )}
+              {mecaniquePromoTotaux.goodies > 0 && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-center">
+                  <p className="text-xl font-bold" style={{ color: COLORS.success }}>{fmt(mecaniquePromoTotaux.goodies)}</p>
+                  <p className="text-[11px] text-muted-foreground">goodies distribués</p>
+                </div>
+              )}
+              {mecaniquePromoTotaux.tirages > 0 && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-center">
+                  <p className="text-xl font-bold" style={{ color: COLORS.purple }}>{fmt(mecaniquePromoTotaux.tirages)}</p>
+                  <p className="text-[11px] text-muted-foreground">tirages effectués</p>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Écoulement par site</p>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={mecaniquePromoSites} margin={{ top: 5, right: 10, bottom: 30, left: -10 }} barGap={4}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                    <XAxis dataKey="nom" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} angle={-18} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
+                    <Bar key="vendus" dataKey="vendus" name="Produits vendus" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />
+                    {mecaniquePromoTotaux.offerts > 0 && <Bar key="offerts" dataKey="offerts" name="Produits offerts" fill={COLORS.info} radius={[4, 4, 0, 0]} />}
+                    {mecaniquePromoTotaux.goodies > 0 && <Bar key="goodies" dataKey="goodies" name="Goodies distribués" fill={COLORS.success} radius={[4, 4, 0, 0]} />}
+                    {mecaniquePromoTotaux.tirages > 0 && <Bar key="tirages" dataKey="tirages" name="Tirages" fill={COLORS.purple} radius={[4, 4, 0, 0]} />}
+                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Détail par site et par jour</p>
+              <div className="flex items-center gap-2 flex-wrap mb-4">
+                {mecaniquePromoSites.map(s => (
+                  <button
+                    key={s.nom}
+                    type="button"
+                    onClick={() => setSelectedMecaniqueSite(s.nom)}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
+                      selectedMecaniqueSite === s.nom
+                        ? "text-white border-transparent"
+                        : "bg-white text-muted-foreground border-slate-200 hover:bg-slate-50"
+                    }`}
+                    style={selectedMecaniqueSite === s.nom ? { background: `linear-gradient(135deg, ${p1}, ${p2})` } : undefined}
+                  >
+                    {s.nom}
+                  </button>
+                ))}
+              </div>
+              {selectedMecaniqueSite && (() => {
+                const s = mecaniquePromoSites.find(x => x.nom === selectedMecaniqueSite);
+                if (!s) return null;
+                return (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                      <div className="rounded-lg bg-white border border-slate-100 p-2 text-center">
+                        <p className="text-sm font-bold" style={{ color: COLORS.secondary }}>{fmt(s.vendus)}</p>
+                        <p className="text-[10px] text-muted-foreground">vendus</p>
+                      </div>
+                      {mecaniquePromoTotaux.offerts > 0 && (
+                        <div className="rounded-lg bg-white border border-slate-100 p-2 text-center">
+                          <p className="text-sm font-bold" style={{ color: COLORS.info }}>{fmt(s.offerts)}</p>
+                          <p className="text-[10px] text-muted-foreground">offerts</p>
+                        </div>
+                      )}
+                      {mecaniquePromoTotaux.goodies > 0 && (
+                        <div className="rounded-lg bg-white border border-slate-100 p-2 text-center">
+                          <p className="text-sm font-bold" style={{ color: COLORS.success }}>{fmt(s.goodies)}</p>
+                          <p className="text-[10px] text-muted-foreground">goodies</p>
+                        </div>
+                      )}
+                      {mecaniquePromoTotaux.tirages > 0 && (
+                        <div className="rounded-lg bg-white border border-slate-100 p-2 text-center">
+                          <p className="text-sm font-bold" style={{ color: COLORS.purple }}>{fmt(s.tirages)}</p>
+                          <p className="text-[10px] text-muted-foreground">tirages</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={mecaniqueSiteDaily} margin={{ top: 5, right: 10, bottom: 0, left: -20 }} barSize={14}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                          <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
+                          <Bar key="vendus" dataKey="vendus" name="Vendus" fill={COLORS.secondary} radius={[3, 3, 0, 0]} />
+                          {mecaniquePromoTotaux.offerts > 0 && <Bar key="offerts" dataKey="offerts" name="Offerts" fill={COLORS.info} radius={[3, 3, 0, 0]} />}
+                          {mecaniquePromoTotaux.goodies > 0 && <Bar key="goodies" dataKey="goodies" name="Goodies" fill={COLORS.success} radius={[3, 3, 0, 0]} />}
+                          {mecaniquePromoTotaux.tirages > 0 && <Bar key="tirages" dataKey="tirages" name="Tirages" fill={COLORS.purple} radius={[3, 3, 0, 0]} />}
+                          <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </CardContent>
         </Card>
