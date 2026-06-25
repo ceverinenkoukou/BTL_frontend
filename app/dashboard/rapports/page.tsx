@@ -17,7 +17,7 @@ import {
 import { PageHeader } from "@/components/dashboard/page-header";
 import { cn } from "@/lib/utils";
 import { useUrlState } from "@/lib/hooks/useUrlState";
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
 import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
@@ -168,6 +168,9 @@ function RapportsPageContent() {
   const handleOpenBulletin = async (rapport: RapportJournalier) => {
     setBulletinLoadingId(rapport.id);
     try {
+      // Le cache GET en mémoire (30s) servirait une réponse périmée si des
+      // données ont été corrigées juste avant de regénérer ce bulletin.
+      invalidateCache();
       const campagneId = sites.find(s => s.id === rapport.site)?.campagne;
       const campagneNom = campagnes.find(c => c.id === campagneId)?.nom ?? rapport.site_nom;
 
@@ -210,6 +213,10 @@ function RapportsPageContent() {
       return false;
     }
     try {
+      // Le cache GET en mémoire (30s) servirait des bulletins/gains/ventes
+      // périmés si des données ont été corrigées juste avant de regénérer
+      // (y compris en rouvrant une entrée archivée) — on force du frais.
+      invalidateCache();
       const [bulletinResults, configRes, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes] = await Promise.all([
         Promise.all(rapportIds.map(id => getBulletin(id).catch(() => null))),
         api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
