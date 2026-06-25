@@ -120,11 +120,12 @@ export function buildCondensedBulletinHtml(
     entry.gratuites += b.nombre_boissons_gratuites ?? 0;
   });
 
-  const parSite = new Map<string, { siteNom: string; deg: number; ca: number }>();
+  const parSite = new Map<string, { siteNom: string; deg: number; horsPromo: number; ca: number }>();
   bulletins.forEach(b => {
-    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, ca: 0 });
+    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, horsPromo: 0, ca: 0 });
     const e = parSite.get(b.site)!;
     e.deg += b.nb_degustations ?? 0;
+    e.horsPromo += b.ventes_hors_promo ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
   });
 
@@ -144,8 +145,8 @@ export function buildCondensedBulletinHtml(
 
   sections.push(`
     <h2 class="section-title">Détail par site</h2>
-    <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th><th class="r">Goodies</th><th class="r">CA</th></tr></thead>
-    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td><td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
+    <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th>${config.show_ventes_detail ? `<th class="r">Hors promo</th>` : ""}<th class="r">Goodies</th><th class="r">CA</th></tr></thead>
+    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td>${config.show_ventes_detail ? `<td class="r">${e.horsPromo}</td>` : ""}<td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
 
   if (config.show_genre) {
     sections.push(`
