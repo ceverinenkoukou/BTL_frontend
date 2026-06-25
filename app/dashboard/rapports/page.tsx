@@ -18,7 +18,7 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { cn } from "@/lib/utils";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import api from "@/lib/api";
-import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour, GainGoodie } from "@/lib/types/backend";
+import type { RapportJournalier, RapportJournalierUpdatePayload, RapportJournalierConfig, SiteList, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_JOURNALIER_CONFIG } from "@/lib/types/backend";
 import { getRapports, genererRapports, updateRapport, getBulletin } from "@/lib/services/rapportService";
 import { buildBulletinHtml } from "@/lib/services/rapportBulletinHtml";
@@ -210,7 +210,7 @@ function RapportsPageContent() {
       return false;
     }
     try {
-      const [bulletinResults, configRes, livraisonsRes, gainGoodiesRes] = await Promise.all([
+      const [bulletinResults, configRes, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes] = await Promise.all([
         Promise.all(rapportIds.map(id => getBulletin(id).catch(() => null))),
         api.get<RapportJournalierConfig | { detail: string; defaults: boolean }>(
           `/rapport-journalier-configs/par-campagne/?campagne=${campagneId}`
@@ -221,6 +221,10 @@ function RapportsPageContent() {
         // client dans buildCondensedBulletinHtml (comme sur la page Ventes).
         api.get<GainGoodie[]>(`/gains-goodies/`)
           .then(r => unwrapList<GainGoodie>(r.data)).catch(() => []),
+        api.get<GainPromotion[]>(`/gains-promotions/?campagne=${campagneId}`)
+          .then(r => unwrapList<GainPromotion>(r.data)).catch(() => []),
+        api.get<Vente[]>(`/ventes/?campagne=${campagneId}`)
+          .then(r => unwrapList<Vente>(r.data)).catch(() => []),
       ]);
 
       const bulletins = bulletinResults.filter((b): b is NonNullable<typeof b> => b !== null);
@@ -235,7 +239,7 @@ function RapportsPageContent() {
       const config: RapportJournalierConfig =
         configRes && !("defaults" in configRes) ? configRes : { ...DEFAULT_RAPPORT_JOURNALIER_CONFIG };
 
-      const html = buildCondensedBulletinHtml(bulletins, config, campagne, livraisonsRes, gainGoodiesRes);
+      const html = buildCondensedBulletinHtml(bulletins, config, campagne, livraisonsRes, gainGoodiesRes, gainPromotionsRes, ventesRes);
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const win = window.open(url, "_blank");

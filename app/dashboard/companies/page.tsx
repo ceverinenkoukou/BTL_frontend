@@ -236,6 +236,22 @@ export default function CompaniesPage() {
         };
         const { data: updated } = await api.patch<Entreprise>(`/entreprises/${editingCompany.id}/`, payload);
 
+        // Mettre à jour les produits existants modifiés
+        const existingProducts = entries.filter(e => e.existingId && e.name.trim());
+        const updatedProduits: Produit[] = [];
+        for (const e of existingProducts) {
+          const mode = e.modes[0];
+          const { data: p } = await api.patch<Produit>(`/produits/${e.existingId}/`, {
+            nom: e.name.trim(),
+            type_conditionnement: mode,
+            description: e.description.trim() || undefined,
+            prix_indicatif: mode === "UNITE"
+              ? parseFloat(e.prix_unite) || undefined
+              : parseFloat(e.prix_pack) || undefined,
+          });
+          updatedProduits.push(p);
+        }
+
         // Créer les nouveaux produits (sans existingId)
         const newProducts = entries.filter(e => !e.existingId && e.name.trim());
         const createdProduits: Produit[] = [];
@@ -254,10 +270,14 @@ export default function CompaniesPage() {
           }
         }
 
-        // Mettre à jour l'état local avec les nouveaux produits
+        // Mettre à jour l'état local : produits existants remplacés par leur version
+        // modifiée (si modifiés), nouveaux produits ajoutés à la suite.
         const updatedWithProducts = {
           ...updated,
-          produits: [...updated.produits, ...createdProduits],
+          produits: [
+            ...updated.produits.map(p => updatedProduits.find(up => up.id === p.id) ?? p),
+            ...createdProduits,
+          ],
         };
         setCompanies(prev => prev.map(c => c.id === editingCompany.id ? updatedWithProducts : c));
 
@@ -275,8 +295,11 @@ export default function CompaniesPage() {
             toast.warning("Entreprise mise à jour, mais erreur lors de l'envoi du mot de passe.");
           }
         } else {
-          const nb = createdProduits.length;
-          toast.success(nb > 0 ? `Entreprise mise à jour. ${nb} produit(s) ajouté(s).` : "Entreprise mise à jour.");
+          const parts = [
+            updatedProduits.length > 0 ? `${updatedProduits.length} produit(s) modifié(s)` : null,
+            createdProduits.length   > 0 ? `${createdProduits.length} produit(s) ajouté(s)`   : null,
+          ].filter(Boolean).join(", ");
+          toast.success(parts ? `Entreprise mise à jour. ${parts}.` : "Entreprise mise à jour.");
         }
       } else {
         const payload: CreateEntreprisePayload = {
@@ -736,22 +759,82 @@ export default function CompaniesPage() {
           {step === 2 && (
             <div className="p-6 space-y-4">
               <div className="bg-sky-50 border border-sky-100 rounded-xl px-4 py-3 text-xs text-sky-700">
-                <span className="font-semibold">📦 Produits de {cName}</span> — {editingCompany ? "Ajoutez de nouveaux produits. Les produits existants sont modifiables depuis la carte." : "Ajoutez les produits liés à cette entreprise."}
+                <span className="font-semibold">📦 Produits de {cName}</span> — {editingCompany ? "Modifiez les produits existants ou ajoutez-en de nouveaux." : "Ajoutez les produits liés à cette entreprise."}
               </div>
 
               {/* Produits existants (mode édition) */}
               {editingCompany && entries.some(e => e.existingId) && (
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Produits existants</p>
-                  {entries.filter(e => e.existingId).map((entry) => (
-                    <div key={entry.existingId} className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2">
-                      <Package className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                      <span className="text-xs font-medium text-foreground flex-1 truncate">{entry.name}</span>
-                      <span className="text-[10px] text-muted-foreground bg-white rounded px-1.5 py-0.5 border border-slate-200">
-                        {entry.modes[0] === "UNITE" ? "Unité" : "Pack"}
-                      </span>
-                    </div>
-                  ))}
+                  {entries.map((entry, i) => {
+                    if (!entry.existingId) return null;
+                    const priceField = entry.modes[0] === "PACK" ? "prix_pack" : "prix_unite";
+                    return (
+                      <div key={entry.existingId} className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex gap-1.5">
+                            {([
+                              { mode: "UNITE" as const, label: "Unité", icon: "🛍️" },
+                              { mode: "PACK"  as const, label: "Pack",  icon: "📦" },
+                            ]).map(({ mode, label, icon }) => {
+                              const active = entry.modes[0] === mode;
+                              return (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => updateEntry(i, { modes: [mode] })}
+                                  className={cn(
+                                    "flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wide transition-all",
+                                    active
+                                      ? "border-sky-500 bg-sky-100 text-sky-700"
+                                      : "border-slate-200 bg-white text-slate-400 hover:border-slate-300"
+                                  )}
+                                >
+                                  <span>{icon}</span>{label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <button
+                            onClick={() => {
+                              handleDeleteProduct(editingCompany.id, entry.existingId!);
+                              setEntries(prev => prev.filter(e => e.existingId !== entry.existingId));
+                            }}
+                            disabled={deletingProductId === entry.existingId}
+                            className="w-5 h-5 rounded-md bg-rose-100 hover:bg-rose-200 flex items-center justify-center transition-colors"
+                            title="Supprimer ce produit"
+                          >
+                            {deletingProductId === entry.existingId
+                              ? <Loader2 className="w-3 h-3 text-rose-600 animate-spin" />
+                              : <X className="w-3 h-3 text-rose-600" />}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <Input
+                            placeholder="Nom du produit *"
+                            value={entry.name}
+                            onChange={e => updateEntry(i, { name: e.target.value })}
+                            className="rounded-lg text-sm h-8 bg-white"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              placeholder={entry.modes[0] === "PACK" ? "Prix du pack (F CFA)" : "Prix unitaire (F CFA)"}
+                              type="number" min="0"
+                              value={entry[priceField]}
+                              onChange={e => updateEntry(i, { [priceField]: e.target.value } as Partial<ProductEntry>)}
+                              className="rounded-lg text-sm h-8 bg-white"
+                            />
+                            <Input
+                              placeholder="Description (optionnel)"
+                              value={entry.description}
+                              onChange={e => updateEntry(i, { description: e.target.value })}
+                              className="rounded-lg text-sm h-8 bg-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

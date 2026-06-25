@@ -474,11 +474,15 @@ export interface GainPromotion {
   promotion_description: string;
   type_promotion: TypePromotion;
   quantite_requise: number;
+  quantite_offerte: number;
+  conditionnement: TypeConditionnement;
+  conditionnement_display: string;
   hotesse_nom: string;
   site_nom: string;
   campagne: string;
   quantite_produits_concernes: number;
   nom_client: string | null;
+  vente_achat: string | null;
   created_at: string;
 }
 
