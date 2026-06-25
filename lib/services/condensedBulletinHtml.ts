@@ -1,4 +1,4 @@
-import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour, GainGoodie } from "@/lib/types/backend";
+import type { RapportJournalierBulletin, RapportJournalierConfig, CampagneList, LivraisonGoodiesJour, GainGoodie, GainPromotion, Vente } from "@/lib/types/backend";
 
 function esc(value: string | number | null | undefined): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -24,6 +24,8 @@ export function buildCondensedBulletinHtml(
   campagne: CampagneList,
   livraisons: LivraisonGoodiesJour[] = [],
   gainGoodies: GainGoodie[] = [],
+  gainPromotions: GainPromotion[] = [],
+  ventes: Vente[] = [],
 ): string {
   const colorPrimary = campagne.couleur_primaire || "#0f766e";
   const colorSecondary = campagne.couleur_secondaire || "#0d9488";
@@ -91,18 +93,30 @@ export function buildCondensedBulletinHtml(
   );
   const relevantLivraisons = livraisons.filter(l => siteIds.has(l.site) && dateSet.has(l.date));
 
-  const ugsRecusMap = new Map<string, number>();
-  const ugsDistribuesMap = new Map<string, number>();
-  const ugsRestantsMap = new Map<string, number>();
+  // Goodies (UGs) reçus/distribués/restants — détaillés par site et par
+  // jour (une ligne par site+date+goodie), plutôt qu'agrégés globalement
+  // par nom de goodie : permet de voir où/quand chaque livraison et chaque
+  // gain a eu lieu plutôt qu'un seul total opaque par goodie.
+  type GoodieRow = { site: string; siteNom: string; date: string; goodieNom: string; recus: number; distribues: number };
+  const goodieRows = new Map<string, GoodieRow>();
   relevantLivraisons.forEach(l => {
-    ugsRecusMap.set(l.goodie_nom, (ugsRecusMap.get(l.goodie_nom) ?? 0) + l.quantite_apportee);
+    const key = `${l.site}|${l.date}|${l.goodie_nom}`;
+    if (!goodieRows.has(key)) {
+      goodieRows.set(key, { site: l.site, siteNom: l.site_nom, date: l.date, goodieNom: l.goodie_nom, recus: 0, distribues: 0 });
+    }
+    goodieRows.get(key)!.recus += l.quantite_apportee;
   });
   relevantGains.forEach(g => {
-    ugsDistribuesMap.set(g.goodie_nom, (ugsDistribuesMap.get(g.goodie_nom) ?? 0) + 1);
+    const date = g.created_at.slice(0, 10);
+    const key = `${g.site}|${date}|${g.goodie_nom}`;
+    if (!goodieRows.has(key)) {
+      goodieRows.set(key, { site: g.site, siteNom: g.site_nom, date, goodieNom: g.goodie_nom, recus: 0, distribues: 0 });
+    }
+    goodieRows.get(key)!.distribues += 1;
   });
-  ugsRecusMap.forEach((recus, goodieNom) => {
-    ugsRestantsMap.set(goodieNom, Math.max(0, recus - (ugsDistribuesMap.get(goodieNom) ?? 0)));
-  });
+  const sortedGoodieRows = [...goodieRows.values()].sort((a, b) =>
+    a.date === b.date ? (a.siteNom === b.siteNom ? a.goodieNom.localeCompare(b.goodieNom) : a.siteNom.localeCompare(b.siteNom)) : a.date.localeCompare(b.date)
+  );
 
   const totalGoodies = relevantGains.length;
 
@@ -129,6 +143,37 @@ export function buildCondensedBulletinHtml(
     e.ca += Number(b.chiffre_affaires || 0);
   });
 
+  // Détail des ventes (promo / hors promo) — une ligne par vente ou par
+  // gain promotionnel, avec le client, le produit (le cas échéant), le
+  // conditionnement, la quantité achetée et — pour les gains promo —
+  // l'offre appliquée et la quantité réellement offerte. Une promotion
+  // n'est pas liée à un produit précis dans ce modèle de données (la règle
+  // est générique : "achetez X, obtenez Y offerts"), donc Produit reste
+  // vide sur ces lignes-là.
+  type VenteRow = {
+    site: string; date: string; client: string; produit: string;
+    conditionnement: string; quantiteAchetee: number; offre: string; quantiteOfferte: number | null;
+  };
+  const relevantGainPromotions = gainPromotions.filter(g =>
+    g.campagne === campagne.id && siteNoms.has(g.site_nom) && dateSet.has(g.created_at.slice(0, 10))
+  );
+  const relevantVentes = ventes.filter(v =>
+    v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
+    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
+  );
+  const venteRows: VenteRow[] = [
+    ...relevantGainPromotions.map(g => ({
+      site: g.site_nom, date: g.created_at.slice(0, 10), client: g.nom_client || "—",
+      produit: "—", conditionnement: g.conditionnement_display || g.conditionnement,
+      quantiteAchetee: g.quantite_produits_concernes, offre: g.promotion_description, quantiteOfferte: g.quantite_offerte,
+    })),
+    ...relevantVentes.map(v => ({
+      site: v.site_nom, date: v.created_at.slice(0, 10), client: v.nom_client || "—",
+      produit: v.produit_nom, conditionnement: v.conditionnement_display, quantiteAchetee: v.quantite,
+      offre: "—", quantiteOfferte: null as number | null,
+    })),
+  ].sort((a, b) => a.date === b.date ? a.site.localeCompare(b.site) : a.date.localeCompare(b.date));
+
   const avis = bulletins.filter(b => b.avis_consommateurs).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.avis_consommateurs! }));
   const observations = bulletins.filter(b => b.observation_generale).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.observation_generale! }));
 
@@ -147,6 +192,13 @@ export function buildCondensedBulletinHtml(
     <h2 class="section-title">Détail par site</h2>
     <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th>${config.show_ventes_detail ? `<th class="r">Hors promo</th>` : ""}<th class="r">Goodies</th><th class="r">CA</th></tr></thead>
     <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td>${config.show_ventes_detail ? `<td class="r">${e.horsPromo}</td>` : ""}<td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
+
+  if (config.show_ventes_detail && venteRows.length > 0) {
+    sections.push(`
+      <h2 class="section-title">Détail des ventes (promo / hors promo)</h2>
+      <table><thead><tr><th>Site</th><th>Date</th><th>Client</th><th>Produit</th><th>Conditionnement</th><th class="r">Qté achetée</th><th>Offre appliquée</th><th class="r">Qté offerte</th></tr></thead>
+      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte ?? "—"}</td></tr>`).join("")}</tbody></table>`);
+  }
 
   if (config.show_genre) {
     sections.push(`
@@ -172,14 +224,11 @@ export function buildCondensedBulletinHtml(
       </div>`);
   }
 
-  if (config.show_ugs_recus && ugsRecusMap.size > 0) {
-    sections.push(`<h2 class="section-title">UGs (goodies) reçus</h2><ul class="ugs-list">${[...ugsRecusMap.entries()].map(([g, q]) => `<li><span>${esc(g)}</span><strong>${q}</strong></li>`).join("")}</ul>`);
-  }
-  if (config.show_ugs_distribues && ugsDistribuesMap.size > 0) {
-    sections.push(`<h2 class="section-title">UGs (goodies) distribués</h2><ul class="ugs-list">${[...ugsDistribuesMap.entries()].map(([g, q]) => `<li><span>${esc(g)}</span><strong>${q}</strong></li>`).join("")}</ul>`);
-  }
-  if (config.show_ugs_restants && ugsRestantsMap.size > 0) {
-    sections.push(`<h2 class="section-title">UGs (goodies) restants</h2><ul class="ugs-list">${[...ugsRestantsMap.entries()].map(([g, q]) => `<li><span>${esc(g)}</span><strong>${q}</strong></li>`).join("")}</ul>`);
+  if ((config.show_ugs_recus || config.show_ugs_distribues || config.show_ugs_restants) && sortedGoodieRows.length > 0) {
+    sections.push(`
+      <h2 class="section-title">UGs (goodies) par site et par jour</h2>
+      <table><thead><tr><th>Site</th><th>Date</th><th>Goodie</th>${config.show_ugs_recus ? `<th class="r">Reçus</th>` : ""}${config.show_ugs_distribues ? `<th class="r">Distribués</th>` : ""}${config.show_ugs_restants ? `<th class="r">Restants</th>` : ""}</tr></thead>
+      <tbody>${sortedGoodieRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.goodieNom)}</td>${config.show_ugs_recus ? `<td class="r">${r.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r">${r.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r">${Math.max(0, r.recus - r.distribues)}</td>` : ""}</tr>`).join("")}</tbody></table>`);
   }
 
   if (config.show_stock_boissons && stockParSite.size > 0) {
@@ -239,8 +288,6 @@ export function buildCondensedBulletinHtml(
   .field{display:flex;flex-direction:column;gap:2px}
   .label{font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#64748b;font-weight:700}
   .value{font-size:16px;font-weight:800;color:#0f172a}
-  .ugs-list{list-style:none;display:flex;flex-direction:column;gap:6px;padding:0 28px 16px}
-  .ugs-list li{display:flex;justify-content:space-between;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;font-size:12px}
   .text{font-size:12px;line-height:1.5;color:#334155;padding:0 28px 8px}
   .foot{padding:16px 28px;text-align:center;color:#94a3b8;font-size:10px}
   @media print{ .action-bar{display:none !important} body{padding:0;background:#fff} #capture-zone{box-shadow:none;max-width:100%} }
