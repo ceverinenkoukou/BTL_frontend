@@ -161,18 +161,42 @@ export function buildCondensedBulletinHtml(
     v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
     siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
   );
-  const venteRows: VenteRow[] = [
-    ...relevantGainPromotions.map(g => ({
-      site: g.site_nom, date: g.created_at.slice(0, 10), client: g.nom_client || "—",
-      produit: "—", conditionnement: g.conditionnement_display || g.conditionnement,
-      quantiteAchetee: g.quantite_produits_concernes, offre: g.promotion_description, quantiteOfferte: g.quantite_offerte,
-    })),
-    ...relevantVentes.map(v => ({
+
+  // Un gain promo et sa vente d'achat (Vente.gain_promotion / GainPromotion.vente_achat)
+  // sont deux enregistrements distincts pour le même évènement client : on les
+  // fusionne en une seule ligne plutôt que d'afficher l'achat et l'offre séparément.
+  const ventesById = new Map(relevantVentes.map(v => [v.id, v]));
+  const consumedVenteIds = new Set<string>();
+  const venteRows: VenteRow[] = [];
+
+  relevantGainPromotions.forEach(g => {
+    const vente = g.vente_achat ? ventesById.get(g.vente_achat) : undefined;
+    if (vente) {
+      consumedVenteIds.add(vente.id);
+      venteRows.push({
+        site: vente.site_nom, date: vente.created_at.slice(0, 10), client: vente.nom_client || g.nom_client || "—",
+        produit: vente.produit_nom, conditionnement: vente.conditionnement_display,
+        quantiteAchetee: vente.quantite, offre: g.promotion_description, quantiteOfferte: g.quantite_offerte,
+      });
+    } else {
+      // Pas de vente_achat liée (promo sans produit associé, ex: TIRAGE) :
+      // on affiche le gain seul avec les données qu'il porte directement.
+      venteRows.push({
+        site: g.site_nom, date: g.created_at.slice(0, 10), client: g.nom_client || "—",
+        produit: "—", conditionnement: g.conditionnement_display || g.conditionnement,
+        quantiteAchetee: g.quantite_produits_concernes, offre: g.promotion_description, quantiteOfferte: g.quantite_offerte,
+      });
+    }
+  });
+  relevantVentes.forEach(v => {
+    if (consumedVenteIds.has(v.id)) return;
+    venteRows.push({
       site: v.site_nom, date: v.created_at.slice(0, 10), client: v.nom_client || "—",
       produit: v.produit_nom, conditionnement: v.conditionnement_display, quantiteAchetee: v.quantite,
-      offre: "—", quantiteOfferte: null as number | null,
-    })),
-  ].sort((a, b) => a.date === b.date ? a.site.localeCompare(b.site) : a.date.localeCompare(b.date));
+      offre: "—", quantiteOfferte: null,
+    });
+  });
+  venteRows.sort((a, b) => a.date === b.date ? a.site.localeCompare(b.site) : a.date.localeCompare(b.date));
 
   const avis = bulletins.filter(b => b.avis_consommateurs).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.avis_consommateurs! }));
   const observations = bulletins.filter(b => b.observation_generale).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.observation_generale! }));
