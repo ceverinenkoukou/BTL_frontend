@@ -70,6 +70,7 @@ type ReportSale = Sale & {
   notes?: string;
   goodies_given?: number;
   type_vente?: "NORMAL" | "GRATUIT" | "PROMOTION";
+  est_achat_promo?: boolean;
 };
 type HostessStat = {
   id: string;
@@ -677,7 +678,7 @@ function generatePDF({
   // Totaux globaux
   const totalTastings = tastings.length;
   const totalSales    = sales.length;
-  const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").length;
+  const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo).length;
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
   const totalGoodies  = hostessStats.reduce((a, h) => a + h.goodiesCount, 0);
 

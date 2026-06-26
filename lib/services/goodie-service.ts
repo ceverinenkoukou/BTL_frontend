@@ -49,6 +49,9 @@ export interface EnregistrerGainPayload {
   site_id: string;
   nom_client?: string;
   quantite_produit?: number;
+  // Requis uniquement pour une saisie manuelle par un Admin/Superviseur
+  // pour le compte d'une hôtesse.
+  hotesse_id?: string;
 }
 
 /**

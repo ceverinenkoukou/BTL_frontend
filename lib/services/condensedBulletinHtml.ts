@@ -102,10 +102,14 @@ export function buildCondensedBulletinHtml(
   const relevantLivraisons = livraisons.filter(l => siteIds.has(l.site) && dateSet.has(l.date));
   // Ventes hors promo : directement depuis la table Vente (filtrée par
   // campagne/site/date), pas depuis les bulletins individuels — cf. note
-  // plus haut sur totalHorsPromo.
+  // plus haut sur totalHorsPromo. On exclut les ventes NORMAL qui sont en
+  // réalité l'achat déclencheur d'un gain promo (GainPromotion.vente_achat) :
+  // ces achats ne sont pas "hors promo".
+  const venteAchatIds = new Set(gainPromotions.filter(g => g.vente_achat).map(g => g.vente_achat as string));
   const relevantVentesHorsPromo = ventes.filter(v =>
     v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
-    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
+    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10)) &&
+    !venteAchatIds.has(v.id)
   );
   const totalHorsPromo = relevantVentesHorsPromo.reduce((s, v) => s + v.quantite, 0);
 
@@ -133,6 +137,13 @@ export function buildCondensedBulletinHtml(
   const sortedGoodieRows = [...goodieRows.values()].sort((a, b) =>
     a.date === b.date ? (a.siteNom === b.siteNom ? a.goodieNom.localeCompare(b.goodieNom) : a.siteNom.localeCompare(b.siteNom)) : a.date.localeCompare(b.date)
   );
+  const ugsTotalsParSite = new Map<string, { siteNom: string; recus: number; distribues: number }>();
+  sortedGoodieRows.forEach(r => {
+    if (!ugsTotalsParSite.has(r.site)) ugsTotalsParSite.set(r.site, { siteNom: r.siteNom, recus: 0, distribues: 0 });
+    const e = ugsTotalsParSite.get(r.site)!;
+    e.recus += r.recus;
+    e.distribues += r.distribues;
+  });
 
   const totalGoodies = relevantGains.length;
 
@@ -146,8 +157,22 @@ export function buildCondensedBulletinHtml(
     if (!stockParSite.has(b.site)) {
       stockParSite.set(b.site, { siteNom: b.site_nom, stock: b.stock_boissons, conditionnement: b.conditionnement_boissons || "—", gratuites: 0 });
     }
-    const entry = stockParSite.get(b.site)!;
-    entry.gratuites += b.nombre_boissons_gratuites ?? 0;
+  });
+  // nombre_boissons_gratuites est saisi une fois par (site, jour) — indépendant
+  // de l'hôtesse — et donc dupliqué dans le bulletin individuel de chaque
+  // hôtesse de ce site/jour. On déduplique par (site, jour) avant de sommer
+  // sur la période, sinon un site à plusieurs hôtesses compte double/triple.
+  const boissonsGratuitesParSiteJour = new Map<string, number>();
+  bulletins.forEach(b => {
+    const key = `${b.site}|${b.date}`;
+    if (!boissonsGratuitesParSiteJour.has(key)) {
+      boissonsGratuitesParSiteJour.set(key, b.nombre_boissons_gratuites ?? 0);
+    }
+  });
+  boissonsGratuitesParSiteJour.forEach((valeur, key) => {
+    const site = key.split("|")[0];
+    if (!stockParSite.has(site)) return;
+    stockParSite.get(site)!.gratuites += valeur;
   });
 
   const parSite = new Map<string, { siteNom: string; deg: number; horsPromo: number; ca: number }>();
@@ -163,6 +188,38 @@ export function buildCondensedBulletinHtml(
     if (!parSite.has(siteId)) parSite.set(siteId, { siteNom: v.site_nom, deg: 0, horsPromo: 0, ca: 0 });
     parSite.get(siteId)!.horsPromo += v.quantite;
   });
+
+  // Synthèse par site et hôtesse : quantité achetée (toutes ventes NORMAL,
+  // y compris celles qui ont déclenché une promo), quantité réellement hors
+  // promo, et nombre de fois où une offre promo a été appliquée. Calculé
+  // depuis Vente + GainPromotion directement (pas depuis le tableau de
+  // détail des dégustations ci-dessous) car la plupart des gains promo
+  // n'ont pas de dégustation associée.
+  type SiteHotesseSynth = { siteNom: string; hotesseNom: string; quantiteAchetee: number; quantiteHorsPromo: number; nbOffresAppliquees: number };
+  const synthMap = new Map<string, SiteHotesseSynth>();
+  const getSynth = (site: string, hotesse: string) => {
+    const key = `${site}|${hotesse}`;
+    if (!synthMap.has(key)) synthMap.set(key, { siteNom: site, hotesseNom: hotesse, quantiteAchetee: 0, quantiteHorsPromo: 0, nbOffresAppliquees: 0 });
+    return synthMap.get(key)!;
+  };
+  const relevantVentesNormal = ventes.filter(v =>
+    v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
+    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
+  );
+  relevantVentesNormal.forEach(v => {
+    const e = getSynth(v.site_nom, v.hotesse_nom || "Non renseignée");
+    e.quantiteAchetee += v.quantite;
+    if (!venteAchatIds.has(v.id)) e.quantiteHorsPromo += v.quantite;
+  });
+  const relevantGainsPromotion = gainPromotions.filter(g =>
+    siteNoms.has(g.site_nom) && dateSet.has(g.created_at.slice(0, 10))
+  );
+  relevantGainsPromotion.forEach(g => {
+    getSynth(g.site_nom, g.hotesse_nom || "Non renseignée").nbOffresAppliquees += 1;
+  });
+  const synthRows = [...synthMap.values()].sort((a, b) =>
+    a.siteNom === b.siteNom ? a.hotesseNom.localeCompare(b.hotesseNom) : a.siteNom.localeCompare(b.siteNom)
+  );
 
   // Détail des dégustations — une ligne par dégustation du jour, sur TOUS
   // les sites de la campagne (filtré uniquement par campagne + date, pas par
@@ -223,13 +280,22 @@ export function buildCondensedBulletinHtml(
   sections.push(`
     <h2 class="section-title">Détail par site</h2>
     <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th>${config.show_ventes_detail ? `<th class="r">Hors promo</th>` : ""}<th class="r">Goodies</th><th class="r">CA</th></tr></thead>
-    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td>${config.show_ventes_detail ? `<td class="r">${e.horsPromo}</td>` : ""}<td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}</tbody></table>`);
+    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td>${config.show_ventes_detail ? `<td class="r">${e.horsPromo}</td>` : ""}<td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}
+    <tr class="tot-row"><td class="b">TOTAL</td><td class="r b">${totalDeg}</td>${config.show_ventes_detail ? `<td class="r b">${totalHorsPromo}</td>` : ""}<td class="r b">${totalGoodies}</td><td class="r b">${esc(fmtXOF(totalCA))}</td></tr>
+    </tbody></table>`);
+
+  if (config.show_ventes_detail && synthRows.length > 0) {
+    sections.push(`
+      <h2 class="section-title">Synthèse par site et hôtesse</h2>
+      <table><thead><tr><th>Site</th><th>Hôtesse</th><th class="r">Qté achetée</th><th class="r">Qté hors promo</th><th class="r">Offres promo appliquées</th></tr></thead>
+      <tbody>${synthRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(r.hotesseNom)}</td><td class="r">${r.quantiteAchetee}</td><td class="r">${r.quantiteHorsPromo}</td><td class="r">${r.nbOffresAppliquees}</td></tr>`).join("")}</tbody></table>`);
+  }
 
   if (config.show_ventes_detail && venteRows.length > 0) {
     sections.push(`
       <h2 class="section-title">Détail des dégustations (achat / promo / hors promo)</h2>
-      <table><thead><tr><th>Site</th><th>Date</th><th>Client</th><th>Produit</th><th>Achat</th><th>Conditionnement</th><th class="r">Qté achetée</th><th>Offre appliquée</th><th class="r">Qté offerte</th></tr></thead>
-      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${r.achat ? "Oui" : "Non"}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte ?? "—"}</td></tr>`).join("")}</tbody></table>`);
+      <table><thead><tr><th>Site</th><th>Date</th><th>Client</th><th>Produit</th><th>Conditionnement</th><th class="r">Qté achetée</th><th>Offre appliquée</th><th class="r">Qté offerte</th></tr></thead>
+      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte ?? "—"}</td></tr>`).join("")}</tbody></table>`);
   }
 
   if (config.show_genre) {
@@ -260,7 +326,9 @@ export function buildCondensedBulletinHtml(
     sections.push(`
       <h2 class="section-title">UGs (goodies) par site et par jour</h2>
       <table><thead><tr><th>Site</th><th>Date</th><th>Goodie</th>${config.show_ugs_recus ? `<th class="r">Reçus</th>` : ""}${config.show_ugs_distribues ? `<th class="r">Distribués</th>` : ""}${config.show_ugs_restants ? `<th class="r">Restants</th>` : ""}</tr></thead>
-      <tbody>${sortedGoodieRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.goodieNom)}</td>${config.show_ugs_recus ? `<td class="r">${r.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r">${r.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r">${Math.max(0, r.recus - r.distribues)}</td>` : ""}</tr>`).join("")}</tbody></table>`);
+      <tbody>${sortedGoodieRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.goodieNom)}</td>${config.show_ugs_recus ? `<td class="r">${r.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r">${r.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r">${Math.max(0, r.recus - r.distribues)}</td>` : ""}</tr>`).join("")}
+      ${[...ugsTotalsParSite.values()].map(s => `<tr class="tot-row"><td class="b" colspan="3">TOTAL ${esc(s.siteNom)}</td>${config.show_ugs_recus ? `<td class="r b">${s.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r b">${s.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r b">${Math.max(0, s.recus - s.distribues)}</td>` : ""}</tr>`).join("")}
+      </tbody></table>`);
   }
 
   if (config.show_stock_boissons && stockParSite.size > 0) {
@@ -316,6 +384,7 @@ export function buildCondensedBulletinHtml(
   th{background:var(--brand-secondary);color:#fff;padding:8px 12px;text-align:left;font-size:11px;font-weight:700}
   td{padding:8px 12px;border-bottom:1px solid #e2e8f0;font-size:12px}
   .r{text-align:right}.b{font-weight:700}
+  .tot-row td{background:#f1f5f9;font-weight:800}
   .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;padding:0 28px 16px}
   .field{display:flex;flex-direction:column;gap:2px}
   .label{font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#64748b;font-weight:700}
