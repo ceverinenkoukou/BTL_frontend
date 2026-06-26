@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type { CampagneList, CampagneRapportSites, CampagneSiteRapport, Degustation, Vente, VenteStats, SiteList, Entreprise, ObjectifSite, GainPromotion } from "@/lib/types/backend";
 import { getObjectifs } from "@/lib/services/objectifService";
 import { getMyEntreprise } from "@/lib/services/entrepriseService";
@@ -77,12 +77,16 @@ export default function CompanyDashboardPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("all");
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isFirstLoad = useRef(true);
   const [period, setPeriod] = useState<"today" | "7" | "30" | "custom">("7");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
+    if (isFirstLoad.current) setLoading(true);
+    // Le cache GET (30 s) coïnciderait avec l'intervalle de rafraîchissement (30 s) :
+    // on le vide à chaque appel pour garantir des données réellement fraîches.
+    invalidateCache();
     try {
       const [campRes, tastRes, ventesRes, statsRes, siteRes, ent, objData, gainsRes] = await Promise.all([
         api.get<CampagneList[]>("/campagnes/"),
@@ -133,6 +137,7 @@ export default function CompanyDashboardPage() {
       /* silent */
     } finally {
       setLoading(false);
+      isFirstLoad.current = false;
     }
   }, []);
 
