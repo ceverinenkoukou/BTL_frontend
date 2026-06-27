@@ -341,6 +341,9 @@ export interface CreateDegustationPayload {
   // /promotions/{id}/enregistrer-gain/) — évite que le backend crée une
   // Vente NORMAL en double en l'absence de conditionnement.
   promotion_appliquee?: boolean;
+  // Requis uniquement pour une saisie manuelle par un Admin/Superviseur
+  // pour le compte d'une hôtesse (cf. /dashboard/saisie-manuelle).
+  hotesse_id?: string;
 }
 
 export interface MonSiteInfo {
@@ -365,6 +368,9 @@ export interface MonSiteInfo {
     quantite_requise: number;
     recompense_description: string;
   }[];
+  // Hôtesses assignées à ce site — utilisé par l'écran de saisie manuelle
+  // (Admin/Superviseur) pour choisir pour le compte de qui la saisie est faite.
+  hotesses_disponibles: { id: string; name: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +395,7 @@ export interface Vente {
   prix_total: string | null;
   type_vente: 'NORMAL' | 'GRATUIT' | 'PROMOTION';
   nom_client: string | null;
+  est_achat_promo: boolean;
   created_at: string;
 }
 

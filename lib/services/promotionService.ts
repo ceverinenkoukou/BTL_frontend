@@ -22,6 +22,9 @@ export async function enregistrerGainPromotion(
     nom_client?: string;
     tranche_age?: string;
     degustation_id?: string;
+    // Requis uniquement pour une saisie manuelle par un Admin/Superviseur
+    // pour le compte d'une hôtesse.
+    hotesse_id?: string;
   }
 ): Promise<{
   detail: string;

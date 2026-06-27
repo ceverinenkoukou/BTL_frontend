@@ -986,6 +986,7 @@ export default function CampaignDetailPage() {
     validated: true,
     created_at: v.created_at,
     type_vente: v.type_vente,
+    est_achat_promo: v.est_achat_promo,
   })) : [], [ventes, campaign]);
 
   const teamForReport = useMemo(() => campaign ? campaign.hotesses.map(h => ({

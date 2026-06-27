@@ -70,6 +70,7 @@ type ReportSale = Sale & {
   notes?: string;
   goodies_given?: number;
   type_vente?: "NORMAL" | "GRATUIT" | "PROMOTION";
+  est_achat_promo?: boolean;
 };
 type HostessStat = {
   id: string;
@@ -116,6 +117,7 @@ type CampaignReportProps = {
   donneesSiteJour?: DonneesSiteJour[];
   livraisons?: LivraisonGoodiesJour[];
   reportConfig?: RapportConfig | null;
+  label?: string;
 };
 type GeneratePDFArgs = {
   campaign: ReportCampaign;
@@ -677,7 +679,7 @@ function generatePDF({
   // Totaux globaux
   const totalTastings = tastings.length;
   const totalSales    = sales.length;
-  const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").length;
+  const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo).length;
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
   const totalGoodies  = hostessStats.reduce((a, h) => a + h.goodiesCount, 0);
 
@@ -1008,6 +1010,7 @@ export default function CampaignReport({
   donneesSiteJour = [],
   livraisons = [],
   reportConfig,
+  label = "Exporter le rapport PDF",
 }: CampaignReportProps) {
   const [loading, setLoading] = useState(false);
   const isAdminOrSupervisor = user?.role === "admin" || user?.role === "supervisor";
@@ -1053,7 +1056,7 @@ export default function CampaignReport({
     >
       {loading
         ? <><Loader2 className="w-4 h-4 animate-spin" /> Génération en cours…</>
-        : <><FileDown className="w-4 h-4" /> Exporter le rapport PDF</>}
+        : <><FileDown className="w-4 h-4" /> {label}</>}
     </button>
   );
 }
