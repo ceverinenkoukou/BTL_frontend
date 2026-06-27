@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, type ComponentType } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment, type ComponentType } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type {
   CampagneDetail,
   CampagneRapportSites,
@@ -14,7 +14,13 @@ import type {
   Vente,
   GainPromotion,
   GainGoodie,
+  JourAnimation,
+  DonneesSiteJour,
+  LivraisonGoodiesJour,
+  TypeConditionnement,
 } from "@/lib/types/backend";
+import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
+import CampaignReport from "@/components/Campaignreport";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +47,7 @@ import {
   Package,
   Activity,
   ChevronDown,
+  RefreshCw,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -163,20 +170,32 @@ export default function CompanyCampaignDetailPage() {
   const [siteDetails, setSiteDetails] = useState<SiteDetail[]>([]);
   const [gainsPromotions, setGainsPromotions] = useState<GainPromotion[]>([]);
   const [gainsGoodies, setGainsGoodies] = useState<GainGoodie[]>([]);
+  const [joursAnimation, setJoursAnimation] = useState<JourAnimation[]>([]);
+  const [donneesSiteJour, setDonneesSiteJour] = useState<DonneesSiteJour[]>([]);
+  const [livraisons, setLivraisons] = useState<LivraisonGoodiesJour[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [showAllActions, setShowAllActions] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const isFirstLoad = useRef(true);
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchCampaignData = useCallback(async () => {
     if (!campaignId) return;
-    setLoading(true);
+    if (isFirstLoad.current) setLoading(true);
+    // Le cache GET (30 s) coïnciderait avec l'intervalle de rafraîchissement (30 s) :
+    // on le vide à chaque appel pour garantir des données réellement fraîches.
+    invalidateCache();
     try {
-      const [campRes, rapportRes, tastRes, ventesRes, gainsRes, gainsGoodiesRes] = await Promise.all([
+      const [campRes, rapportRes, tastRes, ventesRes, gainsRes, gainsGoodiesRes, joursRes, donneesRes, livrRes] = await Promise.all([
         api.get<CampagneDetail>(`/campagnes/${campaignId}/`),
         api.get<CampagneRapportSites>(`/campagnes/${campaignId}/rapport-sites/`).catch(() => ({ data: null })),
         api.get<Degustation[]>(`/degustations/?campagne=${campaignId}`),
         api.get<Vente[]>(`/ventes/?campagne=${campaignId}`),
         api.get<GainPromotion[]>(`/gains-promotions/?campagne=${campaignId}`).catch(() => ({ data: [] })),
         api.get<GainGoodie[]>(`/gains-goodies/?campagne=${campaignId}`).catch(() => ({ data: [] })),
+        api.get<JourAnimation[]>(`/jours-animation/?campagne=${campaignId}`).catch(() => ({ data: [] })),
+        api.get<DonneesSiteJour[]>(`/donnees-site-jour/?campagne=${campaignId}`).catch(() => ({ data: [] })),
+        api.get<LivraisonGoodiesJour[]>(`/livraisons-goodies/?campagne=${campaignId}`).catch(() => ({ data: [] })),
       ]);
       setCampaign(campRes.data);
       setRapport(rapportRes.data as CampagneRapportSites | null);
@@ -186,6 +205,9 @@ export default function CompanyCampaignDetailPage() {
       setGainsPromotions(gainsData);
       const gainsGoodiesData = Array.isArray(gainsGoodiesRes.data) ? gainsGoodiesRes.data : (gainsGoodiesRes.data as { results?: GainGoodie[] }).results ?? [];
       setGainsGoodies(gainsGoodiesData);
+      setJoursAnimation(Array.isArray(joursRes.data) ? joursRes.data : (joursRes.data as { results?: JourAnimation[] }).results ?? []);
+      setDonneesSiteJour(Array.isArray(donneesRes.data) ? donneesRes.data : (donneesRes.data as { results?: DonneesSiteJour[] }).results ?? []);
+      setLivraisons(Array.isArray(livrRes.data) ? livrRes.data : (livrRes.data as { results?: LivraisonGoodiesJour[] }).results ?? []);
 
       // Fetch site details with team info
       if (rapportRes.data && (rapportRes.data as CampagneRapportSites).sites?.length) {
@@ -195,15 +217,21 @@ export default function CompanyCampaignDetailPage() {
         const results = await Promise.all(sitePromises);
         setSiteDetails(results.filter(r => r?.data).map(r => r!.data) as SiteDetail[]);
       }
+      setLastRefresh(new Date());
     } catch {}
     setLoading(false);
+    isFirstLoad.current = false;
   }, [campaignId]);
 
   useEffect(() => {
     if (!authLoading) {
       if (!user) { router.push("/auth/login"); return; }
       if (user.role !== "Entreprise") { router.push("/dashboard"); return; }
-      if (campaignId) fetchCampaignData();
+      if (campaignId) {
+        fetchCampaignData();
+        refreshTimer.current = setInterval(fetchCampaignData, 30000);
+        return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
+      }
     }
   }, [user, authLoading, router, campaignId, fetchCampaignData]);
 
@@ -336,6 +364,70 @@ export default function CompanyCampaignDetailPage() {
     return { vendus, offerts, goodies, tirages };
   }, [ventes, gainsPromotions]);
 
+  const condLabel = (cond: TypeConditionnement) => (cond === "PACK" ? "Packs" : "Unités");
+
+  // Conditionnements réellement utilisés par les ventes/offres de la campagne
+  const conditionnementsPresents = useMemo(() => {
+    const set = new Set<TypeConditionnement>();
+    ventes.forEach(v => { if (v.type_vente === "NORMAL") set.add(v.conditionnement); });
+    gainsPromotions.forEach(g => { if (g.type_promotion === "OFFERT") set.add(g.conditionnement); });
+    return (["UNITE", "PACK"] as TypeConditionnement[]).filter(c => set.has(c));
+  }, [ventes, gainsPromotions]);
+
+  const hasTombola = gainsPromotions.some(g => g.type_promotion === "TIRAGE");
+  const hasGoodiesPromo = gainsPromotions.some(g => g.type_promotion === "GAGNE");
+
+  // ── Performance par PDV — répartition vendus/offerts par conditionnement, tirages, goodies ──
+  const pdvPerformance = useMemo(() => {
+    if (!rapport) return [];
+    return rapport.sites.map(site => {
+      const parCond: Record<string, { vendus: number; offerts: number }> = {};
+      let total = 0;
+      conditionnementsPresents.forEach(cond => {
+        const vendus = ventes.filter(v => v.site_nom === site.nom && v.type_vente === "NORMAL" && v.conditionnement === cond).length;
+        const offerts = gainsPromotions.filter(g => g.site_nom === site.nom && g.type_promotion === "OFFERT" && g.conditionnement === cond).length;
+        parCond[cond] = { vendus, offerts };
+        total += vendus + offerts;
+      });
+      const tirages = gainsPromotions.filter(g => g.site_nom === site.nom && g.type_promotion === "TIRAGE").length;
+      const goodies = gainsPromotions.filter(g => g.site_nom === site.nom && g.type_promotion === "GAGNE").length;
+      total += tirages + goodies;
+      return { nom: site.nom, parCond, tirages, goodies, total };
+    });
+  }, [rapport, ventes, gainsPromotions, conditionnementsPresents]);
+
+  const pdvTotaux = useMemo(() => {
+    const parCond: Record<string, { vendus: number; offerts: number }> = {};
+    conditionnementsPresents.forEach(cond => {
+      parCond[cond] = {
+        vendus: pdvPerformance.reduce((s, p) => s + (p.parCond[cond]?.vendus ?? 0), 0),
+        offerts: pdvPerformance.reduce((s, p) => s + (p.parCond[cond]?.offerts ?? 0), 0),
+      };
+    });
+    return {
+      parCond,
+      tirages: pdvPerformance.reduce((s, p) => s + p.tirages, 0),
+      goodies: pdvPerformance.reduce((s, p) => s + p.goodies, 0),
+      total: pdvPerformance.reduce((s, p) => s + p.total, 0),
+    };
+  }, [pdvPerformance, conditionnementsPresents]);
+
+  // ── Mécaniques promotionnelles configurées — texte généré dynamiquement ──
+  const mecaniqueRules = useMemo(() => {
+    if (!campaign?.promotions) return [];
+    return campaign.promotions.filter(p => p.is_active).map(p => {
+      const label = condLabel(p.conditionnement).toLowerCase();
+      const requise = `${fmt(p.quantite_requise)} ${label} acheté${p.quantite_requise > 1 ? "s" : ""}`;
+      if (p.type_promotion === "OFFERT") {
+        return `${requise} → ${fmt(p.quantite_offerte)} offert${p.quantite_offerte > 1 ? "s" : ""}`;
+      }
+      if (p.type_promotion === "TIRAGE") {
+        return `${requise} → 1 ticket tombola`;
+      }
+      return `${requise} → ${p.recompense_description}`;
+    });
+  }, [campaign]);
+
   const [selectedMecaniqueSite, setSelectedMecaniqueSite] = useState<string>("");
 
   useEffect(() => {
@@ -387,6 +479,93 @@ export default function CompanyCampaignDetailPage() {
     link.click();
   }, [selectedDate, campaign, tastings, ventes]);
 
+  // ── Données mappées pour le bouton "Bilan final" (CampaignReport) ──
+  const campaignForReport = useMemo(() => campaign ? {
+    id: campaign.id,
+    company_id: "",
+    name: campaign.nom,
+    description: campaign.description ?? undefined,
+    start_date: campaign.date_debut,
+    end_date: campaign.date_fin,
+    sales_objective: campaign.objectif_ventes ?? 0,
+    tasting_objective: campaign.objectif_degustations ?? 0,
+    status: "active" as const,
+    created_at: "",
+    updated_at: "",
+    company: {
+      id: "",
+      name: campaign.entreprise_nom,
+      color: campaign.couleur_primaire,
+      logoUrl: campaign.logo_url ?? undefined,
+      created_at: "",
+      updated_at: "",
+    },
+  } : null, [campaign]);
+
+  const tastingsForReport = useMemo(() => campaign ? tastings.map(t => ({
+    id: t.id,
+    campaign_id: campaign.id,
+    hostess_id: t.hotesse,
+    product_id: t.produit,
+    gender: "female" as const,
+    age_range: "18-25" as const,
+    taste_rating: "3" as const,
+    purchase_intent: "medium" as const,
+    has_purchased: t.a_achete,
+    site_id: t.site,
+    created_at: t.created_at,
+    hostess_name: t.hotesse_nom,
+    site_name: t.site_nom,
+    product_name: t.produit_nom,
+    nom_client: t.nom_client,
+    tranche_age_display: t.tranche_age_display,
+    intention_achat_display: t.intention_achat_display,
+    note_gout: t.note_gout,
+    note_ambiance: t.note_ambiance,
+    a_achete: t.a_achete,
+  })) : [], [tastings, campaign]);
+
+  const salesForReport = useMemo(() => campaign ? ventes.map(v => ({
+    id: v.id,
+    campaign_id: campaign.id,
+    hostess_id: v.hotesse,
+    product_id: v.produit,
+    quantity: v.quantite,
+    unit_price: 0,
+    total_amount: parseFloat(v.prix_total ?? "0"),
+    validated: true,
+    created_at: v.created_at,
+    type_vente: v.type_vente,
+    est_achat_promo: v.est_achat_promo,
+  })) : [], [ventes, campaign]);
+
+  const teamForReport = useMemo(() => campaign ? campaign.hotesses.map(h => ({
+    id: h.id,
+    campaign_id: campaign.id,
+    user_id: h.id,
+    role: "hostess" as const,
+    assigned_at: "",
+    user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
+  })) : [], [campaign]);
+
+  const sitesForReport = useMemo(() => (rapport?.sites ?? []).map(s => ({
+    id: s.id,
+    campaign_id: campaign?.id ?? "",
+    zone_id: "",
+    name: s.nom,
+    address: s.ville || "",
+  })), [rapport, campaign]);
+
+  const userForReport = useMemo(() => user ? {
+    id: (user as any).id ?? "",
+    email: (user as any).email ?? "",
+    full_name: (user as any).name ?? "",
+    role: "company" as const,
+    is_active: true,
+    created_at: "",
+    updated_at: "",
+  } : null, [user]);
+
   if (authLoading || (!campaign && loading)) return <CompanyCampaignSkeleton />;
   if (!campaign) return <div className="flex items-center justify-center h-96"><p className="text-muted-foreground">Campagne non trouvée</p></div>;
 
@@ -418,8 +597,14 @@ export default function CompanyCampaignDetailPage() {
                   {campaign.type_recompense === "GOODIES" ? "🎁 Goodies" : "🏷️ Promotions"}
                 </Badge>
               )}
+              <Badge className={`text-xs backdrop-blur-sm border-0 ${dateInfo.joursRestants > 0 || new Date(campaign.date_fin) >= new Date() ? "bg-emerald-500/40 text-white" : "bg-white/20 text-white/80"}`}>
+                {new Date(campaign.date_fin) >= new Date() ? "Active" : "Terminée"}
+              </Badge>
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">{campaign.nom}</h1>
+            {campaign.description && (
+              <p className="text-white/70 text-sm mt-1 max-w-2xl">{campaign.description}</p>
+            )}
             <p className="text-white/80 text-sm mt-1">
               Du {format(parseISO(campaign.date_debut), "dd MMM yyyy", { locale: fr })} au {format(parseISO(campaign.date_fin), "dd MMM yyyy", { locale: fr })}
             </p>
@@ -437,24 +622,51 @@ export default function CompanyCampaignDetailPage() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-xl p-2">
-            <Calendar className="w-4 h-4 text-white/70 ml-2" />
-            <Select value={selectedDate} onValueChange={setSelectedDate}>
-              <SelectTrigger className="w-44 border-0 bg-transparent text-white focus:ring-0 [&>span]:text-white/90">
-                <SelectValue placeholder="Exporter un jour..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableDates.map((date) => (
-                  <SelectItem key={date} value={date}>
-                    {format(parseISO(date), "EEEE dd MMMM", { locale: fr })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button size="sm" onClick={handleExport} disabled={!selectedDate} className="gap-1 bg-white/25 hover:bg-white/35 text-white border-0">
-              <Download className="w-4 h-4" /> Exporter (CSV)
-            </Button>
-          </div>
+        </div>
+      </div>
+
+      {/* ── Status bar : auto-refresh + exports ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          <span>Mis à jour : {lastRefresh.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+          <span className="hidden sm:inline">· Actualisation toutes les 30 s</span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select value={selectedDate} onValueChange={setSelectedDate}>
+            <SelectTrigger className="h-9 w-44 text-xs rounded-lg border-slate-200">
+              <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+              <SelectValue placeholder="Choisir un jour..." />
+            </SelectTrigger>
+            <SelectContent>
+              {availableDates.map((date) => (
+                <SelectItem key={date} value={date}>
+                  {format(parseISO(date), "EEEE dd MMMM", { locale: fr })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" onClick={handleExport} disabled={!selectedDate} className="gap-1.5 text-xs">
+            <Download className="w-3.5 h-3.5" /> Export par jour
+          </Button>
+          {campaignForReport && userForReport && (
+            <CampaignReport
+              campaign={campaignForReport as any}
+              user={userForReport as any}
+              tastings={tastingsForReport as any}
+              sales={salesForReport as any}
+              team={teamForReport as any}
+              sites={sitesForReport as any}
+              horaires={joursAnimation as any}
+              donneesSiteJour={donneesSiteJour}
+              livraisons={livraisons}
+              reportConfig={DEFAULT_RAPPORT_CONFIG}
+              label="Bilan final"
+            />
+          )}
         </div>
       </div>
 
@@ -1265,6 +1477,69 @@ export default function CompanyCampaignDetailPage() {
                 </div>
               )}
             </div>
+
+            {/* ── Performance par PDV (point de vente) ── */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Performance par PDV (point de vente)</p>
+              <div className="overflow-x-auto rounded-xl border border-slate-100">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/60">
+                      <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">Site</th>
+                      {conditionnementsPresents.map(cond => (
+                        <Fragment key={cond}>
+                          <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">{condLabel(cond)} vendues</th>
+                          <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">{condLabel(cond)} offertes</th>
+                        </Fragment>
+                      ))}
+                      {hasTombola && <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Tickets tombola</th>}
+                      {hasGoodiesPromo && <th className="text-right text-xs font-semibold text-muted-foreground px-4 py-3">Goodies</th>}
+                      <th className="text-right text-xs font-semibold text-foreground px-4 py-3">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pdvPerformance.map((row, idx) => (
+                      <tr key={row.nom} className={`border-b border-slate-50 hover:bg-slate-50/60 transition-colors ${idx % 2 === 0 ? "" : "bg-slate-50/30"}`}>
+                        <td className="px-4 py-3 font-medium text-foreground">{row.nom}</td>
+                        {conditionnementsPresents.map(cond => (
+                          <Fragment key={cond}>
+                            <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.secondary }}>{fmt(row.parCond[cond]?.vendus ?? 0)}</td>
+                            <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.info }}>{fmt(row.parCond[cond]?.offerts ?? 0)}</td>
+                          </Fragment>
+                        ))}
+                        {hasTombola && <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.purple }}>{fmt(row.tirages)}</td>}
+                        {hasGoodiesPromo && <td className="px-4 py-3 text-right font-semibold" style={{ color: COLORS.success }}>{fmt(row.goodies)}</td>}
+                        <td className="px-4 py-3 text-right font-bold text-foreground">{fmt(row.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-200 bg-slate-50">
+                      <td className="px-4 py-3 font-bold text-sm text-foreground">Total</td>
+                      {conditionnementsPresents.map(cond => (
+                        <Fragment key={cond}>
+                          <td className="px-4 py-3 text-right font-bold" style={{ color: COLORS.secondary }}>{fmt(pdvTotaux.parCond[cond]?.vendus ?? 0)}</td>
+                          <td className="px-4 py-3 text-right font-bold" style={{ color: COLORS.info }}>{fmt(pdvTotaux.parCond[cond]?.offerts ?? 0)}</td>
+                        </Fragment>
+                      ))}
+                      {hasTombola && <td className="px-4 py-3 text-right font-bold" style={{ color: COLORS.purple }}>{fmt(pdvTotaux.tirages)}</td>}
+                      {hasGoodiesPromo && <td className="px-4 py-3 text-right font-bold" style={{ color: COLORS.success }}>{fmt(pdvTotaux.goodies)}</td>}
+                      <td className="px-4 py-3 text-right font-bold text-foreground">{fmt(pdvTotaux.total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* ── Mécaniques configurées (texte généré depuis les promotions actives) ── */}
+            {mecaniqueRules.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5" /> Mécaniques
+                </p>
+                <p className="text-sm text-amber-900">{mecaniqueRules.join(" · ")}</p>
+              </div>
+            )}
 
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Écoulement par site</p>

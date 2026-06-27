@@ -117,6 +117,7 @@ type CampaignReportProps = {
   donneesSiteJour?: DonneesSiteJour[];
   livraisons?: LivraisonGoodiesJour[];
   reportConfig?: RapportConfig | null;
+  label?: string;
 };
 type GeneratePDFArgs = {
   campaign: ReportCampaign;
@@ -1009,6 +1010,7 @@ export default function CampaignReport({
   donneesSiteJour = [],
   livraisons = [],
   reportConfig,
+  label = "Exporter le rapport PDF",
 }: CampaignReportProps) {
   const [loading, setLoading] = useState(false);
   const isAdminOrSupervisor = user?.role === "admin" || user?.role === "supervisor";
@@ -1054,7 +1056,7 @@ export default function CampaignReport({
     >
       {loading
         ? <><Loader2 className="w-4 h-4 animate-spin" /> Génération en cours…</>
-        : <><FileDown className="w-4 h-4" /> Exporter le rapport PDF</>}
+        : <><FileDown className="w-4 h-4" /> {label}</>}
     </button>
   );
 }
