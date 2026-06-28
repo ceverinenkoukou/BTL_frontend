@@ -36,6 +36,7 @@ import {
   Wifi,
   WifiOff,
   ClipboardEdit,
+  Headset,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
@@ -61,6 +62,8 @@ const navItems: NavItem[] = [
   { href: "/dashboard/campaigns", label: "Campagnes", icon: <Target className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/tastings", label: "Dégustations", icon: <UtensilsCrossed className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/saisie-manuelle", label: "Saisie manuelle", icon: <ClipboardEdit className="w-5 h-5" />, roles: ["Administrateur", "Superviseur"] },
+  { href: "/dashboard/campagnes-services", label: "Campagnes service", icon: <Headset className="w-5 h-5" />, roles: ["Administrateur"] },
+  { href: "/dashboard/sondages", label: "Sondages", icon: <Headset className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/sales", label: "Ventes", icon: <ShoppingCart className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/stats", label: "Statistiques", icon: <BarChart3 className="w-5 h-5" />, roles: ["Administrateur", "Superviseur", "Hotesse"] },
   { href: "/dashboard/wheel", label: "Roue à cadeaux", icon: <Gift className="w-5 h-5" />, roles: ["Hotesse", "Superviseur"] },
