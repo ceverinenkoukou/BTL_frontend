@@ -68,6 +68,11 @@ export interface ProduitCreatePayload {
   prix_indicatif?: number | null;
 }
 
+export interface ServiceCreatePayload {
+  nom: string;
+  description?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Entreprise
 // ---------------------------------------------------------------------------
@@ -84,6 +89,8 @@ export interface Entreprise {
   nom_utilisateur: string;
   is_password_changed: boolean;
   produits: Produit[];
+  // Services (app "services" — campagnes service, indépendant des produits).
+  services: ServicePromu[];
   created_at: string;
   /** Présent après création : indique si l'e-mail d'identifiants a été envoyé */
   email_sent?: boolean;
@@ -100,6 +107,7 @@ export interface CreateEntreprisePayload {
   couleur_secondaire?: string;
   logo_url?: string;
   produits?: ProduitCreatePayload[];
+  services?: ServiceCreatePayload[];
 }
 
 // ---------------------------------------------------------------------------
@@ -270,9 +278,10 @@ export interface SiteList {
   nom: string;
   ville: string;
   emplacement_precis: string | null;
-  campagne: string;
-  campagne_nom: string;
-  entreprise_nom: string;
+  // null = site sans campagne produit (site service uniquement).
+  campagne: string | null;
+  campagne_nom: string | null;
+  entreprise_nom: string | null;
   nb_hotesses: number;
   nb_superviseurs: number;
   created_at: string;
@@ -287,7 +296,10 @@ export interface CreateSitePayload {
   nom: string;
   ville?: string;
   emplacement_precis?: string;
-  campagne: string;
+  // L'un des deux est requis (validé côté backend) : une campagne produit
+  // classique, ou une campagne service pour un site sans activité produit.
+  campagne?: string;
+  campagne_service?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +364,10 @@ export interface MonSiteInfo {
   campagne_id: string;
   campagne_nom: string;
   entreprise_nom: string;
+  // Pilote la variante de formulaire affichée côté hôtesse (dégustation
+  // seule / vente seule / dégustation + vente).
+  type_campagne: TypeCampagne;
+  type_campagne_display: string;
   type_recompense: TypeRecompense;
   type_recompense_display: string;
   note_gout_active: boolean;
@@ -817,6 +833,147 @@ export interface CreateLivraisonGoodiesJourPayload {
   goodie: string;
   date: string;
   quantite_apportee: number;
+}
+
+// ---------------------------------------------------------------------------
+// Campagnes Service (app "services" — promotion d'un service, pas d'un
+// produit physique. Indépendant de Campagne/Produit, réutilise
+// Entreprise/Site/RemoteUser de btl).
+// ---------------------------------------------------------------------------
+
+export type TypeCampagneService = "SONDAGE";
+
+export interface CampagneServiceList {
+  id: string;
+  nom: string;
+  entreprise: string;
+  entreprise_nom: string;
+  type_campagne_service: TypeCampagneService;
+  type_campagne_service_display: string;
+  description: string | null;
+  date_debut: string;
+  date_fin: string;
+  campagne_produit_liee: string | null;
+  campagne_produit_liee_nom: string | null;
+  is_active: boolean;
+  nb_sites: number;
+  nb_hotesses: number;
+  nb_superviseurs: number;
+  created_at: string;
+}
+
+export interface CampagneServiceDetail extends Omit<CampagneServiceList, "nb_sites" | "nb_hotesses" | "nb_superviseurs"> {
+  sites: string[];
+  superviseurs: TeamMember[];
+  hotesses: TeamMember[];
+  // Services réellement disponibles pour cette campagne (sélection si
+  // renseignée, sinon tous les services de l'entreprise).
+  services: ServicePromu[];
+}
+
+export interface CreateCampagneServicePayload {
+  nom: string;
+  entreprise: string;
+  type_campagne_service: TypeCampagneService;
+  description?: string;
+  date_debut: string;
+  date_fin: string;
+  sites?: string[];
+  superviseurs?: string[];
+  hotesses?: string[];
+  // Vide = tous les services de l'entreprise sont disponibles.
+  services?: string[];
+  campagne_produit_liee?: string | null;
+  is_active?: boolean;
+}
+
+export interface ServicePromu {
+  id: string;
+  entreprise: string;
+  entreprise_nom: string;
+  nom: string;
+  description: string | null;
+  created_at: string;
+}
+
+export interface ObjectifCampagneService {
+  id: string;
+  campagne_service: string;
+  site: string | null;
+  site_nom: string | null;
+  nom: string;
+  valeur_cible: number;
+  created_at: string;
+}
+
+export interface RecompenseService {
+  id: string;
+  campagne_service: string;
+  campagne_service_nom: string;
+  nom: string;
+  quantite_totale: number;
+  quantite_distribuee: number;
+  quantite_restante: number;
+  created_at: string;
+}
+
+export interface GainRecompenseService {
+  id: string;
+  sondage: string | null;
+  recompense: string;
+  recompense_nom: string;
+  site: string;
+  site_nom: string;
+  hotesse: string;
+  hotesse_nom: string;
+  nom_client: string | null;
+  created_at: string;
+}
+
+export interface Sondage {
+  id: string;
+  campagne_service: string;
+  campagne_service_nom: string;
+  site: string;
+  site_nom: string;
+  hotesse: string;
+  hotesse_nom: string;
+  service: string;
+  service_nom: string;
+  nom_client: string | null;
+  tranche_age: TrancheAge | null;
+  tranche_age_display: string | null;
+  genre: Genre | null;
+  genre_display: string | null;
+  possede_deja: boolean;
+  a_souscrit: boolean;
+  created_at: string;
+}
+
+export interface CreateSondagePayload {
+  campagne_service: string;
+  site: string;
+  service: string;
+  nom_client?: string;
+  tranche_age?: TrancheAge;
+  genre?: Genre;
+  possede_deja: boolean;
+  a_souscrit: boolean;
+  hotesse_id?: string;
+}
+
+export interface MonSiteServiceInfo {
+  site_id: string;
+  site_nom: string;
+  campagne_service_id: string;
+  campagne_service_nom: string;
+  type_campagne_service: TypeCampagneService;
+  type_campagne_service_display: string;
+  entreprise_nom: string;
+  services: { id: string; nom: string }[];
+  auto_select_service: boolean;
+  recompenses_disponibles: { id: string; nom: string; quantite_restante: number }[];
+  hotesses_disponibles: { id: string; name: string }[];
 }
 
 // ---------------------------------------------------------------------------

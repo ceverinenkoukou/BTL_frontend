@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Building2, Plus, Package, Mail, Phone, MapPin,
   Trash2, Edit2, ChevronRight, ChevronLeft, X, Check,
-  Palette, Upload, Loader2, Send, KeyRound, AlertTriangle,
+  Palette, Upload, Loader2, Send, KeyRound, AlertTriangle, Headset,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -34,6 +34,12 @@ const EMPTY_PRODUCT: ProductEntry = {
   modes: ["UNITE"],
   prix_unite: "", quantite_unite: "", prix_pack: "", items_par_pack: "",
 };
+
+type ServiceEntry = {
+  name: string;
+  description: string;
+};
+const EMPTY_SERVICE: ServiceEntry = { name: "", description: "" };
 
 const isLight = (hex: string) => {
   const c = hex.replace("#", "");
@@ -72,9 +78,17 @@ export default function CompaniesPage() {
 
   // Step-2 fields
   const [entries, setEntries] = useState<ProductEntry[]>([{ ...EMPTY_PRODUCT }]);
+  // Services (entreprise — app "services", campagnes service), créés en
+  // une fois à la création de l'entreprise comme les produits.
+  const [serviceEntries, setServiceEntries] = useState<ServiceEntry[]>([{ ...EMPTY_SERVICE }]);
 
   const updateEntry = (i: number, patch: Partial<ProductEntry>) =>
     setEntries(prev => prev.map((e, idx) => idx === i ? { ...e, ...patch } : e));
+
+  const updateServiceEntry = (i: number, patch: Partial<ServiceEntry>) =>
+    setServiceEntries(prev => prev.map((e, idx) => idx === i ? { ...e, ...patch } : e));
+  const addServiceEntry = () => setServiceEntries(prev => [...prev, { ...EMPTY_SERVICE }]);
+  const removeServiceEntry = (i: number) => setServiceEntries(prev => prev.filter((_, idx) => idx !== i));
 
   const toggleMode = (i: number, mode: "UNITE" | "PACK") =>
     setEntries(prev => prev.map((e, idx) => {
@@ -113,6 +127,7 @@ export default function CompaniesPage() {
     setCName(""); setCAddress(""); setCEmail(""); setCPhone("");
     setCLogoUrl(""); setCColor1("#006776"); setCColor2("#00899b");
     setEntries([{ ...EMPTY_PRODUCT }]);
+    setServiceEntries([{ ...EMPTY_SERVICE }]);
     if (logoInputRef.current) logoInputRef.current.value = "";
   };
 
@@ -210,6 +225,13 @@ export default function CompaniesPage() {
     }
     setSubmitting(true);
     try {
+      const validServices = serviceEntries
+        .filter(e => e.name.trim())
+        .map(e => ({
+          nom: e.name.trim(),
+          description: e.description.trim() || undefined,
+        }));
+
       const validProducts = entries
         .filter(e => e.name.trim())
         .flatMap(e => e.modes.map(mode => ({
@@ -311,11 +333,16 @@ export default function CompaniesPage() {
           couleur_secondaire: cColor2,
           logo_url:          cLogoUrl.trim() || undefined,
           produits:          validProducts.length ? validProducts : undefined,
+          services:          validServices.length ? validServices : undefined,
         };
         const { data: created } = await api.post<Entreprise>("/entreprises/", payload);
         setCompanies(prev => [...prev, created]);
         invalidateCache("/entreprises");
-        const productsMsg = validProducts.length ? ` avec ${validProducts.length} produit(s)` : "";
+        const productsMsgParts = [
+          validProducts.length ? `${validProducts.length} produit(s)` : null,
+          validServices.length ? `${validServices.length} service(s)` : null,
+        ].filter(Boolean).join(" et ");
+        const productsMsg = productsMsgParts ? ` avec ${productsMsgParts}` : "";
         if (created.email_sent === false) {
           toast.warning(
             `Entreprise créée${productsMsg}, mais l'e-mail d'identifiants n'a pas pu être envoyé. Vérifiez la configuration SMTP du serveur.`,
@@ -958,6 +985,51 @@ export default function CompaniesPage() {
                 <Plus className="w-4 h-4" />
                 Ajouter un autre produit
               </button>
+
+              {/* Services — campagnes service (app "services"), indépendant des produits */}
+              {!editingCompany && (
+                <div className="space-y-3 pt-4 border-t border-slate-100">
+                  <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 text-xs text-violet-700 flex items-center gap-2">
+                    <Headset className="w-4 h-4 shrink-0" />
+                    <span><span className="font-semibold">Services</span> — optionnel, pour les campagnes service (sondage, vérification de souscription...).</span>
+                  </div>
+                  <div className="space-y-3">
+                    {serviceEntries.map((entry, i) => (
+                      <div key={i} className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold text-muted-foreground">Service {i + 1}</span>
+                          {serviceEntries.length > 1 && (
+                            <button onClick={() => removeServiceEntry(i)} className="w-5 h-5 rounded-md bg-rose-100 hover:bg-rose-200 flex items-center justify-center transition-colors">
+                              <X className="w-3 h-3 text-rose-600" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <Input
+                            placeholder="Nom du service (ex: Application MyTelecom) *"
+                            value={entry.name}
+                            onChange={e => updateServiceEntry(i, { name: e.target.value })}
+                            className="rounded-lg text-sm h-8"
+                          />
+                          <Input
+                            placeholder="Description (optionnel)"
+                            value={entry.description}
+                            onChange={e => updateServiceEntry(i, { description: e.target.value })}
+                            className="rounded-lg text-sm h-8"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={addServiceEntry}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-violet-200 hover:border-violet-400 text-violet-600 hover:text-violet-700 text-sm font-semibold transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Ajouter un autre service
+                  </button>
+                </div>
+              )}
 
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                 <button

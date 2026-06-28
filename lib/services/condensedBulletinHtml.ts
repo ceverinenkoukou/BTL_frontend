@@ -39,6 +39,15 @@ export function buildCondensedBulletinHtml(
       ? fmtDateLong(dates[0])
       : `${fmtDateLong(dates[0])} — ${fmtDateLong(dates[dates.length - 1])}`;
 
+  // Le contenu du bulletin s'adapte au type de campagne (même logique que
+  // le formulaire de saisie hôtesse) : une campagne VENTE n'a jamais de
+  // dégustation (donc pas de genre/tranche d'âge/notes/CA-dégustation), une
+  // campagne DEGUSTATION n'a jamais de vente. Repli sur DEGUSTATION_VENTE
+  // (comportement historique, tout affiché) si le champ est absent.
+  const campagneType = campagne.type_campagne ?? "DEGUSTATION_VENTE";
+  const showDegustationData = campagneType !== "VENTE";
+  const showVenteData = campagneType !== "DEGUSTATION";
+
   // Champs optionnels / défensif : si le backend déployé est plus ancien que
   // ce générateur (nouveaux champs pas encore renvoyés par l'API), on dégrade
   // proprement au lieu de planter en plein milieu de la génération.
@@ -112,6 +121,14 @@ export function buildCondensedBulletinHtml(
     !venteAchatIds.has(v.id)
   );
   const totalHorsPromo = relevantVentesHorsPromo.reduce((s, v) => s + v.quantite, 0);
+  // Total ventes (toutes Vente NORMAL, y compris achats déclencheurs de
+  // promo) — utilisé comme KPI principal pour une campagne VENTE seule,
+  // où il n'existe aucune dégustation pour porter ce total à sa place.
+  const relevantVentesNormal = ventes.filter(v =>
+    v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
+    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
+  );
+  const totalVentes = relevantVentesNormal.reduce((s, v) => s + v.quantite, 0);
 
   // Goodies (UGs) reçus/distribués/restants — détaillés par site et par
   // jour (une ligne par site+date+goodie), plutôt qu'agrégés globalement
@@ -175,9 +192,9 @@ export function buildCondensedBulletinHtml(
     stockParSite.get(site)!.gratuites += valeur;
   });
 
-  const parSite = new Map<string, { siteNom: string; deg: number; horsPromo: number; ca: number }>();
+  const parSite = new Map<string, { siteNom: string; deg: number; horsPromo: number; ca: number; ventes: number }>();
   bulletins.forEach(b => {
-    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, horsPromo: 0, ca: 0 });
+    if (!parSite.has(b.site)) parSite.set(b.site, { siteNom: b.site_nom, deg: 0, horsPromo: 0, ca: 0, ventes: 0 });
     const e = parSite.get(b.site)!;
     e.deg += b.nb_degustations ?? 0;
     e.ca += Number(b.chiffre_affaires || 0);
@@ -185,8 +202,16 @@ export function buildCondensedBulletinHtml(
   relevantVentesHorsPromo.forEach(v => {
     const siteId = siteNomToId.get(v.site_nom);
     if (!siteId) return;
-    if (!parSite.has(siteId)) parSite.set(siteId, { siteNom: v.site_nom, deg: 0, horsPromo: 0, ca: 0 });
+    if (!parSite.has(siteId)) parSite.set(siteId, { siteNom: v.site_nom, deg: 0, horsPromo: 0, ca: 0, ventes: 0 });
     parSite.get(siteId)!.horsPromo += v.quantite;
+  });
+  // Total ventes par site (campagne VENTE seule, où il n'y a pas de
+  // dégustation pour porter le compte "Détail par site").
+  relevantVentesNormal.forEach(v => {
+    const siteId = siteNomToId.get(v.site_nom);
+    if (!siteId) return;
+    if (!parSite.has(siteId)) parSite.set(siteId, { siteNom: v.site_nom, deg: 0, horsPromo: 0, ca: 0, ventes: 0 });
+    parSite.get(siteId)!.ventes += v.quantite;
   });
 
   // Synthèse par site et hôtesse : quantité achetée (toutes ventes NORMAL,
@@ -202,10 +227,6 @@ export function buildCondensedBulletinHtml(
     if (!synthMap.has(key)) synthMap.set(key, { siteNom: site, hotesseNom: hotesse, quantiteAchetee: 0, quantiteHorsPromo: 0, nbOffresAppliquees: 0 });
     return synthMap.get(key)!;
   };
-  const relevantVentesNormal = ventes.filter(v =>
-    v.type_vente === "NORMAL" && v.campagne_nom === campagne.nom &&
-    siteNoms.has(v.site_nom) && dateSet.has(v.created_at.slice(0, 10))
-  );
   relevantVentesNormal.forEach(v => {
     const e = getSynth(v.site_nom, v.hotesse_nom || "Non renseignée");
     e.quantiteAchetee += v.quantite;
@@ -221,47 +242,84 @@ export function buildCondensedBulletinHtml(
     a.siteNom === b.siteNom ? a.hotesseNom.localeCompare(b.hotesseNom) : a.siteNom.localeCompare(b.siteNom)
   );
 
-  // Détail des dégustations — une ligne par dégustation du jour, sur TOUS
-  // les sites de la campagne (filtré uniquement par campagne + date, pas par
-  // siteNoms : un site sans bulletin généré ne doit pas perdre ses lignes).
-  // L'achat (le cas échéant) et son type (hors promo / promo / goodie) sont
-  // résolus via la Vente liée (Degustation.vente), puis le détail de l'offre
-  // via GainPromotion.vente_achat pour les ventes de type PROMOTION.
+  // Détail des ventes — une ligne par vente NORMAL de la période (achat),
+  // enrichie de l'offre éventuellement déclenchée. Construit directement
+  // depuis Vente, PAS depuis Degustation : couvre aussi les achats
+  // déclencheurs de promo sans dégustation associée (la majorité des gains
+  // promo), qui étaient invisibles quand ce tableau partait de Degustation.
+  // Filtré uniquement par campagne + date, pas par siteNoms : un site sans
+  // bulletin généré ne doit pas perdre ses lignes.
+  //
+  // Conséquence acceptée : les dégustations sans achat n'apparaissent plus
+  // ici (il n'y a pas de Vente à montrer). Pour la liste des dégustations
+  // elles-mêmes, voir les bulletins individuels.
   type VenteRow = {
-    site: string; date: string; client: string; produit: string; achat: boolean;
-    conditionnement: string; quantiteAchetee: number; offre: string; quantiteOfferte: number | null;
+    time: number; site: string; date: string; client: string; produit: string;
+    conditionnement: string; quantiteAchetee: number; offre: string; quantiteOfferte: number;
   };
-  const ventesById = new Map(ventes.map(v => [v.id, v]));
   const gainsByVenteId = new Map(
     gainPromotions.filter(g => g.vente_achat).map(g => [g.vente_achat as string, g])
   );
-  const relevantDegustations = degustations.filter(d =>
-    d.campagne_nom === campagne.nom && dateSet.has(d.created_at.slice(0, 10))
+  const OFFER_WINDOW = 10 * 60 * 1000;
+  const isPlaceholderClient = (c: string) => c === "—";
+  const normalizeClient = (value: string | null | undefined) => (value || "").trim() || "—";
+
+  const relevantVentesDetail = ventes.filter(v =>
+    v.campagne_nom === campagne.nom && dateSet.has(v.created_at.slice(0, 10))
   );
 
-  const venteRows: VenteRow[] = relevantDegustations.map(d => {
-    if (!d.a_achete || !d.vente) {
-      return {
-        site: d.site_nom, date: d.created_at.slice(0, 10), client: d.nom_client || "—",
-        produit: d.produit_nom, achat: false,
-        conditionnement: "—", quantiteAchetee: 0, offre: "—", quantiteOfferte: null,
-      };
-    }
-    const venteFull = ventesById.get(d.vente.id);
-    const typeVente = venteFull?.type_vente;
-    const gain = gainsByVenteId.get(d.vente.id);
-    const offre = gain
-      ? gain.promotion_description
-      : typeVente === "GRATUIT" ? "Offert (goodie)" : "—";
-    return {
-      site: d.site_nom, date: d.created_at.slice(0, 10),
-      client: d.nom_client || venteFull?.nom_client || gain?.nom_client || "—",
-      produit: d.produit_nom, achat: true,
-      conditionnement: d.vente.conditionnement_display, quantiteAchetee: d.vente.quantite,
-      offre, quantiteOfferte: gain?.quantite_offerte ?? null,
-    };
+  // 1. Une ligne par vente NORMAL — l'achat. Liée à sa promo via
+  // GainPromotion.vente_achat (lien exact, pas une approximation).
+  const venteRowsMap = new Map<string, VenteRow>();
+  relevantVentesDetail.filter(v => v.type_vente === "NORMAL").forEach(v => {
+    const gain = gainsByVenteId.get(v.id);
+    venteRowsMap.set(v.id, {
+      time: new Date(v.created_at).getTime(),
+      site: v.site_nom,
+      date: v.created_at.slice(0, 10),
+      client: normalizeClient(v.nom_client),
+      produit: v.produit_nom,
+      conditionnement: v.conditionnement_display,
+      quantiteAchetee: v.quantite,
+      offre: gain ? gain.promotion_description : "—",
+      quantiteOfferte: gain?.quantite_offerte ?? 0,
+    });
   });
-  venteRows.sort((a, b) => a.date === b.date ? a.site.localeCompare(b.site) : a.date.localeCompare(b.date));
+
+  // 2. Les ventes GRATUIT (goodie remis) n'ont aucun lien direct vers une
+  // vente d'achat : rattachement par proximité (même site, même client si
+  // connu, à moins de 10 min d'écart) — même heuristique que le rapport de
+  // ventes (sales/page.tsx, findTriggeringSale). Sans correspondance, la
+  // ligne reste autonome (offre sans achat visible, ex: goodie via la roue).
+  relevantVentesDetail
+    .filter(v => v.type_vente === "GRATUIT")
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .forEach(v => {
+      const time = new Date(v.created_at).getTime();
+      const client = normalizeClient(v.nom_client);
+      const match = [...venteRowsMap.values()]
+        .filter(row =>
+          row.site === v.site_nom &&
+          (row.client === client || isPlaceholderClient(row.client) || isPlaceholderClient(client)) &&
+          Math.abs(row.time - time) <= OFFER_WINDOW
+        )
+        .sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time))[0];
+      if (match) {
+        if (isPlaceholderClient(match.client) && !isPlaceholderClient(client)) match.client = client;
+        match.quantiteOfferte += v.quantite;
+        if (match.offre === "—") match.offre = "Offert (goodie)";
+      } else {
+        venteRowsMap.set(`gratuit-${v.id}`, {
+          time, site: v.site_nom, date: v.created_at.slice(0, 10), client,
+          produit: v.produit_nom, conditionnement: v.conditionnement_display,
+          quantiteAchetee: 0, offre: "Offert (goodie)", quantiteOfferte: v.quantite,
+        });
+      }
+    });
+
+  const venteRows = [...venteRowsMap.values()].sort((a, b) =>
+    a.date === b.date ? a.site.localeCompare(b.site) : a.date.localeCompare(b.date)
+  );
 
   const avis = bulletins.filter(b => b.avis_consommateurs).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.avis_consommateurs! }));
   const observations = bulletins.filter(b => b.observation_generale).map(b => ({ site: b.site_nom, hotesse: b.hotesse_nom, texte: b.observation_generale! }));
@@ -270,35 +328,35 @@ export function buildCondensedBulletinHtml(
 
   sections.push(`
     <div class="kpis">
-      <div class="kpi"><div class="l">Dégustations / Ventes</div><div class="v">${totalDeg}</div></div>
-      ${config.show_ventes_detail ? `<div class="kpi"><div class="l">Hors promo</div><div class="v">${totalHorsPromo}</div></div>` : ""}
+      ${showDegustationData ? `<div class="kpi"><div class="l">Dégustations / Ventes</div><div class="v">${totalDeg}</div></div>` : `<div class="kpi"><div class="l">Ventes</div><div class="v">${totalVentes}</div></div>`}
+      ${config.show_ventes_detail && showVenteData ? `<div class="kpi"><div class="l">Hors promo</div><div class="v">${totalHorsPromo}</div></div>` : ""}
       <div class="kpi"><div class="l">Goodies</div><div class="v">${totalGoodies}</div></div>
-      <div class="kpi"><div class="l">Chiffre d'affaires</div><div class="v">${esc(fmtXOF(totalCA))}</div></div>
+      ${showVenteData ? `<div class="kpi"><div class="l">Chiffre d'affaires</div><div class="v">${esc(fmtXOF(totalCA))}</div></div>` : ""}
       ${config.show_personnes_touchees ? `<div class="kpi"><div class="l">Personnes touchées</div><div class="v">${totalPersonnesTouchees}</div></div>` : ""}
     </div>`);
 
   sections.push(`
     <h2 class="section-title">Détail par site</h2>
-    <table><thead><tr><th>Site</th><th class="r">Dégustations / Ventes</th>${config.show_ventes_detail ? `<th class="r">Hors promo</th>` : ""}<th class="r">Goodies</th><th class="r">CA</th></tr></thead>
-    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${e.deg}</td>${config.show_ventes_detail ? `<td class="r">${e.horsPromo}</td>` : ""}<td class="r">${goodiesParSite.get(siteId) ?? 0}</td><td class="r">${esc(fmtXOF(e.ca))}</td></tr>`).join("")}
-    <tr class="tot-row"><td class="b">TOTAL</td><td class="r b">${totalDeg}</td>${config.show_ventes_detail ? `<td class="r b">${totalHorsPromo}</td>` : ""}<td class="r b">${totalGoodies}</td><td class="r b">${esc(fmtXOF(totalCA))}</td></tr>
+    <table><thead><tr><th>Site</th><th class="r">${showDegustationData ? "Dégustations / Ventes" : "Ventes"}</th>${config.show_ventes_detail && showVenteData ? `<th class="r">Hors promo</th>` : ""}<th class="r">Goodies</th>${showVenteData ? `<th class="r">CA</th>` : ""}</tr></thead>
+    <tbody>${[...parSite.entries()].map(([siteId, e]) => `<tr><td class="b">${esc(e.siteNom)}</td><td class="r">${showDegustationData ? e.deg : e.ventes}</td>${config.show_ventes_detail && showVenteData ? `<td class="r">${e.horsPromo}</td>` : ""}<td class="r">${goodiesParSite.get(siteId) ?? 0}</td>${showVenteData ? `<td class="r">${esc(fmtXOF(e.ca))}</td>` : ""}</tr>`).join("")}
+    <tr class="tot-row"><td class="b">TOTAL</td><td class="r b">${showDegustationData ? totalDeg : totalVentes}</td>${config.show_ventes_detail && showVenteData ? `<td class="r b">${totalHorsPromo}</td>` : ""}<td class="r b">${totalGoodies}</td>${showVenteData ? `<td class="r b">${esc(fmtXOF(totalCA))}</td>` : ""}</tr>
     </tbody></table>`);
 
-  if (config.show_ventes_detail && synthRows.length > 0) {
+  if (config.show_ventes_detail && showVenteData && synthRows.length > 0) {
     sections.push(`
       <h2 class="section-title">Synthèse par site et hôtesse</h2>
       <table><thead><tr><th>Site</th><th>Hôtesse</th><th class="r">Qté achetée</th><th class="r">Qté hors promo</th><th class="r">Offres promo appliquées</th></tr></thead>
       <tbody>${synthRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(r.hotesseNom)}</td><td class="r">${r.quantiteAchetee}</td><td class="r">${r.quantiteHorsPromo}</td><td class="r">${r.nbOffresAppliquees}</td></tr>`).join("")}</tbody></table>`);
   }
 
-  if (config.show_ventes_detail && venteRows.length > 0) {
+  if (config.show_ventes_detail && showVenteData && venteRows.length > 0) {
     sections.push(`
-      <h2 class="section-title">Détail des dégustations (achat / promo / hors promo)</h2>
+      <h2 class="section-title">Détail des ventes (achat / promo / hors promo)</h2>
       <table><thead><tr><th>Site</th><th>Date</th><th>Client</th><th>Produit</th><th>Conditionnement</th><th class="r">Qté achetée</th><th>Offre appliquée</th><th class="r">Qté offerte</th></tr></thead>
-      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte ?? "—"}</td></tr>`).join("")}</tbody></table>`);
+      <tbody>${venteRows.map(r => `<tr><td class="b">${esc(r.site)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.client)}</td><td>${esc(r.produit)}</td><td>${esc(r.conditionnement)}</td><td class="r">${r.quantiteAchetee || "—"}</td><td>${esc(r.offre)}</td><td class="r">${r.quantiteOfferte || "—"}</td></tr>`).join("")}</tbody></table>`);
   }
 
-  if (config.show_genre) {
+  if (config.show_genre && showDegustationData && (genreTotal.hommes > 0 || genreTotal.femmes > 0)) {
     sections.push(`
       <h2 class="section-title">Répartition par genre</h2>
       <div class="row">
@@ -307,13 +365,13 @@ export function buildCondensedBulletinHtml(
       </div>`);
   }
 
-  if (config.show_tranche_age && [...trancheMap.values()].some(t => t.quantite > 0)) {
+  if (config.show_tranche_age && showDegustationData && [...trancheMap.values()].some(t => t.quantite > 0)) {
     sections.push(`
       <h2 class="section-title">Répartition par tranche d'âge</h2>
       <div class="row">${[...trancheMap.values()].filter(t => t.quantite > 0).map(t => `<div class="field"><span class="label">${esc(t.label)}</span><span class="value">${t.quantite}</span></div>`).join("")}</div>`);
   }
 
-  if (config.show_notes_degustation && (avgGout != null || avgAmbiance != null)) {
+  if (config.show_notes_degustation && showDegustationData && (avgGout != null || avgAmbiance != null)) {
     sections.push(`
       <h2 class="section-title">Notes moyennes</h2>
       <div class="row">

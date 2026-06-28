@@ -8,6 +8,7 @@ import type {
   TrancheAge, IntentionAchat, TypeConditionnement, TypePromotion, Genre,
 } from "@/lib/types/backend";
 import { enregistrerGainPromotion } from "@/lib/services/promotionService";
+import { creerVenteDirecte } from "@/lib/services/venteService";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -236,6 +237,91 @@ export default function TastingsPage() {
       setSaving(false);
     }
   };
+
+  // Variante de formulaire pilotée par le type de la campagne du site
+  // sélectionné. Par défaut DEGUSTATION_VENTE (comportement historique,
+  // inchangé) si le champ n'est pas encore renvoyé par le backend.
+  const campagneType = siteInfo?.type_campagne ?? "DEGUSTATION_VENTE";
+  const isVenteSeule = campagneType === "VENTE";
+  const isDegustationSeule = campagneType === "DEGUSTATION";
+
+  // Campagne "Vente" : aucune dégustation créée. Achat direct, avec promo
+  // si une offre est sélectionnée (POST enregistrer-gain crée lui-même la
+  // vente), sinon vente directe (POST /ventes/creer-directe/).
+  const submitVenteSeule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.site || !form.produit) {
+      toast.error("Veuillez sélectionner un site et un produit.");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (form.promotion_selectionnee) {
+        const gainResult = await enregistrerGainPromotion(form.promotion_selectionnee, {
+          site_id: form.site,
+          produit_id: form.produit,
+          nom_client: form.nom_client.trim() || undefined,
+        });
+        toast.success(`🎉 ${gainResult.recompense} enregistré !`);
+      } else {
+        await creerVenteDirecte({
+          site_id: form.site,
+          produit_id: form.produit,
+          conditionnement: form.conditionnement,
+          quantite: form.quantite,
+          nom_client: form.nom_client.trim() || undefined,
+        });
+        toast.success("Vente enregistrée !");
+      }
+      await refreshSiteInfo();
+      setDialogOpen(false);
+      setForm(f => ({ ...EMPTY_FORM, site: f.site }));
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg ?? "Erreur lors de l'enregistrement de la vente.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Campagne "Dégustation" seule : aucune vente créée, la question achat
+  // est retirée du formulaire (a_achete toujours false).
+  const submitDegustationSeule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const needsNote = siteInfo?.note_gout_active;
+    const needsAmbiance = siteInfo?.note_ambiance_active;
+    if (!form.site || !form.produit || !form.tranche_age || !form.genre || !form.intention_achat
+      || (needsNote && !form.note_gout) || (needsAmbiance && !form.note_ambiance)) {
+      toast.error("Veuillez remplir tous les champs obligatoires.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: CreateDegustationPayload = {
+        site: form.site,
+        produit: form.produit,
+        tranche_age: form.tranche_age as TrancheAge,
+        genre: form.genre as Genre,
+        ...(siteInfo?.note_gout_active ? { note_gout: form.note_gout || null } : {}),
+        ...(siteInfo?.note_ambiance_active ? { note_ambiance: form.note_ambiance || null } : {}),
+        intention_achat: form.intention_achat as IntentionAchat,
+        a_achete: false,
+        nom_client: form.nom_client.trim() || undefined,
+      };
+      const { data: created } = await api.post<Degustation>("/degustations/", payload);
+      setTastings(prev => [created, ...prev]);
+      toast.success("Dégustation enregistrée !");
+      setDialogOpen(false);
+      setForm(f => ({ ...EMPTY_FORM, site: f.site }));
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg ?? "Erreur lors de l'enregistrement.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onTastingFormSubmit = isVenteSeule ? submitVenteSeule : isDegustationSeule ? submitDegustationSeule : handleSubmit;
 
   const filtered = tastings.filter(t => {
     const q = searchQuery.toLowerCase();
@@ -490,10 +576,16 @@ export default function TastingsPage() {
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Enregistrer une dégustation</DialogTitle>
-              <DialogDescription>Saisissez les informations de la dégustation</DialogDescription>
+              <DialogTitle>{isVenteSeule ? "Enregistrer une vente" : "Enregistrer une dégustation"}</DialogTitle>
+              <DialogDescription>
+                {isVenteSeule
+                  ? "Campagne vente : saisissez directement la vente du client"
+                  : isDegustationSeule
+                    ? "Campagne dégustation : aucune vente n'est enregistrée ici"
+                    : "Saisissez les informations de la dégustation"}
+              </DialogDescription>
             </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-5 mt-4">
+            <form onSubmit={onTastingFormSubmit} className="space-y-5 mt-4">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Site *</Label>
@@ -521,6 +613,7 @@ export default function TastingsPage() {
                 </div>
               </div>
 
+              {!isVenteSeule && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Tranche d&apos;âge *</Label>
@@ -537,8 +630,9 @@ export default function TastingsPage() {
                   </Select>
                 </div>
               </div>
+              )}
 
-              {siteInfo?.note_ambiance_active && (
+              {!isVenteSeule && siteInfo?.note_ambiance_active && (
                 <div className="space-y-3">
                   <Label>Note d&apos;ambiance *</Label>
                   {(siteInfo.note_ambiance_max ?? 5) <= 5 ? (
@@ -565,7 +659,7 @@ export default function TastingsPage() {
                 </div>
               )}
 
-              {siteInfo?.note_gout_active && (
+              {!isVenteSeule && siteInfo?.note_gout_active && (
                 <div className="space-y-3">
                   <Label>Note du goût *</Label>
                   {(siteInfo.note_gout_max ?? 5) <= 5 ? (
@@ -592,6 +686,7 @@ export default function TastingsPage() {
                 </div>
               )}
 
+              {!isVenteSeule && (
               <div className="space-y-3">
                 <Label>Intention d&apos;achat *</Label>
                 <div className="grid grid-cols-3 gap-2">
@@ -604,7 +699,9 @@ export default function TastingsPage() {
                   ))}
                 </div>
               </div>
+              )}
 
+              {!isVenteSeule && !isDegustationSeule && (
               <div className="space-y-3">
                 <Label>Le client a-t-il acheté ?</Label>
                 <div className="grid grid-cols-2 gap-3">
@@ -620,8 +717,9 @@ export default function TastingsPage() {
                   </button>
                 </div>
               </div>
+              )}
 
-              {form.a_achete && (
+              {(isVenteSeule || (!isDegustationSeule && form.a_achete)) && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
@@ -759,7 +857,9 @@ export default function TastingsPage() {
               </div>
 
               <Button type="submit" className="w-full h-12 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700" disabled={saving}>
-                {saving ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Enregistrement…</> : <><CheckCircle2 className="w-5 h-5 mr-2" />Enregistrer la dégustation</>}
+                {saving
+                  ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Enregistrement…</>
+                  : <><CheckCircle2 className="w-5 h-5 mr-2" />{isVenteSeule ? "Enregistrer la vente" : "Enregistrer la dégustation"}</>}
               </Button>
             </form>
           </DialogContent>

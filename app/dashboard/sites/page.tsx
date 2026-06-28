@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import api from "@/lib/api";
-import type { CampagneList, CreatePromotionPayload, DonneesSiteJour, Entreprise, Goodie, JourAnimation, LivraisonGoodiesJour, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
+import type { CampagneList, CampagneServiceList, CreatePromotionPayload, DonneesSiteJour, Entreprise, Goodie, JourAnimation, LivraisonGoodiesJour, Produit, Promotion, RemoteUser, SiteList, TeamMember, TypeConditionnement, TypePromotion } from "@/lib/types/backend";
+import { getCampagnesServices } from "@/lib/services/campagneServiceService";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -66,6 +67,10 @@ type CreateSiteForm = {
   ville: string;
   emplacement_precis: string;
   campagne: string;
+  // Site sans aucune activité produit (entreprise 100% service) : on choisit
+  // une campagne service à la place d'une campagne produit.
+  modeService: boolean;
+  campagneServiceId: string;
 };
 
 const emptyCreateForm: CreateSiteForm = {
@@ -73,6 +78,8 @@ const emptyCreateForm: CreateSiteForm = {
   ville: "Libreville",
   emplacement_precis: "",
   campagne: "",
+  modeService: false,
+  campagneServiceId: "",
 };
 
 type PromoForm = {
@@ -119,6 +126,7 @@ function SitesPageContent() {
   const [sites, setSites] = useState<SiteList[]>([]);
   const [campaigns, setCampaigns] = useState<CampagneList[]>([]);
   const [entreprises, setEntreprises] = useState<Entreprise[]>([]);
+  const [campagnesServices, setCampagnesServices] = useState<CampagneServiceList[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOffers, setLoadingOffers] = useState(false);
@@ -288,15 +296,17 @@ function SitesPageContent() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [sitesRes, campaignsRes, entreprisesRes] = await Promise.all([
+      const [sitesRes, campaignsRes, entreprisesRes, campagnesServicesRes] = await Promise.all([
         api.get("/sites/"),
         api.get("/campagnes/"),
         api.get("/entreprises/"),
+        getCampagnesServices(),
       ]);
 
       setSites(unwrapList<SiteList>(sitesRes.data));
       setCampaigns(unwrapList<CampagneList>(campaignsRes.data));
       setEntreprises(unwrapList<Entreprise>(entreprisesRes.data));
+      setCampagnesServices(campagnesServicesRes);
     } catch {
       toast.error("Erreur lors du chargement des sites.");
     } finally {
@@ -315,7 +325,7 @@ function SitesPageContent() {
 
   const filteredSites = useMemo(() => {
     return sites.filter(site => {
-      const campaign = campaignById.get(site.campagne);
+      const campaign = site.campagne ? campaignById.get(site.campagne) : undefined;
       const matchCompany = filterCompany === "all" || campaign?.entreprise === filterCompany;
       const matchCampaign = filterCampaign === "all" || site.campagne === filterCampaign;
       const searchable = [
@@ -358,19 +368,23 @@ function SitesPageContent() {
 
   const handleCreateSite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createForm.nom.trim() || !createForm.campagne) return;
+    if (!createForm.nom.trim()) return;
+    if (createForm.modeService ? !createForm.campagneServiceId : !createForm.campagne) return;
     setSavingCreate(true);
     try {
-      const { data } = await api.post<{ id: string; nom: string; ville: string; emplacement_precis: string | null; campagne: string; created_at: string }>("/sites/", {
+      const { data } = await api.post<{ id: string; nom: string; ville: string; emplacement_precis: string | null; campagne: string | null; created_at: string }>("/sites/", {
         nom: createForm.nom.trim(),
         ville: createForm.ville.trim() || "Libreville",
         emplacement_precis: createForm.emplacement_precis.trim() || null,
-        campagne: createForm.campagne,
+        ...(createForm.modeService
+          ? { campagne_service: createForm.campagneServiceId }
+          : { campagne: createForm.campagne }),
       });
       toast.success(`Site "${data.nom}" créé avec succès.`);
       setShowCreateDialog(false);
       setCreateForm(emptyCreateForm);
       await fetchAll();
+      if (createForm.modeService) return;
       const campaign = campaigns.find(c => c.id === createForm.campagne);
       if (campaign?.type_recompense === "PROMOTIONS") {
         const entreprise = entreprises.find(e => e.id === campaign.entreprise);
@@ -524,6 +538,7 @@ function SitesPageContent() {
   const handleCreatePromotion = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!offersSite) return;
+    if (!offersSite.campagne) { toast.error("Ce site n'a pas de campagne produit — les offres promotionnelles ne s'appliquent pas."); return; }
     const qty = parseInt(promoForm.quantite_requise, 10);
     const qtyOfferte = parseInt(promoForm.quantite_offerte, 10);
     if (!qty || qty < 1 || !qtyOfferte || qtyOfferte < 1 || !promoForm.recompense_description.trim()) return;
@@ -821,18 +836,18 @@ function SitesPageContent() {
 
               <div className="divide-y">
                 {group.sites.map(site => {
-                  const campaign = campaignById.get(site.campagne);
+                  const campaign = site.campagne ? campaignById.get(site.campagne) : undefined;
                   return (
                     <div key={site.id} className="p-4 flex items-center justify-between gap-4">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                          <Badge className={site.campagne_nom ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : "bg-violet-100 text-violet-700 hover:bg-violet-100"}>
                             <Target className="w-3 h-3 mr-1" />
-                            {site.campagne_nom}
+                            {site.campagne_nom ?? "Service uniquement"}
                           </Badge>
                           <Badge variant="outline">
                             <Building2 className="w-3 h-3 mr-1" />
-                            {site.entreprise_nom}
+                            {site.entreprise_nom ?? "—"}
                           </Badge>
                           {campaign && (
                             <Badge variant="outline">
@@ -846,7 +861,7 @@ function SitesPageContent() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {(isAdmin || isSuperviseur) && (
+                        {(isAdmin || isSuperviseur) && site.campagne && (
                           <Button variant="outline" size="sm" onClick={() => openStockDialog(site)} className="gap-2">
                             <Beer className="w-4 h-4" />
                             Goodies & stock
@@ -854,14 +869,18 @@ function SitesPageContent() {
                         )}
                         {isAdmin && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => openPlanningDialog(site)} className="gap-2">
-                              <Clock className="w-4 h-4" />
-                              Planning
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => openOffersDialog(site)} className="gap-2">
-                              <SlidersHorizontal className="w-4 h-4" />
-                              Offres
-                            </Button>
+                            {site.campagne && (
+                              <Button variant="outline" size="sm" onClick={() => openPlanningDialog(site)} className="gap-2">
+                                <Clock className="w-4 h-4" />
+                                Planning
+                              </Button>
+                            )}
+                            {site.campagne && (
+                              <Button variant="outline" size="sm" onClick={() => openOffersDialog(site)} className="gap-2">
+                                <SlidersHorizontal className="w-4 h-4" />
+                                Offres
+                              </Button>
+                            )}
                             <Button variant="outline" size="sm" onClick={() => openHotessesDialog(site)} className="gap-2">
                               <Users className="w-4 h-4" />
                               Équipe
@@ -891,19 +910,45 @@ function SitesPageContent() {
             <DialogTitle>Créer un nouveau site</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreateSite} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Campagne *</Label>
-              <Select value={createForm.campagne} onValueChange={v => setCreateForm(f => ({ ...f, campagne: v }))}>
-                <SelectTrigger><SelectValue placeholder="Sélectionner une campagne" /></SelectTrigger>
-                <SelectContent>
-                  {campaigns
-                    .filter(c => filterCompany === "all" || c.entreprise === filterCompany)
-                    .map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+            <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl w-fit text-sm">
+              <button type="button" onClick={() => setCreateForm(f => ({ ...f, modeService: false }))}
+                className={cn("px-3 py-1.5 rounded-lg font-semibold transition-all", !createForm.modeService ? "bg-white shadow-sm text-foreground" : "text-muted-foreground")}>
+                Campagne produit
+              </button>
+              <button type="button" onClick={() => setCreateForm(f => ({ ...f, modeService: true }))}
+                className={cn("px-3 py-1.5 rounded-lg font-semibold transition-all", createForm.modeService ? "bg-white shadow-sm text-foreground" : "text-muted-foreground")}>
+                Campagne service
+              </button>
             </div>
+
+            {createForm.modeService ? (
+              <div className="space-y-2">
+                <Label>Campagne service *</Label>
+                <Select value={createForm.campagneServiceId} onValueChange={v => setCreateForm(f => ({ ...f, campagneServiceId: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Sélectionner une campagne service" /></SelectTrigger>
+                  <SelectContent>
+                    {campagnesServices.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.nom} — {c.entreprise_nom}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Site sans activité produit : pas de dégustation/vente, goodies ni offres promotionnelles pour ce site.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Campagne *</Label>
+                <Select value={createForm.campagne} onValueChange={v => setCreateForm(f => ({ ...f, campagne: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Sélectionner une campagne" /></SelectTrigger>
+                  <SelectContent>
+                    {campaigns
+                      .filter(c => filterCompany === "all" || c.entreprise === filterCompany)
+                      .map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Nom du site *</Label>
               <Input
@@ -929,7 +974,7 @@ function SitesPageContent() {
                 />
               </div>
             </div>
-            {createForm.campagne && campaigns.find(c => c.id === createForm.campagne)?.type_recompense === "PROMOTIONS" && (
+            {!createForm.modeService && createForm.campagne && campaigns.find(c => c.id === createForm.campagne)?.type_recompense === "PROMOTIONS" && (
               <div className="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
                 <span className="text-base leading-none mt-0.5">🎁</span>
                 <span>Cette campagne utilise des <strong>offres promotionnelles</strong> — vous pourrez les configurer pour ce site juste après la création.</span>
@@ -937,7 +982,7 @@ function SitesPageContent() {
             )}
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="outline" onClick={() => { setShowCreateDialog(false); setCreateForm(emptyCreateForm); }}>Annuler</Button>
-              <Button type="submit" disabled={savingCreate || !createForm.nom.trim() || !createForm.campagne}>
+              <Button type="submit" disabled={savingCreate || !createForm.nom.trim() || (createForm.modeService ? !createForm.campagneServiceId : !createForm.campagne)}>
                 {savingCreate && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 Créer le site
               </Button>
