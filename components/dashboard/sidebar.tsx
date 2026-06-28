@@ -256,7 +256,7 @@ export function DashboardSidebar() {
 
   return (
     <>
-      {/* Mobile Header — minimal pour l'hôtesse (logo + nom + réseau, pas de menu) */}
+      {/* Mobile Header — minimal pour l'hôtesse (logo + nom + réseau + menu utilisateur compact) */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-sidebar border-b border-sidebar-border px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -267,11 +267,14 @@ export function DashboardSidebar() {
           </div>
 
           {isHostess ? (
-            <span title={isOnline ? "Connecté" : "Hors ligne"} className="shrink-0">
-              {isOnline
-                ? <Wifi className="w-4 h-4 text-emerald-400" />
-                : <WifiOff className="w-4 h-4 text-amber-400" />}
-            </span>
+            <div className="flex items-center gap-3 shrink-0">
+              <span title={isOnline ? "Connecté" : "Hors ligne"}>
+                {isOnline
+                  ? <Wifi className="w-4 h-4 text-emerald-400" />
+                  : <WifiOff className="w-4 h-4 text-amber-400" />}
+              </span>
+              <UserMenu user={user} signOut={signOut} getInitials={getInitials} compact />
+            </div>
           ) : (
             <Button
               variant="ghost"
@@ -344,10 +347,12 @@ function UserMenu({
   user,
   signOut,
   getInitials,
+  compact = false,
 }: {
   user: { name: string; email: string; role: string; role_display?: string } | null;
   signOut: () => Promise<void>;
   getInitials: (name: string) => string;
+  compact?: boolean;
 }) {
   const roleLabels: Record<string, string> = {
     Hotesse: "Hôtesse",
@@ -360,25 +365,40 @@ function UserMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-3 h-auto py-2 px-3 hover:bg-sidebar-accent"
-        >
-          <Avatar className="w-9 h-9">
-            <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground text-sm">
-              {user ? getInitials(user.name) : "?"}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 text-left">
-            <p className="text-sm font-medium text-sidebar-foreground truncate">
-              {user?.name || "Utilisateur"}
-            </p>
-            <p className="text-xs text-sidebar-foreground/50">
-              {user?.role_display || (user?.role ? roleLabels[user.role] : "")}
-            </p>
-          </div>
-          <ChevronDown className="w-4 h-4 text-sidebar-foreground/50" />
-        </Button>
+        {compact ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full hover:bg-sidebar-accent"
+            aria-label="Menu utilisateur"
+          >
+            <Avatar className="w-8 h-8">
+              <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground text-xs">
+                {user ? getInitials(user.name) : "?"}
+              </AvatarFallback>
+            </Avatar>
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 h-auto py-2 px-3 hover:bg-sidebar-accent"
+          >
+            <Avatar className="w-9 h-9">
+              <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground text-sm">
+                {user ? getInitials(user.name) : "?"}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 text-left">
+              <p className="text-sm font-medium text-sidebar-foreground truncate">
+                {user?.name || "Utilisateur"}
+              </p>
+              <p className="text-xs text-sidebar-foreground/50">
+                {user?.role_display || (user?.role ? roleLabels[user.role] : "")}
+              </p>
+            </div>
+            <ChevronDown className="w-4 h-4 text-sidebar-foreground/50" />
+          </Button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
