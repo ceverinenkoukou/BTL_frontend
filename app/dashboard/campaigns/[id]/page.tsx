@@ -2665,12 +2665,14 @@ export default function CampaignDetailPage() {
           <div className="p-4 border-b border-slate-100" style={{ background: hex("#3b82f6", 0.06) }}>
             <h3 className="font-semibold text-sm text-foreground flex items-center gap-2"><div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 bg-blue-100"><Tag className="w-3.5 h-3.5 text-blue-600" /></div>Promotions en cours</h3>
           </div>
+
           <div className="p-4 space-y-2.5">
             {(campaign.promotions ?? []).filter(p => p.is_active).map(promo => (
               <div key={promo.id} className="flex items-start gap-3 p-3 rounded-xl border border-blue-100 bg-blue-50">
                 <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0 mt-0.5"><Tag className="w-4 h-4 text-blue-600" /></div>
                 <div><p className="text-sm font-semibold text-foreground">Acheter <span className="text-blue-700">{promo.quantite_requise} produit{promo.quantite_requise > 1 ? "s" : ""}</span> {promo.type_promotion === "OFFERT" ? "→ offert : " : "→ à gagner : "}<span className="text-blue-700">{promo.recompense_description}</span></p><p className="text-xs text-blue-500 mt-0.5">{promo.type_promotion_display}</p></div>
               </div>
+              
             ))}
           </div>
         </div>
