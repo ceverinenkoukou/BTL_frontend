@@ -743,6 +743,9 @@ export default function CampaignDetailPage() {
       setWonPrize(null);
       wheelRotationRef.current = 0;
       setPendingDegustationId(null);
+      // Recharge le stock du jour du site (un goodie épuisé doit disparaître
+      // de la roue immédiatement, sans attendre le rafraîchissement périodique).
+      refreshSiteInfo();
       fetchAll();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
