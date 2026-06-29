@@ -1056,7 +1056,7 @@ function SitesPageContent() {
                         </div>
                       </div>
                       <div>
-                        <Label className="text-xs text-muted-foreground">Quantité apportée</Label>
+                        <Label className="text-xs text-muted-foreground">Quantité à ajouter au stock du jour</Label>
                         <Input type="number" min={1} className="h-8 text-xs mt-0.5" value={stockLivraisonForm.quantite} onChange={e => setStockLivraisonForm(f => ({ ...f, quantite: parseInt(e.target.value) || 1 }))} />
                       </div>
                       <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitStockLivraison} disabled={savingStockLivraison}>

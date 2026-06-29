@@ -159,9 +159,9 @@ export default function WheelPage() {
         const { data } = await api.get<MonSiteInfo>("/degustations/mon-site/", {
           params: { site_id: selectedSite },
         });
-        // Tous les goodies de la campagne apparaissent sur la roue, même sans stock
-        // alloué à ce site — le stock n'est vérifié qu'au moment de confirmer le gain
-        // (avec l'option de relancer la roue si le stock est insuffisant ce jour-là).
+        // Seuls les goodies avec un stock du jour disponible sur ce site sont
+        // renvoyés par le backend (cf. DegustationViewSet.mon_site) — un goodie
+        // en rupture aujourd'hui sur ce site n'apparaît donc plus sur la roue.
         activeGoodies = data.goodies_disponibles ?? [];
         setGoodies([]);
       } else {
