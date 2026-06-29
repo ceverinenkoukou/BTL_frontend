@@ -425,12 +425,16 @@ export default function WheelPage() {
     }
     setSavingGain(true);
     try {
-      await api.post("/gains-goodies/enregistrer/", {
+      const { data } = await api.post<{ stock_jour_restant?: number }>("/gains-goodies/enregistrer/", {
         goodie_id: wonPrize.id,
         site_id: selectedSite,
         nom_client: customerName.trim() || undefined,
       });
-      toast.success(`🎁 Gain enregistré${customerName ? ` pour ${customerName}` : ""} !`);
+      const restant = data.stock_jour_restant;
+      const stockMsg = restant !== undefined
+        ? (restant > 0 ? ` — ${restant} ${wonPrize.name} restant${restant > 1 ? "s" : ""} aujourd'hui` : ` — dernier ${wonPrize.name} du jour !`)
+        : "";
+      toast.success(`🎁 Gain enregistré${customerName ? ` pour ${customerName}` : ""} !${stockMsg}`);
       setShowWinDialog(false);
       setCustomerName("");
       setCustomerPhone("");

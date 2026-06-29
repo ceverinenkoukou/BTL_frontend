@@ -539,18 +539,15 @@ export default function CampaignDetailPage() {
   };
 
   const getWheelPrizes = useCallback((): WheelPrize[] => {
-    // TIRAGE promo with specific goodies linked to the promotion
+    // TIRAGE promo with specific goodies linked to the promotion — contenu
+    // déjà filtré côté backend par stock du jour/site (cf. handlePromoGain /
+    // handleDegSubmit).
     if (tirageGoodiesOverride !== null) {
       if (tirageGoodiesOverride.length === 0) return [];
       return tirageGoodiesOverride.map(g => ({ id: g.id, name: g.nom, isGoodie: true }));
     }
-    // TIRAGE promo without specific goodies: use all campaign-level goodies
-    // (no per-site stock required — TIRAGE bypasses StockGoodieSite)
-    if (activeWheelPromoId) {
-      if (goodies.length === 0) return [];
-      return goodies.map(g => ({ id: g.id, name: g.nom, isGoodie: true }));
-    }
-    // Standard GOODIES wheel : seuls les goodies avec un stock du jour
+    // TIRAGE/GAGNE sans goodies spécifiques à la promo, ou roue "Goodies"
+    // classique : dans les deux cas, seuls les goodies avec un stock du jour
     // disponible sur ce site apparaissent (filtré côté backend dans
     // goodies_disponibles). Tant que siteInfo n'a pas encore chargé, on
     // affiche le catalogue complet de la campagne ; une fois chargé, une
@@ -561,7 +558,7 @@ export default function CampaignDetailPage() {
       : goodies.map(g => ({ id: g.id, name: g.nom }));
     if (activeGoodies.length === 0) return [];
     return activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true }));
-  }, [goodies, siteInfo, tirageGoodiesOverride, activeWheelPromoId]);
+  }, [goodies, siteInfo, tirageGoodiesOverride]);
 
   const drawWheelImmediate = (rot: number) => {
     const canvas = wheelCanvasRef.current;
@@ -729,7 +726,7 @@ export default function CampaignDetailPage() {
 
     setSavingWheelGain(true);
     try {
-      await api.post("/gains-goodies/enregistrer/", {
+      const { data } = await api.post<{ stock_jour_restant?: number }>("/gains-goodies/enregistrer/", {
         goodie_id: wonPrize.id,
         site_id: siteId,
         nom_client: wheelClientName.trim() || undefined,
@@ -738,7 +735,11 @@ export default function CampaignDetailPage() {
       });
       invalidateCache("/gains-goodies");
       invalidateCache("/goodies");
-      toast.success(`Gain enregistré : ${wonPrize.name}`);
+      const restant = data.stock_jour_restant;
+      const stockMsg = restant !== undefined
+        ? (restant > 0 ? ` — ${restant} restant${restant > 1 ? "s" : ""} aujourd'hui` : " — dernier du jour !")
+        : "";
+      toast.success(`Gain enregistré : ${wonPrize.name}${stockMsg}`);
       closeWheel();
       setWonPrize(null);
       wheelRotationRef.current = 0;
@@ -799,7 +800,11 @@ export default function CampaignDetailPage() {
         setWonPrize(null);
         wheelRotationRef.current = 0;
         setWheelSpinning(false);
-        if (gainRes.tirage_disponible && gainRes.goodies_roue.length > 0) {
+        // Override seulement si la promo restreint à des goodies précis
+        // (le contenu vient du backend, déjà filtré par stock du jour/site) ;
+        // sinon repli sur le stock du jour du site, pas tout le catalogue.
+        const promoHasSpecificGoodies = (promo?.goodies_details?.length ?? 0) > 0;
+        if (gainRes.tirage_disponible && promoHasSpecificGoodies) {
           setTirageGoodiesOverride(gainRes.goodies_roue);
         } else {
           setTirageGoodiesOverride(null);
@@ -856,16 +861,21 @@ export default function CampaignDetailPage() {
       const { data: created } = await api.post<Degustation>("/degustations/", payload);
 
       let selectedPromo = null;
+      let promoGoodiesRoue: { id: string; nom: string }[] = [];
       if (willRegisterPromo) {
         selectedPromo = campaign?.promotions?.find(p => p.id === degForm.promotion_selectionnee);
         if (selectedPromo) {
           try {
-            await api.post(`/promotions/${selectedPromo.id}/enregistrer-gain/`, {
-              site_id: degForm.site,
-              produit_id: degForm.produit,
-              nom_client: degForm.nom_client.trim() || undefined,
-              degustation_id: created.id,
-            });
+            const { data: promoGainRes } = await api.post<{ goodies_roue: { id: string; nom: string }[] }>(
+              `/promotions/${selectedPromo.id}/enregistrer-gain/`,
+              {
+                site_id: degForm.site,
+                produit_id: degForm.produit,
+                nom_client: degForm.nom_client.trim() || undefined,
+                degustation_id: created.id,
+              }
+            );
+            promoGoodiesRoue = promoGainRes.goodies_roue ?? [];
             toast.success("Gain promotionnel enregistré ! 🎉");
           } catch (promoErr: unknown) {
             const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -898,8 +908,12 @@ export default function CampaignDetailPage() {
           setWonPrize(null);
           wheelRotationRef.current = 0;
           setWheelSpinning(false);
+          // Override uniquement si la promo restreint à des goodies précis —
+          // dans ce cas le contenu vient du backend (déjà filtré par stock du
+          // jour/site) ; sinon on retombe sur le stock du jour du site (cf.
+          // getWheelPrizes), pas sur tout le catalogue de la campagne.
           if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
-            setTirageGoodiesOverride(selectedPromo.goodies_details.map(g => ({ id: g.id, nom: g.nom })));
+            setTirageGoodiesOverride(promoGoodiesRoue);
           } else {
             setTirageGoodiesOverride(null);
           }
