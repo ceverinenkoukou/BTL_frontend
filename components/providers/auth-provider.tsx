@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import type { RemoteUser } from "@/lib/types/backend";
 import {
   getCachedUser,
@@ -25,7 +24,6 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const [user, setUser] = useState<RemoteUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -55,7 +53,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await apiLogout();
     setUser(null);
-    router.replace("/auth/login");
+    // Rechargement complet (et non router.replace) pour repartir d'un état JS
+    // propre : vide le cache GET en mémoire (lib/api.ts) et évite tout résidu
+    // d'UI (ex. overlay du menu) issu de la navigation précédente.
+    window.location.href = "/auth/login";
   };
 
   const refreshUser = async () => {

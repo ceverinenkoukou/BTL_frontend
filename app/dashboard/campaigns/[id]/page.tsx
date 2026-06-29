@@ -550,17 +550,15 @@ export default function CampaignDetailPage() {
       if (goodies.length === 0) return [];
       return goodies.map(g => ({ id: g.id, name: g.nom, isGoodie: true }));
     }
-    // Standard GOODIES wheel : tous les goodies de la campagne apparaissent,
-    // même sans stock alloué à ce site — le stock n'est vérifié qu'au moment de
-    // confirmer le gain (avec l'option de relancer la roue si insuffisant).
-    let activeGoodies: { id: string; name: string }[] = [];
-    if (siteInfo?.goodies_disponibles && siteInfo.goodies_disponibles.length > 0) {
-      activeGoodies = siteInfo.goodies_disponibles
-        .map(g => ({ id: g.id, name: g.nom }));
-    } else {
-      activeGoodies = goodies
-        .map(g => ({ id: g.id, name: g.nom }));
-    }
+    // Standard GOODIES wheel : seuls les goodies avec un stock du jour
+    // disponible sur ce site apparaissent (filtré côté backend dans
+    // goodies_disponibles). Tant que siteInfo n'a pas encore chargé, on
+    // affiche le catalogue complet de la campagne ; une fois chargé, une
+    // liste vide signifie réellement "rupture sur ce site aujourd'hui" et
+    // ne doit pas retomber sur le catalogue complet.
+    const activeGoodies: { id: string; name: string }[] = siteInfo
+      ? siteInfo.goodies_disponibles.map(g => ({ id: g.id, name: g.nom }))
+      : goodies.map(g => ({ id: g.id, name: g.nom }));
     if (activeGoodies.length === 0) return [];
     return activeGoodies.map(g => ({ id: g.id, name: g.name, isGoodie: true }));
   }, [goodies, siteInfo, tirageGoodiesOverride, activeWheelPromoId]);
