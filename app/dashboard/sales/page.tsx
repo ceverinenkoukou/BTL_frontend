@@ -197,6 +197,7 @@ function SalesPageContent() {
     gainGoodies: GainGoodieReport[],
     gainPromotions: GainPromotionReport[],
     reportDateLabel: string,
+    campagneNom?: string,
   ): string => {
     const esc = (value: string | number | null | undefined) =>
       String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -425,9 +426,10 @@ function SalesPageContent() {
         </tr>`).join("");
 
     const safeNom = entrepriseNom.replace(/\s+/g, "_");
+    const safeCamp = campagneNom ? `_${campagneNom.replace(/\s+/g, "_")}` : "";
     return `<!DOCTYPE html>
 <html lang="fr"><head><meta charset="UTF-8">
-<title>Rapport - ${esc(entrepriseNom)} — ${reportDateLabel}</title>
+<title>Rapport - ${esc(entrepriseNom)}${campagneNom ? ` — ${esc(campagneNom)}` : ""} — ${reportDateLabel}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root{--brand-primary:${colorPrimary};--brand-secondary:${colorSecondary}}
@@ -494,7 +496,7 @@ function SalesPageContent() {
         ${logoUrl ? `<img src="${logoUrl}" alt="Logo" class="corporate-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />` : ""}
         <div class="corporate-logo-fallback" style="${logoUrl ? "display:none;" : "display:flex;"}">${esc(entrepriseNom.charAt(0))}</div>
       </div>
-      <div class="hdr-text"><h1>Rapport de performance</h1><p>${esc(entrepriseNom)}</p></div>
+      <div class="hdr-text"><h1>Rapport de performance</h1><p>${esc(entrepriseNom)}</p>${campagneNom ? `<p style="font-size:13px;color:#0d9488;font-weight:800;margin-top:4px;letter-spacing:-.2px">Campagne : ${esc(campagneNom)}</p>` : ""}</div>
     </div>
     <div class="meta-date">Rapport du<br/><div class="date-box">${reportDateLabel}</div></div>
   </div>
@@ -535,7 +537,7 @@ function SalesPageContent() {
     const element = document.getElementById('capture-zone');
     const opt = {
       margin: 10,
-      filename: "Rapport_${safeNom}_${reportDateLabel.replace(/\s+/g, "_")}.pdf",
+      filename: "Rapport_${safeNom}${safeCamp}_${reportDateLabel.replace(/\s+/g, "_")}.pdf",
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
@@ -658,6 +660,101 @@ function SalesPageContent() {
     if (win) win.document.title = `Rapport du jour — ${entrepriseNom}`;
     setTimeout(() => URL.revokeObjectURL(url), 15000);
     toast.success(`Rapport du jour ouvert pour ${entrepriseNom}`);
+  };
+
+  const exportCampaignPDF = async (entrepriseNom: string, campagneNom: string) => {
+    let latestSales = sales;
+    try {
+      invalidateCache("/ventes/");
+      const res = await api.get<VenteEnrichie[]>("/ventes/");
+      const fresh = Array.isArray(res.data) ? res.data : ((res.data as { results?: VenteEnrichie[] }).results ?? []);
+      setSales(fresh);
+      latestSales = fresh;
+    } catch { /* utilise les données en mémoire */ }
+
+    const campaignSales = latestSales.filter(s => s.entreprise_nom === entrepriseNom && s.campagne_nom === campagneNom);
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    const firstSale = campaignSales[0];
+    const logoUrl = firstSale?.entreprise_logo || "";
+    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46";
+    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
+
+    const goodiesSiteMap = new Map<string, Map<string, number>>();
+    const goodiesTotalsBySite = new Map<string, number>();
+    let gainGoodies: GainGoodieReport[] = [];
+    let gainPromotions: GainPromotionReport[] = [];
+
+    try {
+      const campaign = campaigns.find(c => c.entreprise_nom === entrepriseNom && c.nom === campagneNom);
+      const campaignSiteNames = new Set(campaignSales.map(s => s.site_nom));
+
+      if (campaign) {
+        const rapport = await api.get<CampagneRapportSites>(`/campagnes/${campaign.id}/rapport-sites/`).then(r => r.data).catch(() => null);
+        rapport?.sites.forEach(site => {
+          let siteTotal = 0;
+          (site.goodies ?? []).forEach(goodie => {
+            const quantite = Number(goodie.quantite_distribuee ?? 0);
+            if (quantite <= 0) return;
+            if (!goodiesSiteMap.has(site.nom)) goodiesSiteMap.set(site.nom, new Map<string, number>());
+            const sg = goodiesSiteMap.get(site.nom)!;
+            sg.set(goodie.goodie_nom, (sg.get(goodie.goodie_nom) ?? 0) + quantite);
+            siteTotal += quantite;
+          });
+          if (siteTotal === 0) siteTotal = Number(site.goodies_distribues_total ?? 0);
+          if (siteTotal > 0) goodiesTotalsBySite.set(site.nom, (goodiesTotalsBySite.get(site.nom) ?? 0) + siteTotal);
+        });
+      }
+
+      const gainsRes = await api.get<GainGoodieReport[] | { results?: GainGoodieReport[] }>("/gains-goodies/").catch(() => ({ data: [] as GainGoodieReport[] }));
+      const gainsData = Array.isArray(gainsRes.data) ? gainsRes.data : (gainsRes.data.results ?? []);
+      gainGoodies = gainsData.filter(gain => campaignSales.some(s => s.site_nom === gain.site_nom));
+
+      const gainPromosRes = await api.get<GainPromotionReport[] | { results?: GainPromotionReport[] }>("/gains-promotions/").catch(() => ({ data: [] as GainPromotionReport[] }));
+      const gainPromosData = Array.isArray(gainPromosRes.data) ? gainPromosRes.data : (gainPromosRes.data.results ?? []);
+      gainPromotions = gainPromosData.filter(gp => campaignSales.some(s => s.site_nom === gp.site_nom));
+    } catch {
+      toast.error("Impossible de charger le détail des goodies pour le PDF.");
+    }
+
+    const dayMap = new Map<string, VenteEnrichie[]>();
+    campaignSales.forEach(s => {
+      const day = new Date(s.created_at).toISOString().slice(0, 10);
+      if (!dayMap.has(day)) dayMap.set(day, []);
+      dayMap.get(day)!.push(s);
+    });
+
+    const existingArchiveIds = new Set(loadArchives().map(a => a.id));
+    [...dayMap.entries()]
+      .filter(([day]) => day < todayStr)
+      .forEach(([day, daySales]) => {
+        const archiveId = `${entrepriseNom}__${campagneNom}__${day}`;
+        if (existingArchiveIds.has(archiveId)) return;
+        const dayGoodies = gainGoodies.filter(g => new Date(g.created_at).toISOString().slice(0, 10) === day);
+        const dayGainPromos = gainPromotions.filter(gp => new Date(gp.created_at).toISOString().slice(0, 10) === day);
+        const dayLabel = new Date(day).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+        const html = buildReportHtml(daySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, dayGoodies, dayGainPromos, dayLabel, campagneNom);
+        saveArchive({ id: archiveId, entrepriseNom, generatedAt: `${day}T23:59:59.000Z`, label: `${campagneNom} — ${dayLabel}`, htmlContent: html });
+      });
+    setArchives(loadArchives());
+
+    const todaySales = dayMap.get(todayStr) ?? [];
+    const todayGoodies = gainGoodies.filter(g => new Date(g.created_at).toISOString().slice(0, 10) === todayStr);
+    const todayGainPromos = gainPromotions.filter(gp => new Date(gp.created_at).toISOString().slice(0, 10) === todayStr);
+    const todayLabel = new Date(todayStr).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+    if (todaySales.length === 0) {
+      toast.info(`Aucune vente aujourd'hui pour la campagne "${campagneNom}". Les jours précédents ont été archivés.`);
+      return;
+    }
+
+    const html = buildReportHtml(todaySales, entrepriseNom, logoUrl, colorPrimary, colorSecondary, goodiesSiteMap, goodiesTotalsBySite, todayGoodies, todayGainPromos, todayLabel, campagneNom);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (win) win.document.title = `Rapport — ${campagneNom} — ${entrepriseNom}`;
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    toast.success(`Rapport ouvert : campagne "${campagneNom}"`);
   };
 
   return (
@@ -898,6 +995,13 @@ function SalesPageContent() {
                               <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full font-medium">
                                 {campSales.length} vente{campSales.length > 1 ? "s" : ""}
                               </span>
+                              <button
+                                onClick={() => exportCampaignPDF(compName, campName)}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-teal-200 bg-white hover:bg-teal-50 text-teal-700 text-xs font-semibold transition-colors shadow-sm"
+                                title={`Rapport PDF — ${campName}`}
+                              >
+                                <FileText className="w-3 h-3" />PDF
+                              </button>
                             </div>
                           </div>
                           <SalesTable sales={campSales} />
