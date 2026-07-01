@@ -1143,7 +1143,7 @@ function SalesPageContent() {
                       </p>
                     </div>
                     {!isHostess && (
-                      <p className="text-xs text-muted-foreground border-t pt-2">💃 {sale.hotesse_nom}</p>
+                      <p className="text-xs text-muted-foreground border-t pt-2"> {sale.hotesse_nom}</p>
                     )}
                   </div>
                 ))}
