@@ -201,6 +201,18 @@ function SalesPageContent() {
   ): string => {
     const esc = (value: string | number | null | undefined) =>
       String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const formatPromoLabel = (gp: GainPromotionReport): string => {
+      const desc = (gp.promotion_description || "").trim();
+      if (!desc || /^\d+$/.test(desc)) {
+        const req = gp.quantite_requise;
+        const off = gp.quantite_offerte;
+        if (gp.type_promotion === "TIRAGE" || gp.type_promotion === "GAGNE") {
+          return `Tirage (${req} acheté${req > 1 ? "s" : ""})`;
+        }
+        return `${req} acheté${req > 1 ? "s" : ""} → ${off} offert${off > 1 ? "s" : ""}`;
+      }
+      return desc;
+    };
     const formatTime = (value: string) =>
       new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
     const normalizeClientName = (value: string | null | undefined) =>
@@ -376,7 +388,7 @@ function SalesPageContent() {
         const row = match[1];
         if (isPlaceholder(row.client) && !isPlaceholder(client)) row.client = client;
         row.offert += gp.quantite_offerte || 0;
-        if (row.promo === "-") { row.promo = gp.promotion_description; row.qRequise = gp.quantite_requise || 0; row.qOfferte = gp.quantite_offerte || 0; }
+        if (row.promo === "-") { row.promo = formatPromoLabel(gp); row.qRequise = gp.quantite_requise || 0; row.qOfferte = gp.quantite_offerte || 0; }
       } else {
         tMap.set(`promo__${gp.id}`, {
           time: date.getTime(),
@@ -388,7 +400,7 @@ function SalesPageContent() {
           vendu: 0,
           offert: gp.quantite_offerte || 0,
           goodie: "-",
-          promo: gp.promotion_description,
+          promo: formatPromoLabel(gp),
           qRequise: gp.quantite_requise || 0,
           qOfferte: gp.quantite_offerte || 0,
         });

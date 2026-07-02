@@ -134,12 +134,12 @@ export function buildCondensedBulletinHtml(
   // jour (une ligne par site+date+goodie), plutôt qu'agrégés globalement
   // par nom de goodie : permet de voir où/quand chaque livraison et chaque
   // gain a eu lieu plutôt qu'un seul total opaque par goodie.
-  type GoodieRow = { site: string; siteNom: string; date: string; goodieNom: string; recus: number; distribues: number };
+  type GoodieRow = { site: string; siteNom: string; date: string; goodieNom: string; recus: number; distribues: number; estReport: boolean };
   const goodieRows = new Map<string, GoodieRow>();
   relevantLivraisons.forEach(l => {
     const key = `${l.site}|${l.date}|${l.goodie_nom}`;
     if (!goodieRows.has(key)) {
-      goodieRows.set(key, { site: l.site, siteNom: l.site_nom, date: l.date, goodieNom: l.goodie_nom, recus: 0, distribues: 0 });
+      goodieRows.set(key, { site: l.site, siteNom: l.site_nom, date: l.date, goodieNom: l.goodie_nom, recus: 0, distribues: 0, estReport: l.est_report ?? false });
     }
     goodieRows.get(key)!.recus += l.quantite_apportee;
   });
@@ -147,7 +147,7 @@ export function buildCondensedBulletinHtml(
     const date = g.created_at.slice(0, 10);
     const key = `${g.site}|${date}|${g.goodie_nom}`;
     if (!goodieRows.has(key)) {
-      goodieRows.set(key, { site: g.site, siteNom: g.site_nom, date, goodieNom: g.goodie_nom, recus: 0, distribues: 0 });
+      goodieRows.set(key, { site: g.site, siteNom: g.site_nom, date, goodieNom: g.goodie_nom, recus: 0, distribues: 0, estReport: false });
     }
     goodieRows.get(key)!.distribues += 1;
   });
@@ -257,6 +257,21 @@ export function buildCondensedBulletinHtml(
     time: number; site: string; date: string; client: string; produit: string;
     conditionnement: string; quantiteAchetee: number; offre: string; quantiteOfferte: number;
   };
+  // Construit un libellé lisible pour une promotion : si recompense_description
+  // est un nombre pur (anciennes saisies admin) on recompose depuis les quantités.
+  const formatPromoLabel = (g: GainPromotion): string => {
+    const desc = (g.promotion_description || "").trim();
+    if (!desc || /^\d+$/.test(desc)) {
+      const req = g.quantite_requise;
+      const off = g.quantite_offerte;
+      if (g.type_promotion === "TIRAGE" || g.type_promotion === "GAGNE") {
+        return `Tirage (${req} acheté${req > 1 ? "s" : ""})`;
+      }
+      return `${req} acheté${req > 1 ? "s" : ""} → ${off} offert${off > 1 ? "s" : ""}`;
+    }
+    return desc;
+  };
+
   const gainsByVenteId = new Map(
     gainPromotions.filter(g => g.vente_achat).map(g => [g.vente_achat as string, g])
   );
@@ -281,7 +296,7 @@ export function buildCondensedBulletinHtml(
       produit: v.produit_nom,
       conditionnement: v.conditionnement_display,
       quantiteAchetee: v.quantite,
-      offre: gain ? gain.promotion_description : "—",
+      offre: gain ? formatPromoLabel(gain) : "—",
       quantiteOfferte: gain?.quantite_offerte ?? 0,
     });
   });
@@ -384,7 +399,7 @@ export function buildCondensedBulletinHtml(
     sections.push(`
       <h2 class="section-title">UGs (goodies) par site et par jour</h2>
       <table><thead><tr><th>Site</th><th>Date</th><th>Goodie</th>${config.show_ugs_recus ? `<th class="r">Reçus</th>` : ""}${config.show_ugs_distribues ? `<th class="r">Distribués</th>` : ""}${config.show_ugs_restants ? `<th class="r">Restants</th>` : ""}</tr></thead>
-      <tbody>${sortedGoodieRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.goodieNom)}</td>${config.show_ugs_recus ? `<td class="r">${r.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r">${r.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r">${Math.max(0, r.recus - r.distribues)}</td>` : ""}</tr>`).join("")}
+      <tbody>${sortedGoodieRows.map(r => `<tr${r.estReport ? ' style="background:#fffbeb"' : ""}><td class="b">${esc(r.siteNom)}</td><td>${esc(fmtDateLong(r.date))}</td><td>${esc(r.goodieNom)}${r.estReport ? ' <span style="font-size:10px;color:#b45309;background:#fef3c7;border:1px solid #fde68a;border-radius:4px;padding:1px 5px;font-weight:700">report ↩</span>' : ""}</td>${config.show_ugs_recus ? `<td class="r">${r.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r">${r.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r">${Math.max(0, r.recus - r.distribues)}</td>` : ""}</tr>`).join("")}
       ${[...ugsTotalsParSite.values()].map(s => `<tr class="tot-row"><td class="b" colspan="3">TOTAL ${esc(s.siteNom)}</td>${config.show_ugs_recus ? `<td class="r b">${s.recus}</td>` : ""}${config.show_ugs_distribues ? `<td class="r b">${s.distribues}</td>` : ""}${config.show_ugs_restants ? `<td class="r b">${Math.max(0, s.recus - s.distribues)}</td>` : ""}</tr>`).join("")}
       </tbody></table>`);
   }

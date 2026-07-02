@@ -823,6 +823,7 @@ export interface LivraisonGoodiesJour {
   quantite_apportee: number;
   gains_du_jour: number;
   restants_du_jour: number;
+  est_report: boolean;
   enregistre_par: string | null;
   enregistre_par_nom: string | null;
   created_at: string;
