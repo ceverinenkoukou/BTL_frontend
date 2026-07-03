@@ -821,14 +821,11 @@ export default function CampaignDetailPage() {
 
   const handleDegSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isVenteCampaign = campaign?.type_campagne === "VENTE";
     const isPromoMode = campaign?.type_recompense === "PROMOTIONS";
     const baseValid = degForm.site && degForm.produit && degForm.tranche_age && degForm.genre;
     const noteRequired     = !!campaign?.note_gout_active;
     const ambianceRequired = !!campaign?.note_ambiance_active;
-    // "Vente hors offre promotionnelle" est toujours disponible (cf. étape 3) :
-    // plus de pass-through quand aucune promo n'est éligible, pour forcer la
-    // saisie du conditionnement/quantité réel plutôt que de retomber sur le
-    // défaut UNITE/1 côté backend.
     const promoChoiceValid = !isPromoMode || degForm.promotion_selectionnee !== "";
     const promoValid = (isPromoMode
       ? baseValid && (!noteRequired || degForm.note_gout) && (!ambianceRequired || degForm.note_ambiance)
@@ -840,86 +837,152 @@ export default function CampaignDetailPage() {
     }
     setSavingDeg(true);
     try {
-      const a_achete = isPromoMode ? true : false;
-      const willRegisterPromo = isPromoMode && degForm.promotion_selectionnee !== "" && degForm.promotion_selectionnee !== "__NONE__";
-      const payload: CreateDegustationPayload = {
-        site: degForm.site,
-        produit: degForm.produit,
-        tranche_age: degForm.tranche_age as TrancheAge,
-        genre: degForm.genre as Genre,
-        note_gout:     campaign?.note_gout_active     ? (degForm.note_gout     || null) : null,
-        note_ambiance: campaign?.note_ambiance_active ? (degForm.note_ambiance || null) : null,
-        intention_achat: isPromoMode ? "ELEVEE" : (showTasting ? degForm.intention_achat as IntentionAchat : "MOYENNE"),
-        a_achete,
-        nom_client: degForm.nom_client.trim() || undefined,
-        promotion_appliquee: willRegisterPromo,
-        ...(isPromoMode && degForm.promotion_selectionnee === "__NONE__" && {
-          conditionnement: degForm.conditionnement,
-          quantite: degForm.quantite,
-        }),
-      };
-      const { data: created } = await api.post<Degustation>("/degustations/", payload);
-
-      let selectedPromo = null;
-      let promoGoodiesRoue: { id: string; nom: string }[] = [];
-      if (willRegisterPromo) {
-        selectedPromo = campaign?.promotions?.find(p => p.id === degForm.promotion_selectionnee);
-        if (selectedPromo) {
-          try {
-            const { data: promoGainRes } = await api.post<{ goodies_roue: { id: string; nom: string }[] }>(
-              `/promotions/${selectedPromo.id}/enregistrer-gain/`,
-              {
-                site_id: degForm.site,
-                produit_id: degForm.produit,
-                nom_client: degForm.nom_client.trim() || undefined,
-                degustation_id: created.id,
-              }
-            );
-            promoGoodiesRoue = promoGainRes.goodies_roue ?? [];
-            toast.success("Gain promotionnel enregistré ! 🎉");
-          } catch (promoErr: unknown) {
-            const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-            toast.warning(promoMsg ?? "Erreur lors de l'enregistrement de la promotion.");
-          }
-        }
-      }
-
-      setTastings(prev => [created, ...prev]);
-      invalidateCache("/degustations");
-      setPendingDegustationId(created.id);
       const clientName = degForm.nom_client.trim();
-      setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
-      setDegStep(1);
 
-      // Confirmation plein écran (~1s) + vibration mobile, avant l'ouverture
-      // éventuelle de la roue pour ne pas superposer les deux.
-      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(120);
-      setShowDegConfirm(true);
-      setTimeout(() => {
-        setShowDegConfirm(false);
-        if (campaign?.type_recompense === "GOODIES") {
-          setWheelClientName(clientName || "Client");
-          setWonPrize(null);
-          wheelRotationRef.current = 0;
-          setWheelSpinning(false);
-          setWheelOpen(true);
-        } else if (isPromoMode && (selectedPromo?.type_promotion === "GAGNE" || selectedPromo?.type_promotion === "TIRAGE")) {
-          setWheelClientName(clientName || "Client");
-          setWonPrize(null);
-          wheelRotationRef.current = 0;
-          setWheelSpinning(false);
-          // Override uniquement si la promo restreint à des goodies précis —
-          // dans ce cas le contenu vient du backend (déjà filtré par stock du
-          // jour/site) ; sinon on retombe sur le stock du jour du site (cf.
-          // getWheelPrizes), pas sur tout le catalogue de la campagne.
-          if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
-            setTirageGoodiesOverride(promoGoodiesRoue);
-          } else {
-            setTirageGoodiesOverride(null);
+      if (isVenteCampaign) {
+        // ── VENTE : enregistrement direct dans Vente, sans Degustation ──
+        const willRegisterPromo = isPromoMode && degForm.promotion_selectionnee !== "" && degForm.promotion_selectionnee !== "__NONE__";
+        let selectedPromo = null;
+        let promoGoodiesRoue: { id: string; nom: string }[] = [];
+
+        if (willRegisterPromo) {
+          // La promo crée elle-même la Vente NORMAL + Vente PROMOTION en interne
+          selectedPromo = campaign?.promotions?.find(p => p.id === degForm.promotion_selectionnee) ?? null;
+          if (selectedPromo) {
+            try {
+              const { data: promoGainRes } = await api.post<{ goodies_roue: { id: string; nom: string }[] }>(
+                `/promotions/${selectedPromo.id}/enregistrer-gain/`,
+                {
+                  site_id: degForm.site,
+                  produit_id: degForm.produit,
+                  nom_client: clientName || undefined,
+                  tranche_age: degForm.tranche_age || undefined,
+                  genre: degForm.genre || undefined,
+                }
+              );
+              promoGoodiesRoue = promoGainRes.goodies_roue ?? [];
+              toast.success("Gain promotionnel enregistré ! 🎉");
+            } catch (promoErr: unknown) {
+              const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+              toast.warning(promoMsg ?? "Erreur lors de l'enregistrement de la promotion.");
+            }
           }
-          setActiveWheelPromoId(selectedPromo.id);
+        } else {
+          // Vente simple (ou promo mode sans promo sélectionnée)
+          const { data: createdVente } = await api.post<Vente>("/ventes/creer-directe/", {
+            site_id: degForm.site,
+            produit_id: degForm.produit,
+            conditionnement: degForm.conditionnement || "UNITE",
+            quantite: Number(degForm.quantite) || 1,
+            nom_client: clientName || undefined,
+            tranche_age: degForm.tranche_age || undefined,
+            genre: degForm.genre || undefined,
+          });
+          setVentes(prev => [createdVente, ...prev]);
+          invalidateCache("/ventes");
         }
-      }, 1000);
+
+        setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
+        setDegStep(1);
+        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(120);
+        setShowDegConfirm(true);
+        setTimeout(() => {
+          setShowDegConfirm(false);
+          if (!willRegisterPromo && campaign?.type_recompense === "GOODIES") {
+            setWheelClientName(clientName || "Client");
+            setWonPrize(null);
+            wheelRotationRef.current = 0;
+            setWheelSpinning(false);
+            setWheelOpen(true);
+          } else if (selectedPromo && (selectedPromo.type_promotion === "GAGNE" || selectedPromo.type_promotion === "TIRAGE")) {
+            setWheelClientName(clientName || "Client");
+            setWonPrize(null);
+            wheelRotationRef.current = 0;
+            setWheelSpinning(false);
+            if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
+              setTirageGoodiesOverride(promoGoodiesRoue);
+            } else {
+              setTirageGoodiesOverride(null);
+            }
+            setActiveWheelPromoId(selectedPromo.id);
+          }
+        }, 1000);
+
+      } else {
+        // ── DEGUSTATION / DEGUSTATION_VENTE : flux existant ─────────────
+        const a_achete = isPromoMode ? true : false;
+        const willRegisterPromo = isPromoMode && degForm.promotion_selectionnee !== "" && degForm.promotion_selectionnee !== "__NONE__";
+        const payload: CreateDegustationPayload = {
+          site: degForm.site,
+          produit: degForm.produit,
+          tranche_age: degForm.tranche_age as TrancheAge,
+          genre: degForm.genre as Genre,
+          note_gout:     campaign?.note_gout_active     ? (degForm.note_gout     || null) : null,
+          note_ambiance: campaign?.note_ambiance_active ? (degForm.note_ambiance || null) : null,
+          intention_achat: isPromoMode ? "ELEVEE" : (showTasting ? degForm.intention_achat as IntentionAchat : "MOYENNE"),
+          a_achete,
+          nom_client: clientName || undefined,
+          promotion_appliquee: willRegisterPromo,
+          ...(isPromoMode && degForm.promotion_selectionnee === "__NONE__" && {
+            conditionnement: degForm.conditionnement,
+            quantite: degForm.quantite,
+          }),
+        };
+        const { data: created } = await api.post<Degustation>("/degustations/", payload);
+
+        let selectedPromo = null;
+        let promoGoodiesRoue: { id: string; nom: string }[] = [];
+        if (willRegisterPromo) {
+          selectedPromo = campaign?.promotions?.find(p => p.id === degForm.promotion_selectionnee) ?? null;
+          if (selectedPromo) {
+            try {
+              const { data: promoGainRes } = await api.post<{ goodies_roue: { id: string; nom: string }[] }>(
+                `/promotions/${selectedPromo.id}/enregistrer-gain/`,
+                {
+                  site_id: degForm.site,
+                  produit_id: degForm.produit,
+                  nom_client: clientName || undefined,
+                  degustation_id: created.id,
+                }
+              );
+              promoGoodiesRoue = promoGainRes.goodies_roue ?? [];
+              toast.success("Gain promotionnel enregistré ! 🎉");
+            } catch (promoErr: unknown) {
+              const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+              toast.warning(promoMsg ?? "Erreur lors de l'enregistrement de la promotion.");
+            }
+          }
+        }
+
+        setTastings(prev => [created, ...prev]);
+        invalidateCache("/degustations");
+        setPendingDegustationId(created.id);
+        setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
+        setDegStep(1);
+        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(120);
+        setShowDegConfirm(true);
+        setTimeout(() => {
+          setShowDegConfirm(false);
+          if (campaign?.type_recompense === "GOODIES") {
+            setWheelClientName(clientName || "Client");
+            setWonPrize(null);
+            wheelRotationRef.current = 0;
+            setWheelSpinning(false);
+            setWheelOpen(true);
+          } else if (isPromoMode && selectedPromo && (selectedPromo.type_promotion === "GAGNE" || selectedPromo.type_promotion === "TIRAGE")) {
+            setWheelClientName(clientName || "Client");
+            setWonPrize(null);
+            wheelRotationRef.current = 0;
+            setWheelSpinning(false);
+            if (selectedPromo.type_promotion === "TIRAGE" && (selectedPromo.goodies_details?.length ?? 0) > 0) {
+              setTirageGoodiesOverride(promoGoodiesRoue);
+            } else {
+              setTirageGoodiesOverride(null);
+            }
+            setActiveWheelPromoId(selectedPromo.id);
+          }
+        }, 1000);
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast.error(msg ?? "Erreur lors de l'enregistrement.");
