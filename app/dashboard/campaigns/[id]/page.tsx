@@ -285,7 +285,7 @@ export default function CampaignDetailPage() {
     try {
       const requests: Promise<unknown>[] = [
         api.get<CampagneDetail>(`/campagnes/${id}/`),
-        api.get<Degustation[]>("/degustations/"),
+        api.get<Degustation[]>(`/degustations/?campagne=${id}`),
         api.get<Vente[]>(`/ventes/?campagne=${id}`),
         api.get<SiteList[]>("/sites/"),
       ];
@@ -955,7 +955,7 @@ export default function CampaignDetailPage() {
         }
 
         setTastings(prev => [created, ...prev]);
-        invalidateCache("/degustations");
+        invalidateCache(`/degustations/?campagne=${id}`);
         setPendingDegustationId(created.id);
         setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
         setDegStep(1);
