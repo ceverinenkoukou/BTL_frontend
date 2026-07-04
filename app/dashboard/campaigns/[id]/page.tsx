@@ -1553,10 +1553,15 @@ export default function CampaignDetailPage() {
                 {livraisons.length > 0 && (
                   <div className="space-y-1.5 pt-2 border-t border-slate-100 max-h-48 overflow-y-auto">
                     {livraisons.slice(0, 10).map(l => (
-                      <div key={l.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                      <div key={l.id} className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs ${l.est_report ? "bg-amber-50 border border-amber-100" : "bg-slate-50"}`}>
                         <div className="min-w-0">
                           <p className="font-semibold text-foreground truncate">{l.goodie_nom}</p>
-                          <p className="text-muted-foreground">{l.site_nom} · {new Date(l.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
+                          <p className="text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                            {l.site_nom} · {new Date(l.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                            {l.est_report && (
+                              <span className="inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">↩ report J-1</span>
+                            )}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0 text-right">
                           <span className="text-emerald-600 font-bold">+{l.quantite_apportee}</span>
@@ -2599,10 +2604,15 @@ export default function CampaignDetailPage() {
             {livraisons.length > 0 && (
               <div className="space-y-1.5 pt-2 border-t border-slate-100 max-h-48 overflow-y-auto">
                 {livraisons.map(l => (
-                  <div key={l.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
+                  <div key={l.id} className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs ${l.est_report ? "bg-amber-50 border border-amber-100" : "bg-slate-50"}`}>
                     <div className="min-w-0">
                       <p className="font-semibold text-foreground truncate">{l.goodie_nom}</p>
-                      <p className="text-muted-foreground">{l.site_nom} · {new Date(l.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
+                      <p className="text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                        {l.site_nom} · {new Date(l.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                        {l.est_report && (
+                          <span className="inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">↩ report J-1</span>
+                        )}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-emerald-600 font-bold">+{l.quantite_apportee}</span>
