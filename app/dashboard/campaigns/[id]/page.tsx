@@ -994,6 +994,13 @@ export default function CampaignDetailPage() {
   const purchasedCount = tastings.filter(t => t.a_achete).length;
   const totalRevenue   = ventes.reduce((sum, v) => sum + Number(v.prix_total ?? 0), 0);
   const convRate       = tastings.length > 0 ? Math.round((purchasedCount / tastings.length) * 100) : 0;
+  // Pour les campagnes VENTE (sans dégustation), le compteur d'objectif ventes
+  // lit directement les Vente NORMAL — les anciennes ventes liées à des
+  // dégustations ET les nouvelles ventes directes sont ainsi toutes comptées.
+  const isVenteCampagne = campaign?.type_campagne === "VENTE";
+  const venteNormalCount = isVenteCampagne
+    ? ventes.length
+    : purchasedCount;
   const ratedTastings  = tastings.filter(t => t.note_gout !== null);
   const avgRating      = ratedTastings.length > 0
     ? Math.round((ratedTastings.reduce((s, t) => s + (t.note_gout ?? 0), 0) / ratedTastings.length) * 10) / 10
@@ -1114,6 +1121,8 @@ export default function CampaignDetailPage() {
 
   const showTasting  = campaign.type_campagne !== "VENTE";
   const showVente    = campaign.type_campagne !== "DEGUSTATION";
+  const degustationCount = isVenteCampagne ? tastings.length + ventes.length : tastings.length;
+  const showDegustationBar = showTasting || (isVenteCampagne && (tastings.length > 0 || !!campaign.objectif_degustations));
   const showWheel    = campaign.type_recompense === "GOODIES";
   const showPromos   = campaign.type_recompense === "PROMOTIONS";
 
@@ -1186,7 +1195,7 @@ export default function CampaignDetailPage() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
               {[
-                showTasting && { label: "Dégustations", value: tastings.length, sub: `/ ${campaign.objectif_degustations ?? 0}`, icon: "🍷" },
+                showDegustationBar && { label: "Dégustations", value: degustationCount, sub: `/ ${campaign.objectif_degustations ?? 0}`, icon: "🍷" },
                 showTasting && { label: "Acheteurs", value: purchasedCount, sub: `conv. ${convRate}%`, icon: "🛒" },
                 showTasting && campaign.note_gout_active && avgRating !== null && { label: "Note moy.", value: `${avgRating}/${campaign.note_gout_max}`, sub: "satisfaction", icon: "⭐" },
                 showVente && { label: "Chiffre d'aff.", value: fmtXOF(totalRevenue), sub: `${ventes.length} ventes`, icon: "💰" },
@@ -1272,14 +1281,14 @@ export default function CampaignDetailPage() {
                 <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center shrink-0"><BarChart3 className="w-3.5 h-3.5 text-violet-600" /></div>
                 Avancement des objectifs
               </h3>
-              {showTasting && (
+              {showDegustationBar && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm"><UtensilsCrossed className="w-4 h-4 text-indigo-500" /><span className="font-medium text-foreground">Dégustations</span></div>
-                    <div className="flex items-center gap-2 text-sm"><span className="font-bold text-indigo-700">{tastings.length}</span><span className="text-muted-foreground">/ {campaign.objectif_degustations ?? 0}</span><span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-semibold">{convRate}%</span></div>
+                    <div className="flex items-center gap-2 text-sm"><span className="font-bold text-indigo-700">{degustationCount}</span><span className="text-muted-foreground">/ {campaign.objectif_degustations ?? 0}</span><span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-semibold">{convRate}%</span></div>
                   </div>
                   <div className="h-3 rounded-full bg-indigo-50 overflow-hidden shadow-inner">
-                    <div className="h-full bg-gradient-to-r from-indigo-500 to-blue-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${Math.min(100, campaign.objectif_degustations ? Math.round((tastings.length / campaign.objectif_degustations) * 100) : 0)}%` }} />
+                    <div className="h-full bg-gradient-to-r from-indigo-500 to-blue-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${Math.min(100, campaign.objectif_degustations ? Math.round((degustationCount / campaign.objectif_degustations) * 100) : 0)}%` }} />
                   </div>
                 </div>
               )}
@@ -1287,10 +1296,10 @@ export default function CampaignDetailPage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm"><ShoppingCart className="w-4 h-4 text-violet-500" /><span className="font-medium text-foreground">Ventes</span></div>
-                    <div className="flex items-center gap-2 text-sm"><span className="font-bold text-violet-700">{purchasedCount}</span><span className="text-muted-foreground">/ {campaign.objectif_ventes ?? 0}</span><span className="text-xs px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full font-semibold">{campaign.objectif_ventes ? Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100)) : 0}%</span></div>
+                    <div className="flex items-center gap-2 text-sm"><span className="font-bold text-violet-700">{venteNormalCount}</span><span className="text-muted-foreground">/ {campaign.objectif_ventes ?? 0}</span><span className="text-xs px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full font-semibold">{campaign.objectif_ventes ? Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100)) : 0}%</span></div>
                   </div>
                   <div className="h-3 rounded-full bg-violet-50 overflow-hidden shadow-inner">
-                    <div className="h-full bg-gradient-to-r from-violet-500 to-purple-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${campaign.objectif_ventes ? Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100)) : 0}%` }} />
+                    <div className="h-full bg-gradient-to-r from-violet-500 to-purple-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${campaign.objectif_ventes ? Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100)) : 0}%` }} />
                   </div>
                 </div>
               )}
@@ -1713,26 +1722,26 @@ export default function CampaignDetailPage() {
               </div>
             </div>
           )}
-          {((showTasting && campaign.objectif_degustations) || (showVente && campaign.objectif_ventes)) && (
+          {((showDegustationBar && campaign.objectif_degustations) || (showVente && campaign.objectif_ventes)) && (
             <div className="pt-3 border-t border-slate-100 grid sm:grid-cols-2 gap-3">
-              {showTasting && campaign.objectif_degustations && (
+              {showDegustationBar && campaign.objectif_degustations && (
                 <div className="rounded-xl p-3 space-y-1.5" style={{ background: hex(p1, 0.07) }}>
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5" style={{ color: p1 }}><UtensilsCrossed className="w-3.5 h-3.5" /><span className="font-semibold">Objectif dégustations</span></div>
-                    <span className="font-bold tabular-nums" style={{ color: p1 }}>{tastings.length} / {campaign.objectif_degustations}</span>
+                    <span className="font-bold tabular-nums" style={{ color: p1 }}>{degustationCount} / {campaign.objectif_degustations}</span>
                   </div>
-                  <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((tastings.length / campaign.objectif_degustations) * 100))}%`, background: brandGrad }} /></div>
-                  <p className="text-xs text-right" style={{ color: p1 }}>{Math.min(100, Math.round((tastings.length / campaign.objectif_degustations) * 100))}% atteint</p>
+                  <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((degustationCount / campaign.objectif_degustations) * 100))}%`, background: brandGrad }} /></div>
+                  <p className="text-xs text-right" style={{ color: p1 }}>{Math.min(100, Math.round((degustationCount / campaign.objectif_degustations) * 100))}% atteint</p>
                 </div>
               )}
               {showVente && campaign.objectif_ventes && (
                 <div className="rounded-xl p-3 space-y-1.5" style={{ background: hex(p2, 0.07) }}>
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5" style={{ color: p2 }}><ShoppingCart className="w-3.5 h-3.5" /><span className="font-semibold">Objectif ventes</span></div>
-                    <span className="font-bold tabular-nums" style={{ color: p2 }}>{purchasedCount} / {campaign.objectif_ventes}</span>
+                    <span className="font-bold tabular-nums" style={{ color: p2 }}>{venteNormalCount} / {campaign.objectif_ventes}</span>
                   </div>
-                  <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100))}%`, background: `linear-gradient(to right, ${p2}, ${p1})` }} /></div>
-                  <p className="text-xs text-right" style={{ color: p2 }}>{Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100))}% atteint</p>
+                  <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100))}%`, background: `linear-gradient(to right, ${p2}, ${p1})` }} /></div>
+                  <p className="text-xs text-right" style={{ color: p2 }}>{Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100))}% atteint</p>
                 </div>
               )}
             </div>
@@ -2344,29 +2353,29 @@ export default function CampaignDetailPage() {
               </h3>
             </div>
             <div className="space-y-5">
-              {showTasting && campaign.objectif_degustations ? (
+              {showDegustationBar && campaign.objectif_degustations ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2"><UtensilsCrossed className="w-4 h-4" style={{ color: p1 }} /><span className="font-medium text-foreground">Dégustations</span></div>
-                    <span className="font-bold tabular-nums" style={{ color: p1 }}>{tastings.length} / {campaign.objectif_degustations}</span>
+                    <span className="font-bold tabular-nums" style={{ color: p1 }}>{degustationCount} / {campaign.objectif_degustations}</span>
                   </div>
-                  <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((tastings.length / campaign.objectif_degustations) * 100))}%`, background: brandGrad }} /></div>
-                  <p className="text-xs text-muted-foreground text-right">{Math.min(100, Math.round((tastings.length / campaign.objectif_degustations) * 100))}% atteint</p>
+                  <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((degustationCount / campaign.objectif_degustations) * 100))}%`, background: brandGrad }} /></div>
+                  <p className="text-xs text-muted-foreground text-right">{Math.min(100, Math.round((degustationCount / campaign.objectif_degustations) * 100))}% atteint</p>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p1, 0.07) }}><UtensilsCrossed className="w-4 h-4 shrink-0" style={{ color: p1 }} /><div><p className="text-sm font-semibold text-foreground">{tastings.length} dégustation{tastings.length !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Objectif libre</p></div></div>
+                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p1, 0.07) }}><UtensilsCrossed className="w-4 h-4 shrink-0" style={{ color: p1 }} /><div><p className="text-sm font-semibold text-foreground">{degustationCount} dégustation{degustationCount !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Objectif libre</p></div></div>
               )}
               {showVente && campaign.objectif_ventes ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2"><ShoppingCart className="w-4 h-4" style={{ color: p2 }} /><span className="font-medium text-foreground">Ventes</span></div>
-                    <span className="font-bold tabular-nums" style={{ color: p2 }}>{purchasedCount} / {campaign.objectif_ventes}</span>
+                    <span className="font-bold tabular-nums" style={{ color: p2 }}>{venteNormalCount} / {campaign.objectif_ventes}</span>
                   </div>
-                  <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100))}%`, background: `linear-gradient(to right, ${p2}, ${p1})` }} /></div>
-                  <p className="text-xs text-muted-foreground text-right">{Math.min(100, Math.round((purchasedCount / campaign.objectif_ventes) * 100))}% atteint</p>
+                  <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100))}%`, background: `linear-gradient(to right, ${p2}, ${p1})` }} /></div>
+                  <p className="text-xs text-muted-foreground text-right">{Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100))}% atteint</p>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p2, 0.07) }}><ShoppingCart className="w-4 h-4 shrink-0" style={{ color: p2 }} /><div><p className="text-sm font-semibold text-foreground">{purchasedCount} vente{purchasedCount !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Objectif libre</p></div></div>
+                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: hex(p2, 0.07) }}><ShoppingCart className="w-4 h-4 shrink-0" style={{ color: p2 }} /><div><p className="text-sm font-semibold text-foreground">{venteNormalCount} vente{venteNormalCount !== 1 ? "s" : ""}</p><p className="text-xs text-muted-foreground">Objectif libre</p></div></div>
               )}
             </div>
           </div>
