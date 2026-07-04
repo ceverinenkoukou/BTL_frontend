@@ -286,7 +286,7 @@ export default function CampaignDetailPage() {
       const requests: Promise<unknown>[] = [
         api.get<CampagneDetail>(`/campagnes/${id}/`),
         api.get<Degustation[]>("/degustations/"),
-        api.get<Vente[]>("/ventes/"),
+        api.get<Vente[]>(`/ventes/?campagne=${id}`),
         api.get<SiteList[]>("/sites/"),
       ];
       if (user?.role === "Entreprise") {
