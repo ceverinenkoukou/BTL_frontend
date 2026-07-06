@@ -210,6 +210,11 @@ export default function CampaignDetailPage() {
   const [entrepriseStats, setEntrepriseStats] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
+  // Statistiques agrégées (hôtesse) — alimentent les barres de progression sans
+  // charger tous les enregistrements de la campagne.
+  const [venteStats, setVenteStats] = useState<{ total_ventes: number; total_unites_vendues: number } | null>(null);
+  const [degustationStats, setDegustationStats] = useState<{ total_degustations: number; total_acheteurs: number; taux_conversion: number } | null>(null);
+
   // ── Config rapport ──
   const [reportConfig, setReportConfig] = useState<RapportConfig | null>(null);
 
@@ -283,14 +288,34 @@ export default function CampaignDetailPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const isHotesse = user?.role === "Hotesse";
+      const today = new Date().toISOString().slice(0, 10);
+
       const requests: Promise<unknown>[] = [
         api.get<CampagneDetail>(`/campagnes/${id}/`),
-        api.get<Degustation[]>(`/degustations/?campagne=${id}`),
-        api.get<Vente[]>(`/ventes/?campagne=${id}`),
+        api.get<Degustation[]>(isHotesse
+          ? `/degustations/?campagne=${id}&date=${today}`
+          : `/degustations/?campagne=${id}`),
+        api.get<Vente[]>(isHotesse
+          ? `/ventes/?campagne=${id}&date=${today}`
+          : `/ventes/?campagne=${id}`),
         api.get<SiteList[]>("/sites/"),
       ];
       if (user?.role === "Entreprise") {
         requests.push(api.get<CampagneRapportSites>(`/campagnes/${id}/rapport-sites/`));
+      } else if (isHotesse) {
+        // Stats agrégées pour les barres de progression — évite de charger
+        // l'intégralité des enregistrements de la campagne côté hôtesse.
+        // Les .catch garantissent que Promise.all ne plante pas si ces appels
+        // échouent — la page se charge quand même avec les données du jour.
+        requests.push(
+          api.get<{ total_ventes: number; total_unites_vendues: number }>(`/ventes/stats/?campagne_id=${id}`)
+            .catch(() => ({ data: null })),
+        );
+        requests.push(
+          api.get<{ total_degustations: number; total_acheteurs: number; taux_conversion: number }>(`/degustations/stats/?campagne=${id}`)
+            .catch(() => ({ data: null })),
+        );
       }
       const results = await Promise.all(requests);
       const campRes = results[0] as { data: CampagneDetail };
@@ -353,6 +378,11 @@ export default function CampaignDetailPage() {
         } catch {
           setReportConfig(null);
         }
+      }
+
+      if (isHotesse && results[4] && results[5]) {
+        setVenteStats((results[4] as { data: { total_ventes: number; total_unites_vendues: number } }).data);
+        setDegustationStats((results[5] as { data: { total_degustations: number; total_acheteurs: number; taux_conversion: number } }).data);
       }
 
       if (user?.role === "Entreprise" && results[4]) {
@@ -991,15 +1021,24 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const purchasedCount = tastings.filter(t => t.a_achete).length;
+  // Pour l'hôtesse, ventes[] et tastings[] ne contiennent que les données du
+  // jour (chargement allégé). Les compteurs des barres de progression lisent
+  // donc les stats agrégées (venteStats / degustationStats) qui couvrent toute
+  // la campagne. Pour les autres rôles, les tableaux complets sont chargés et
+  // les calculs restent inchangés.
+  const purchasedCount = isHostess
+    ? (degustationStats?.total_acheteurs ?? tastings.filter(t => t.a_achete).length)
+    : tastings.filter(t => t.a_achete).length;
   const totalRevenue   = ventes.reduce((sum, v) => sum + Number(v.prix_total ?? 0), 0);
-  const convRate       = tastings.length > 0 ? Math.round((purchasedCount / tastings.length) * 100) : 0;
+  const convRate       = isHostess
+    ? Math.round(degustationStats?.taux_conversion ?? (tastings.length > 0 ? (tastings.filter(t => t.a_achete).length / tastings.length) * 100 : 0))
+    : (tastings.length > 0 ? Math.round((purchasedCount / tastings.length) * 100) : 0);
   // Pour les campagnes VENTE (sans dégustation), le compteur d'objectif ventes
   // lit directement les Vente NORMAL — les anciennes ventes liées à des
   // dégustations ET les nouvelles ventes directes sont ainsi toutes comptées.
   const isVenteCampagne = campaign?.type_campagne === "VENTE";
   const venteNormalCount = isVenteCampagne
-    ? ventes.length
+    ? (isHostess ? (venteStats?.total_ventes ?? ventes.length) : ventes.length)
     : purchasedCount;
   const ratedTastings  = tastings.filter(t => t.note_gout !== null);
   const avgRating      = ratedTastings.length > 0
@@ -1121,7 +1160,9 @@ export default function CampaignDetailPage() {
 
   const showTasting  = campaign.type_campagne !== "VENTE";
   const showVente    = campaign.type_campagne !== "DEGUSTATION";
-  const degustationCount = isVenteCampagne ? tastings.length + ventes.length : tastings.length;
+  const degustationCount = isVenteCampagne
+    ? (isHostess ? (venteStats?.total_ventes ?? ventes.length) : tastings.length + ventes.length)
+    : (isHostess ? (degustationStats?.total_degustations ?? tastings.length) : tastings.length);
   const showDegustationBar = showTasting || (isVenteCampagne && (tastings.length > 0 || !!campaign.objectif_degustations));
   const showWheel    = campaign.type_recompense === "GOODIES";
   const showPromos   = campaign.type_recompense === "PROMOTIONS";

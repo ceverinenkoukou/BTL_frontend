@@ -247,8 +247,8 @@ export function buildCondensedBulletinHtml(
   // depuis Vente, PAS depuis Degustation : couvre aussi les achats
   // déclencheurs de promo sans dégustation associée (la majorité des gains
   // promo), qui étaient invisibles quand ce tableau partait de Degustation.
-  // Filtré uniquement par campagne + date, pas par siteNoms : un site sans
-  // bulletin généré ne doit pas perdre ses lignes.
+  // Filtré par siteNoms (même périmètre que "Détail par site") pour que les
+  // quantités soient cohérentes entre les deux tableaux.
   //
   // Conséquence acceptée : les dégustations sans achat n'apparaissent plus
   // ici (il n'y a pas de Vente à montrer). Pour la liste des dégustations
@@ -280,7 +280,9 @@ export function buildCondensedBulletinHtml(
   const normalizeClient = (value: string | null | undefined) => (value || "").trim() || "—";
 
   const relevantVentesDetail = ventes.filter(v =>
-    v.campagne_nom === campagne.nom && dateSet.has(v.created_at.slice(0, 10))
+    v.campagne_nom === campagne.nom &&
+    siteNoms.has(v.site_nom) &&
+    dateSet.has(v.created_at.slice(0, 10))
   );
 
   // 1. Une ligne par vente NORMAL — l'achat. Liée à sa promo via
