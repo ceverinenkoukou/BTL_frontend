@@ -33,7 +33,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FileDown, Loader2 } from "lucide-react";
 import type { Campaign, CampaignSite, CampaignTeamMember, Company, Profile, Sale, Tasting, Zone } from "@/lib/types";
-import type { RapportConfig, DonneesSiteJour, LivraisonGoodiesJour } from "@/lib/types/backend";
+import type { RapportConfig, DonneesSiteJour, LivraisonGoodiesJour, TypeCampagne, GainGoodie } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 
 type HostessTasting = Tasting & {
@@ -65,10 +65,10 @@ type BrandCompany = Company & {
 type ReportCampaign = Campaign & {
   company?: BrandCompany;
   zone?: Zone;
+  type_campagne?: TypeCampagne;
 };
 type ReportSale = Sale & {
   notes?: string;
-  goodies_given?: number;
   type_vente?: "NORMAL" | "GRATUIT" | "PROMOTION";
   est_achat_promo?: boolean;
 };
@@ -97,6 +97,11 @@ type SiteStat = {
   goodies: number;
   promoGains: Record<string, number>;
   hostesses: HostessStat[];
+  activeDays: number;
+  ventesNormales: number;
+  offerts: number;
+  avgVentesNormalesParJour: number;
+  avgOffertsParJour: number;
 };
 type Palette = ReturnType<typeof buildPalette>;
 type HoraireSite = {
@@ -116,6 +121,7 @@ type CampaignReportProps = {
   horaires?: HoraireSite[];
   donneesSiteJour?: DonneesSiteJour[];
   livraisons?: LivraisonGoodiesJour[];
+  gainsGoodies?: GainGoodie[];
   reportConfig?: RapportConfig | null;
   label?: string;
 };
@@ -129,6 +135,7 @@ type GeneratePDFArgs = {
   horaires: HoraireSite[];
   donneesSiteJour: DonneesSiteJour[];
   livraisons: LivraisonGoodiesJour[];
+  gainsGoodies: GainGoodie[];
   isAdminOrSupervisor: boolean;
   palette: Palette;
   logoBase64: string | null;
@@ -414,7 +421,10 @@ function computePromoGains(campaignId: string, qty:number, promoType = "canettes
 // 5. Agrégations données
 // ─────────────────────────────────────────────────────────────
 
-function buildHostessStats(tastings: HostessTasting[], sales: ReportSale[], team: StaffMember[], campaign: ReportCampaign): HostessStat[] {
+function buildHostessStats(
+  tastings: HostessTasting[], sales: ReportSale[], team: StaffMember[],
+  campaign: ReportCampaign, gainsGoodies: GainGoodie[]
+): HostessStat[] {
   return team
     .filter(m => m.role === "hostess")
     .map(h => {
@@ -425,10 +435,11 @@ function buildHostessStats(tastings: HostessTasting[], sales: ReportSale[], team
       const dailyObj = h.daily_objective ?? Math.max(1, Math.ceil(campaign.sales_objective / 30));
       const activeDays = Math.max(1, [...new Set(hS.map(s => s.created_at?.slice(0, 10)))].length);
       const avgPerDay  = Math.round(hS.length / activeDays);
-      const goodiesCount = hS.reduce((a, s) => {
-        if ((s.notes ?? "").includes("Goodie: ✓")) return a + 1;
-        return a + (s.goodies_given ?? 0);
-      }, 0);
+      // Goodies réellement gagnés par des clients (GainGoodie), pas une valeur
+      // dérivée des ventes — hotesse est nullable côté backend (SET_NULL), donc
+      // ce comptage par hôtesse peut sous-estimer légèrement les gains non
+      // rattachés à une hôtesse (voir le total par site, plus fiable, ci-dessous).
+      const goodiesCount = gainsGoodies.filter(g => g.hotesse === h.user_id).length;
       return {
         id: h.user_id, name: h.user?.full_name ?? "—",
         site: h.site?.name ?? "—", siteId: h.site_id,
@@ -441,7 +452,10 @@ function buildHostessStats(tastings: HostessTasting[], sales: ReportSale[], team
     });
 }
 
-function buildSiteStats(hostessStats: HostessStat[], tastings: HostessTasting[], sales: ReportSale[], sites: CampaignSite[]): SiteStat[] {
+function buildSiteStats(
+  hostessStats: HostessStat[], tastings: HostessTasting[], sales: ReportSale[],
+  sites: CampaignSite[], gainsGoodies: GainGoodie[]
+): SiteStat[] {
   return sites.map(site => {
     const hIds = hostessStats.filter(h => h.siteId === site.id).map(h => h.id);
     const sH   = hostessStats.filter(h => h.siteId === site.id);
@@ -449,15 +463,33 @@ function buildSiteStats(hostessStats: HostessStat[], tastings: HostessTasting[],
       Object.entries(h.promoGains).forEach(([k, v]) => { acc[k] = (acc[k] ?? 0) + v; });
       return acc;
     }, {});
+    const siteSales = sales.filter(s => hIds.includes(s.hostess_id));
+    // "Ventes normales" = quantités réellement achetées (ex : les 4 canettes dans
+    // une mécanique "4 achetées → 1 offerte"). GRATUIT/PROMOTION = le produit
+    // offert (CA nul) — jamais compté comme une vente pour ce graphique.
+    const normalSales = siteSales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL");
+    const offertSales = siteSales.filter(s => s.type_vente === "GRATUIT" || s.type_vente === "PROMOTION");
+    // Jours d'activité = dates distinctes où une vente normale a été enregistrée
+    // sur ce site — un jour non travaillé ne produit aucune ligne et ne dilue
+    // donc jamais la moyenne (comparaison équitable entre sites à durées d'activité différentes).
+    const activeDays = Math.max(1, new Set(normalSales.map(s => s.created_at?.slice(0, 10))).size);
     return {
       id: site.id, name: site.name ?? "—",
       location: site.zone?.name ?? site.address ?? "—",
       tastings: tastings.filter(t => hIds.includes(t.hostess_id)).length,
-      sales:    sales.filter(s => hIds.includes(s.hostess_id)).length,
-      revenue:  sales.filter(s => hIds.includes(s.hostess_id)).reduce((a, s) => a + (s.total_amount ?? 0), 0),
-      goodies:  sH.reduce((a, h) => a + h.goodiesCount, 0),
+      sales:    siteSales.length,
+      revenue:  siteSales.reduce((a, s) => a + (s.total_amount ?? 0), 0),
+      // GainGoodie.site n'est jamais nul côté backend (contrairement à hotesse),
+      // donc ce comptage par site est exhaustif — plus fiable que la somme des
+      // goodiesCount par hôtesse.
+      goodies:  gainsGoodies.filter(g => g.site === site.id).length,
       promoGains: promoGainsAgg,
       hostesses: sH,
+      activeDays,
+      ventesNormales: normalSales.length,
+      offerts: offertSales.length,
+      avgVentesNormalesParJour: Math.round(normalSales.length / activeDays),
+      avgOffertsParJour: Math.round(offertSales.length / activeDays),
     };
   });
 }
@@ -483,7 +515,7 @@ function buildSiteHoraires(horaires: HoraireSite[], siteStats: SiteStat[]): Site
 
 function generatePDF({
   campaign, user, hostessStats, siteStats, tastings, sales, horaires,
-  donneesSiteJour, livraisons,
+  donneesSiteJour, livraisons, gainsGoodies,
   isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
 }: GeneratePDFArgs) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -498,6 +530,9 @@ function generatePDF({
   const isGMS  = campaign.id === GMS_ID;
   const isCHR  = campaign.id === CHR_ID;
   const isPromo = isGMS || isCHR;
+  // Campagne VENTE : pas de dégustations (nb_degustations forcé à 0 côté backend),
+  // le KPI "Ventes" doit donc refléter les ventes réelles de la campagne, pas les dégustations.
+  const isVenteCampagne = campaign.type_campagne === "VENTE";
   const TASTING_LABEL = "Ventes";
   const OFFERED_LABEL = "Produits offerts";
 
@@ -646,6 +681,104 @@ function generatePDF({
     Y += 26;
   }
 
+  /** Tronque un libellé pour qu'il tienne dans maxWidth (mm), avec "…" si besoin. */
+  function truncateLabel(label: string, maxWidth: number): string {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    if (doc.getTextWidth(label) <= maxWidth) return label;
+    let t = label;
+    while (t.length > 1 && doc.getTextWidth(t + "…") > maxWidth) t = t.slice(0, -1);
+    return t + "…";
+  }
+
+  /** Légende à puces colorées (obligatoire dès 2 séries). */
+  function legendRow(items: { color: RGB; label: string }[]) {
+    guard(8);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    let x = M;
+    items.forEach(it => {
+      doc.setFillColor(...it.color);
+      doc.roundedRect(x, Y, 3.2, 3.2, 0.6, 0.6, "F");
+      doc.setTextColor(...P.mid);
+      doc.text(it.label, x + 4.6, Y + 2.7);
+      x += 4.6 + doc.getTextWidth(it.label) + 7;
+    });
+    Y += 8;
+  }
+
+  /**
+   * Barres horizontales à une seule série (comparaison de magnitude).
+   * Couleur séquentielle (une teinte, du plus sombre — valeur la plus haute —
+   * au plus clair), triée décroissante, valeur affichée à l'extrémité de la barre.
+   */
+  function barChartSequential(items: { label: string; value: number }[]) {
+    if (items.length === 0) return;
+    const labelW = 40, valueW = 16;
+    const chartW = CW - labelW - valueW;
+    const barH = 5, gap = 2.2;
+    guard(items.length * (barH + gap) + 10);
+    const sorted = [...items].sort((a, b) => b.value - a.value);
+    const maxV = Math.max(1, sorted[0].value);
+    const baseX = M + labelW;
+    const startY = Y;
+    sorted.forEach((it, i) => {
+      const y = Y + i * (barH + gap);
+      const ratio = sorted.length > 1 ? i / (sorted.length - 1) : 0;
+      const color = mixRgb(P.secondary, lighten(P.primary, 0.55), ratio);
+      const w = Math.max(1.5, (it.value / maxV) * chartW);
+      doc.setFillColor(...color);
+      doc.roundedRect(baseX, y, w, barH, 1, 1, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...P.dark);
+      doc.text(truncateLabel(it.label, labelW - 3), M, y + barH - 1.2);
+      doc.setTextColor(...P.mid);
+      doc.text(fmt(it.value), baseX + w + 2, y + barH - 1.2);
+    });
+    doc.setDrawColor(...P.accentBorder);
+    doc.setLineWidth(0.2);
+    doc.line(baseX, startY - 1, baseX, startY + sorted.length * (barH + gap) - gap + 1);
+    Y = startY + sorted.length * (barH + gap) + 8;
+  }
+
+  /**
+   * Barres horizontales groupées à deux séries (identité fixe : couleur A / couleur B,
+   * jamais permutées). Valeurs directement étiquetées à l'extrémité de chaque barre.
+   */
+  function barChartGrouped2(items: { label: string; a: number; b: number }[], colorA: RGB, colorB: RGB) {
+    if (items.length === 0) return;
+    const labelW = 40, valueW = 14;
+    const chartW = CW - labelW - valueW;
+    const barH = 3.4, pairGap = 1, groupGap = 3.5;
+    const step = barH * 2 + pairGap + groupGap;
+    guard(items.length * step + 10);
+    const maxV = Math.max(1, ...items.flatMap(i => [i.a, i.b]));
+    const baseX = M + labelW;
+    const startY = Y;
+    items.forEach((it, i) => {
+      const yTop = Y + i * step;
+      const wa = Math.max(1, (it.a / maxV) * chartW);
+      const wb = Math.max(1, (it.b / maxV) * chartW);
+      doc.setFillColor(...colorA);
+      doc.roundedRect(baseX, yTop, wa, barH, 0.8, 0.8, "F");
+      doc.setFillColor(...colorB);
+      doc.roundedRect(baseX, yTop + barH + pairGap, wb, barH, 0.8, 0.8, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...P.dark);
+      doc.text(truncateLabel(it.label, labelW - 3), M, yTop + barH + pairGap / 2 + 1.2);
+      doc.setFontSize(6.5);
+      doc.setTextColor(...P.mid);
+      doc.text(fmt(it.a), baseX + wa + 1.5, yTop + barH - 0.6);
+      doc.text(fmt(it.b), baseX + wb + 1.5, yTop + barH + pairGap + barH - 0.6);
+    });
+    doc.setDrawColor(...P.accentBorder);
+    doc.setLineWidth(0.2);
+    doc.line(baseX, startY - 1, baseX, startY + items.length * step - groupGap + 1);
+    Y = startY + items.length * step + 8;
+  }
+
   function table(head: string[], body: (string | number)[][]) {
     guard(28);
     autoTable(doc, {
@@ -679,13 +812,14 @@ function generatePDF({
   // Totaux globaux
   const totalTastings = tastings.length;
   const totalSales    = sales.length;
+  const totalVentesNormales  = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").length;
   const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo).length;
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
-  const totalGoodies  = hostessStats.reduce((a, h) => a + h.goodiesCount, 0);
+  const totalGoodies  = gainsGoodies.length;
 
   sectionTitle("Synthèse globale");
   const kpis = [
-    cfg.show_kpi_degustations    ? { value: fmt(totalTastings),          label: TASTING_LABEL }          : null,
+    cfg.show_kpi_degustations    ? { value: fmt(isVenteCampagne ? totalVentesNormales : totalTastings), label: TASTING_LABEL } : null,
     cfg.show_kpi_ventes          ? { value: fmt(totalSales),             label: OFFERED_LABEL }          : null,
     cfg.show_kpi_ventes_hors_promo ? { value: fmt(totalVentesHorsPromo), label: "Ventes hors promo" }    : null,
     cfg.show_kpi_ca              ? { value: `${totalRevenue.toFixed(0)} €`, label: "Chiffre d'affaires" } : null,
@@ -693,6 +827,35 @@ function generatePDF({
     cfg.show_kpi_sites           ? { value: fmt(siteStats.length),       label: "Sites actifs" }         : null,
   ].filter(Boolean) as { value: string | number; label: string }[];
   if (kpis.length > 0) kpiRow(kpis);
+
+  // ── Graphiques de comparaison par site ──────────────────
+  // Métrique : ventes NORMAL (quantités réellement achetées, hors produits
+  // offerts GRATUIT/PROMOTION) rapportées aux jours d'activité réels du site
+  // — comparaison équitable entre sites qui n'ont pas travaillé le même
+  // nombre de jours sur la campagne.
+  if (cfg.show_section_graphiques && siteStats.length > 0) {
+    sectionTitle("Graphiques — comparaison par site");
+
+    guard(6);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...P.mid);
+    doc.text("Ventes normales par jour actif, par site (du plus élevé au plus faible)", M, Y);
+    Y += 5;
+    barChartSequential(siteStats.map(s => ({ label: s.name, value: s.avgVentesNormalesParJour })));
+
+    guard(14);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...P.mid);
+    doc.text("Ventes normales vs produits offerts, par jour actif et par site", M, Y);
+    Y += 5;
+    legendRow([{ color: P.primary, label: "Ventes normales" }, { color: P.mid, label: "Produits offerts" }]);
+    barChartGrouped2(
+      siteStats.map(s => ({ label: s.name, a: s.avgVentesNormalesParJour, b: s.avgOffertsParJour })),
+      P.primary, P.mid
+    );
+  }
 
   // ── Offres promotionnelles ──────────────────────────────
   if (cfg.show_section_offres_promo) {
@@ -778,49 +941,95 @@ function generatePDF({
     );
   }
 
-  // ── Stock de boissons & boissons gratuites par site ────
-  // Saisies indépendantes de l'hôtesse (cf. DonneesSiteJour) : on affiche le
-  // stock le plus récent (snapshot) et le cumul des boissons gratuites sur
-  // la période du rapport.
+  // ── Boissons offertes par jour d'activité, par site ────
+  // Saisies indépendantes de l'hôtesse (cf. DonneesSiteJour, une ligne par
+  // site+date) : détail jour par jour du stock disponible et des boissons
+  // offertes gratuitement, avec un total par site en bas de tableau.
   if (cfg.show_section_stock_boissons && donneesSiteJour.length > 0) {
-    sectionTitle("Stock de boissons & boissons gratuites par site");
+    sectionTitle("Boissons offertes par jour d'activité, par site");
+
     const parSite = new Map<string, DonneesSiteJour[]>();
     donneesSiteJour.forEach(d => {
       if (!parSite.has(d.site)) parSite.set(d.site, []);
       parSite.get(d.site)!.push(d);
     });
-    table(
-      ["Site", "Stock actuel", "Conditionnement", "Boissons gratuites (période)"],
-      siteStats
-        .filter(s => parSite.has(s.id))
-        .map(s => {
-          const entries = parSite.get(s.id)!.sort((a, b) => a.date.localeCompare(b.date));
-          const dernier = entries[entries.length - 1];
-          const totalGratuites = entries.reduce((sum, d) => sum + (d.nombre_boissons_gratuites ?? 0), 0);
-          return [s.name, fmt(dernier.stock_boissons ?? 0), dernier.conditionnement_display, fmt(totalGratuites)];
-        })
-    );
+
+    [...parSite.entries()].forEach(([siteId, entries]) => {
+      const siteName = siteStats.find(s => s.id === siteId)?.name ?? entries[0]?.site_nom ?? "—";
+      const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+
+      guard(12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...P.dark);
+      doc.text(siteName, M, Y);
+      Y += 5;
+
+      let totalOffertes = 0;
+      const body = sorted.map(d => {
+        const offertes = d.nombre_boissons_gratuites ?? 0;
+        totalOffertes += offertes;
+        return [fmtDate(d.date), d.conditionnement_display, fmt(d.stock_boissons ?? 0), fmt(offertes)];
+      });
+      body.push(["TOTAL", "—", "—", fmt(totalOffertes)]);
+
+      table(["Date", "Conditionnement", "Stock du jour", "Boissons offertes"], body);
+    });
   }
 
-  // ── UGs (goodies) reçus / distribués / restants par site ─
+  // ── UGs (goodies) : détail par jour d'activité, par site ─
+  // Chaque ligne LivraisonGoodiesJour = un jour d'activité réel pour (site, goodie).
+  // "Reporté" = restant du jour d'activité précédent (les goodies non distribués
+  // restent physiquement sur site et alimentent le stock disponible du jour suivant),
+  // qu'il ait été reporté automatiquement (est_report) ou réapprovisionné manuellement.
   if (cfg.show_section_ugs_livraisons && livraisons.length > 0) {
-    sectionTitle("UGs (goodies) reçus / distribués / restants par site");
-    const parSiteGoodie = new Map<string, { siteName: string; goodieNom: string; recus: number; distribues: number }>();
+    sectionTitle("UGs (goodies) — reçus / reportés / gagnés / restants par jour d'activité");
+
+    const parSiteGoodie = new Map<string, { siteName: string; goodieNom: string; jours: LivraisonGoodiesJour[] }>();
     livraisons.forEach(l => {
       const key = `${l.site}__${l.goodie}`;
       if (!parSiteGoodie.has(key)) {
-        parSiteGoodie.set(key, { siteName: l.site_nom, goodieNom: l.goodie_nom, recus: 0, distribues: 0 });
+        parSiteGoodie.set(key, { siteName: l.site_nom, goodieNom: l.goodie_nom, jours: [] });
       }
-      const entry = parSiteGoodie.get(key)!;
-      entry.recus += l.quantite_apportee;
-      entry.distribues += l.gains_du_jour;
+      parSiteGoodie.get(key)!.jours.push(l);
     });
-    table(
-      ["Site", "Goodie", "Reçus", "Distribués", "Restants"],
-      [...parSiteGoodie.values()].map(e => [
-        e.siteName, e.goodieNom, fmt(e.recus), fmt(e.distribues), fmt(Math.max(0, e.recus - e.distribues)),
-      ])
-    );
+
+    [...parSiteGoodie.values()].forEach(({ siteName, goodieNom, jours }) => {
+      const sorted = [...jours].sort((a, b) => a.date.localeCompare(b.date));
+
+      guard(12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...P.dark);
+      doc.text(`${siteName} — ${goodieNom}`, M, Y);
+      Y += 5;
+
+      let totalRecusFrais = 0, totalGagne = 0, totalReporteCumule = 0;
+      const body = sorted.map((l, i) => {
+        const reporte = i > 0 ? sorted[i - 1].restants_du_jour : 0;
+        const recusFrais = Math.max(0, l.quantite_apportee - reporte);
+        totalRecusFrais += recusFrais;
+        totalGagne += l.gains_du_jour;
+        if (reporte > 0) totalReporteCumule += reporte;
+        return [
+          fmtDate(l.date),
+          fmt(recusFrais),
+          reporte > 0 ? fmt(reporte) : "—",
+          fmt(l.gains_du_jour),
+          fmt(l.restants_du_jour),
+        ];
+      });
+      const restantFinal = Math.max(0, totalRecusFrais - totalGagne);
+      body.push([
+        "TOTAL",
+        fmt(totalRecusFrais),
+        totalReporteCumule > 0 ? fmt(totalReporteCumule) : "—",
+        fmt(totalGagne),
+        fmt(restantFinal),
+      ]);
+
+      table(["Date", "Reçus (frais)", "Reporté (veille)", "Gagné", "Restant"], body);
+    });
   }
 
   // ── SECTIONS SELON RÔLE ────────────────────────────────
@@ -1009,6 +1218,7 @@ export default function CampaignReport({
   horaires  = [],
   donneesSiteJour = [],
   livraisons = [],
+  gainsGoodies = [],
   reportConfig,
   label = "Exporter le rapport PDF",
 }: CampaignReportProps) {
@@ -1021,14 +1231,14 @@ export default function CampaignReport({
       // Résolution du branding depuis les données de l'entreprise
       const { palette, logoBase64, logoMimeType } = await resolveBranding(campaign.company);
 
-      const hostessStats = buildHostessStats(tastings, sales, team, campaign);
-      const siteStats    = buildSiteStats(hostessStats, tastings, sales, sites);
+      const hostessStats = buildHostessStats(tastings, sales, team, campaign, gainsGoodies);
+      const siteStats    = buildSiteStats(hostessStats, tastings, sales, sites, gainsGoodies);
 
       const cfg: RapportConfig = reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG };
 
       const doc = generatePDF({
         campaign, user, hostessStats, siteStats, tastings, sales, horaires,
-        donneesSiteJour, livraisons,
+        donneesSiteJour, livraisons, gainsGoodies,
         isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
       });
 
@@ -1040,7 +1250,7 @@ export default function CampaignReport({
     } finally {
       setLoading(false);
     }
-  }, [campaign, user, tastings, sales, team, sites, horaires, donneesSiteJour, livraisons, isAdminOrSupervisor, reportConfig]);
+  }, [campaign, user, tastings, sales, team, sites, horaires, donneesSiteJour, livraisons, gainsGoodies, isAdminOrSupervisor, reportConfig]);
 
   return (
     <button

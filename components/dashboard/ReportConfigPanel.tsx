@@ -49,6 +49,7 @@ const SECTIONS: Section[] = [
       { field: "show_section_horaires_sites",     label: "Horaires d'ouverture des sites",          hint: "Horaires d'ouverture/fermeture des sites de la campagne" },
       { field: "show_section_stock_boissons",     label: "Stock de boissons & boissons gratuites",  hint: "Par site, saisi dans le panneau Goodies & stock" },
       { field: "show_section_ugs_livraisons",     label: "UGs (goodies) reçus / distribués / restants", hint: "Par site, d'après les livraisons de goodies enregistrées" },
+      { field: "show_section_graphiques",         label: "Graphiques de comparaison par site",      hint: "Diagrammes en barres colorés : ventes et dégustations par site" },
     ],
   },
   {
@@ -145,6 +146,7 @@ export default function ReportConfigPanel({ campaignId, onConfigChange }: Props)
         show_section_horaires_sites: config.show_section_horaires_sites,
         show_section_stock_boissons: config.show_section_stock_boissons,
         show_section_ugs_livraisons: config.show_section_ugs_livraisons,
+        show_section_graphiques: config.show_section_graphiques,
         show_col_ca: config.show_col_ca,
         show_col_goodies: config.show_col_goodies,
         show_col_promo_details: config.show_col_promo_details,
