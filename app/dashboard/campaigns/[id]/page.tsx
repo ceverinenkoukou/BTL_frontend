@@ -9,7 +9,7 @@ import type {
   CampagneDetail, Degustation, Vente, SiteList, MonSiteInfo,
   CreateDegustationPayload, TrancheAge, IntentionAchat, TypeConditionnement, Genre,
   CampagneRapportSites, TypePromotion, Promotion, Goodie, JourAnimation, RapportConfig,
-  Pointage, LivraisonGoodiesJour, DonneesSiteJour,
+  Pointage, LivraisonGoodiesJour, DonneesSiteJour, GainGoodie,
 } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
@@ -224,6 +224,7 @@ export default function CampaignDetailPage() {
 
   // ── Livraisons goodies (admin/superviseur) ──
   const [livraisons, setLivraisons] = useState<LivraisonGoodiesJour[]>([]);
+  const [gainsGoodies, setGainsGoodies] = useState<GainGoodie[]>([]);
   const [livraisonForm, setLivraisonForm] = useState({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
   const [livraisonSite, setLivraisonSite] = useState("");
   const [savingLivraison, setSavingLivraison] = useState(false);
@@ -362,6 +363,10 @@ export default function CampaignDetailPage() {
           const dsjRes = await api.get<DonneesSiteJour[]>(`/donnees-site-jour/?campagne=${id}`);
           setDonneesSiteJour(Array.isArray(dsjRes.data) ? dsjRes.data : []);
         } catch { setDonneesSiteJour([]); }
+        try {
+          const ggRes = await api.get<GainGoodie[]>(`/gains-goodies/?campagne=${id}`);
+          setGainsGoodies(Array.isArray(ggRes.data) ? ggRes.data : ((ggRes.data as { results?: GainGoodie[] }).results ?? []));
+        } catch { setGainsGoodies([]); }
       }
 
       // Charger la config rapport (admin + superviseur)
@@ -1065,6 +1070,7 @@ export default function CampaignDetailPage() {
     status: "active" as const,
     created_at: "",
     updated_at: "",
+    type_campagne: campaign.type_campagne,
     company: {
       id: "",
       name: campaign.entreprise_nom,
@@ -1739,6 +1745,7 @@ export default function CampaignDetailPage() {
               horaires={joursAnimation as any}
               donneesSiteJour={donneesSiteJour}
               livraisons={livraisons}
+              gainsGoodies={gainsGoodies}
               reportConfig={reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG }}
             />
           </div>
@@ -2826,6 +2833,7 @@ export default function CampaignDetailPage() {
           horaires={joursAnimation as any}
           donneesSiteJour={donneesSiteJour}
           livraisons={livraisons}
+          gainsGoodies={gainsGoodies}
           reportConfig={reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG }}
         />
 

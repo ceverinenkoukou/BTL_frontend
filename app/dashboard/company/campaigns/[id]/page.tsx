@@ -492,6 +492,7 @@ export default function CompanyCampaignDetailPage() {
     status: "active" as const,
     created_at: "",
     updated_at: "",
+    type_campagne: campaign.type_campagne,
     company: {
       id: "",
       name: campaign.entreprise_nom,
@@ -663,6 +664,7 @@ export default function CompanyCampaignDetailPage() {
               horaires={joursAnimation as any}
               donneesSiteJour={donneesSiteJour}
               livraisons={livraisons}
+              gainsGoodies={gainsGoodies}
               reportConfig={DEFAULT_RAPPORT_CONFIG}
               label="Bilan final"
             />

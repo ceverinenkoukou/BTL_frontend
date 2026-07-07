@@ -427,7 +427,9 @@ export interface GainGoodie {
   campagne_nom: string;
   site: string;
   site_nom: string;
+  goodie: string;
   goodie_nom: string;
+  hotesse: string | null;
   hotesse_nom: string;
   created_at: string;
 }
@@ -721,6 +723,7 @@ export interface RapportConfig {
   show_section_horaires_sites: boolean;
   show_section_stock_boissons: boolean;
   show_section_ugs_livraisons: boolean;
+  show_section_graphiques: boolean;
   // Colonnes
   show_col_ca: boolean;
   show_col_goodies: boolean;
@@ -766,6 +769,7 @@ export const DEFAULT_RAPPORT_CONFIG: RapportConfig = {
   show_section_horaires_sites: true,
   show_section_stock_boissons: true,
   show_section_ugs_livraisons: true,
+  show_section_graphiques: true,
   show_col_ca: true,
   show_col_goodies: true,
   show_col_promo_details: true,
