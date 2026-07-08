@@ -6,10 +6,10 @@ import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-provider";
 import api, { invalidateCache } from "@/lib/api";
 import type {
-  CampagneDetail, Degustation, Vente, SiteList, MonSiteInfo,
+  CampagneDetail, Degustation, Vente, SiteList, MonSiteInfo, SiteDetail,
   CreateDegustationPayload, TrancheAge, IntentionAchat, TypeConditionnement, Genre,
   CampagneRapportSites, TypePromotion, Promotion, Goodie, JourAnimation, RapportConfig,
-  Pointage, LivraisonGoodiesJour, DonneesSiteJour, GainGoodie,
+  Pointage, LivraisonGoodiesJour, DonneesSiteJour, GainGoodie, GainPromotion,
 } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 import { getGoodiesByCampagne } from "@/lib/services/goodieService";
@@ -225,6 +225,11 @@ export default function CampaignDetailPage() {
   // ── Livraisons goodies (admin/superviseur) ──
   const [livraisons, setLivraisons] = useState<LivraisonGoodiesJour[]>([]);
   const [gainsGoodies, setGainsGoodies] = useState<GainGoodie[]>([]);
+  const [gainsPromotions, setGainsPromotions] = useState<GainPromotion[]>([]);
+  // Détail par site (dont l'affectation des hôtesses) — nécessaire au rapport
+  // final pour agréger ventes/dégustations par site (campaign.hotesses n'a
+  // pas d'affectation de site).
+  const [siteDetails, setSiteDetails] = useState<SiteDetail[]>([]);
   const [livraisonForm, setLivraisonForm] = useState({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
   const [livraisonSite, setLivraisonSite] = useState("");
   const [savingLivraison, setSavingLivraison] = useState(false);
@@ -367,6 +372,17 @@ export default function CampaignDetailPage() {
           const ggRes = await api.get<GainGoodie[]>(`/gains-goodies/?campagne=${id}`);
           setGainsGoodies(Array.isArray(ggRes.data) ? ggRes.data : ((ggRes.data as { results?: GainGoodie[] }).results ?? []));
         } catch { setGainsGoodies([]); }
+        try {
+          const gpRes = await api.get<GainPromotion[]>(`/gains-promotions/?campagne=${id}`);
+          setGainsPromotions(Array.isArray(gpRes.data) ? gpRes.data : ((gpRes.data as { results?: GainPromotion[] }).results ?? []));
+        } catch { setGainsPromotions([]); }
+        try {
+          const sitesOfCampagne = allSites.filter(s => s.campagne === id);
+          const siteDetailResults = await Promise.all(
+            sitesOfCampagne.map(s => api.get<SiteDetail>(`/sites/${s.id}/`).catch(() => null))
+          );
+          setSiteDetails(siteDetailResults.filter(r => r?.data).map(r => r!.data));
+        } catch { setSiteDetails([]); }
       }
 
       // Charger la config rapport (admin + superviseur)
@@ -893,9 +909,12 @@ export default function CampaignDetailPage() {
                   nom_client: clientName || undefined,
                   tranche_age: degForm.tranche_age || undefined,
                   genre: degForm.genre || undefined,
+                  note_gout: campaign?.note_gout_active ? (degForm.note_gout || null) : null,
+                  note_ambiance: campaign?.note_ambiance_active ? (degForm.note_ambiance || null) : null,
                 }
               );
               promoGoodiesRoue = promoGainRes.goodies_roue ?? [];
+              invalidateCache("/ventes");
               toast.success("Gain promotionnel enregistré ! 🎉");
             } catch (promoErr: unknown) {
               const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -912,6 +931,8 @@ export default function CampaignDetailPage() {
             nom_client: clientName || undefined,
             tranche_age: degForm.tranche_age || undefined,
             genre: degForm.genre || undefined,
+            note_gout: campaign?.note_gout_active ? (degForm.note_gout || null) : null,
+            note_ambiance: campaign?.note_ambiance_active ? (degForm.note_ambiance || null) : null,
           });
           setVentes(prev => [createdVente, ...prev]);
           invalidateCache("/ventes");
@@ -981,6 +1002,7 @@ export default function CampaignDetailPage() {
                 }
               );
               promoGoodiesRoue = promoGainRes.goodies_roue ?? [];
+              invalidateCache("/ventes");
               toast.success("Gain promotionnel enregistré ! 🎉");
             } catch (promoErr: unknown) {
               const promoMsg = (promoErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -991,6 +1013,7 @@ export default function CampaignDetailPage() {
 
         setTastings(prev => [created, ...prev]);
         invalidateCache(`/degustations/?campagne=${id}`);
+        if (a_achete) invalidateCache("/ventes");
         setPendingDegustationId(created.id);
         setDegForm(f => ({ ...EMPTY_DEG_FORM, site: f.site }));
         setDegStep(1);
@@ -1071,6 +1094,8 @@ export default function CampaignDetailPage() {
     created_at: "",
     updated_at: "",
     type_campagne: campaign.type_campagne,
+    note_gout_max: campaign.note_gout_max,
+    note_ambiance_max: campaign.note_ambiance_max,
     company: {
       id: "",
       name: campaign.entreprise_nom,
@@ -1098,7 +1123,10 @@ export default function CampaignDetailPage() {
     site_name: t.site_nom,
     product_name: t.produit_nom,
     nom_client: t.nom_client,
+    tranche_age: t.tranche_age,
     tranche_age_display: t.tranche_age_display,
+    genre: t.genre,
+    intention_achat: t.intention_achat,
     intention_achat_display: t.intention_achat_display,
     note_gout: t.note_gout,
     note_ambiance: t.note_ambiance,
@@ -1116,17 +1144,42 @@ export default function CampaignDetailPage() {
     validated: true,
     created_at: v.created_at,
     type_vente: v.type_vente,
+    tranche_age: v.tranche_age,
+    genre: v.genre,
+    note_gout: v.note_gout,
+    note_ambiance: v.note_ambiance,
     est_achat_promo: v.est_achat_promo,
+    nom_client: v.nom_client,
+    produit_nom: v.produit_nom,
+    conditionnement_display: v.conditionnement_display,
   })) : [], [ventes, campaign]);
 
-  const teamForReport = useMemo(() => campaign ? campaign.hotesses.map(h => ({
-    id: h.id,
-    campaign_id: campaign.id,
-    user_id: h.id,
-    role: "hostess" as const,
-    assigned_at: "",
-    user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
-  })) : [], [campaign]);
+  // site_id est indispensable aux agrégations par site du rapport (ventes,
+  // dégustations, CA...) — campaign.hotesses ne porte aucune affectation de
+  // site, donc on reconstruit l'équipe à partir des hôtesses de chaque site
+  // (siteDetails) plutôt que de la liste globale.
+  const teamForReport = useMemo(() => {
+    if (!campaign) return [];
+    if (siteDetails.length > 0) {
+      return siteDetails.flatMap(site => site.hotesses.map(h => ({
+        id: `${site.id}_${h.id}`,
+        campaign_id: campaign.id,
+        site_id: site.id,
+        user_id: h.id,
+        role: "hostess" as const,
+        assigned_at: "",
+        user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
+      })));
+    }
+    return campaign.hotesses.map(h => ({
+      id: h.id,
+      campaign_id: campaign.id,
+      user_id: h.id,
+      role: "hostess" as const,
+      assigned_at: "",
+      user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
+    }));
+  }, [campaign, siteDetails]);
 
   const sitesForReport = useMemo(() => campaignSites.map(s => ({
     id: s.id,
@@ -1701,7 +1754,7 @@ export default function CampaignDetailPage() {
                     <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.stock_boissons} onChange={e => setDonneesSiteForm(f => ({ ...f, stock_boissons: e.target.value }))} />
                   </div>
                   <div>
-                    <Label className="text-xs text-muted-foreground">Boissons gratuites</Label>
+                    <Label className="text-xs text-muted-foreground">Gratuites offertes</Label>
                     <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.nombre_boissons_gratuites} onChange={e => setDonneesSiteForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
                   </div>
                 </div>
@@ -1746,6 +1799,7 @@ export default function CampaignDetailPage() {
               donneesSiteJour={donneesSiteJour}
               livraisons={livraisons}
               gainsGoodies={gainsGoodies}
+              gainsPromotions={gainsPromotions}
               reportConfig={reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG }}
             />
           </div>
@@ -2787,7 +2841,7 @@ export default function CampaignDetailPage() {
                 <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.stock_boissons} onChange={e => setDonneesSiteForm(f => ({ ...f, stock_boissons: e.target.value }))} />
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground">Boissons gratuites</Label>
+                <Label className="text-xs text-muted-foreground">Gratuites offertes</Label>
                 <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.nombre_boissons_gratuites} onChange={e => setDonneesSiteForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
               </div>
             </div>
@@ -2834,6 +2888,7 @@ export default function CampaignDetailPage() {
           donneesSiteJour={donneesSiteJour}
           livraisons={livraisons}
           gainsGoodies={gainsGoodies}
+          gainsPromotions={gainsPromotions}
           reportConfig={reportConfig ?? { ...DEFAULT_RAPPORT_CONFIG }}
         />
 

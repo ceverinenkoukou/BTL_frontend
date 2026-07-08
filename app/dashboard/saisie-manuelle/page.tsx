@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import api from "@/lib/api";
+import api, { invalidateCache } from "@/lib/api";
 import type {
   SiteList, MonSiteInfo, TrancheAge, IntentionAchat, TypeConditionnement, Genre,
   CreateDegustationPayload, Degustation,
@@ -164,6 +164,7 @@ function SaisieManuelleContent() {
         }
       }
 
+      if (degForm.a_achete) invalidateCache("/ventes");
       toast.success("Dégustation enregistrée pour le compte de l'hôtesse.");
       setDegForm({ ...EMPTY_DEG_FORM });
     } catch (err: unknown) {
@@ -209,6 +210,7 @@ function SaisieManuelleContent() {
         tranche_age: promoForm.tranche_age || undefined,
         hotesse_id: hotesseId,
       });
+      invalidateCache("/ventes");
       toast.success(`🎉 ${result.recompense} enregistré !`);
       setPromoForm({ ...EMPTY_PROMO_FORM });
     } catch (err: unknown) {
