@@ -400,7 +400,11 @@ async function resolveBranding(company?: BrandCompany) {
 // 4. Helpers rapport
 // ─────────────────────────────────────────────────────────────
 
-const fmt     = (n: number | string)   => Number(n ?? 0).toLocaleString("fr-FR");
+// Remplace l'espace insécable (fin ou normal) que "fr-FR" utilise comme
+// séparateur de milliers par un espace ASCII simple — la police Helvetica
+// standard de jsPDF ne supporte pas ce caractère Unicode et l'affiche comme
+// un glyphe cassé (ex: "3/369" au lieu de "3 369").
+const fmt     = (n: number | string)   => Number(n ?? 0).toLocaleString("fr-FR").replace(/[  ]/g, " ");
 const fmtDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("fr-FR") : "—";
 const pct     = (a: number, b: number) => b > 0 ? Math.round((a / b) * 100) : 0;
 
@@ -1235,6 +1239,13 @@ function generatePDF({
     .reduce((a, s) => a + (s.quantity ?? 0), 0);
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
   const totalGoodies  = gainsGoodies.length;
+  // "Personnes touchées" = nombre de CLIENTS (une ligne = une personne),
+  // pas une quantité de produits — contrairement à "Ventes" qui somme les
+  // quantités. Pour une campagne VENTE, une personne = une ligne de vente
+  // NORMAL (une transaction), pas les unités qu'elle contient.
+  const totalPersonnesTouchees = isVenteCampagne
+    ? sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").length
+    : totalTastings;
 
   sectionTitle("Synthèse globale");
   const kpis = [
@@ -1244,10 +1255,7 @@ function generatePDF({
     cfg.show_kpi_ca              ? { value: `${totalRevenue.toFixed(0)} €`, label: "Chiffre d'affaires" } : null,
     cfg.show_kpi_goodies         ? { value: fmt(totalGoodies),           label: "Goodies distribués" }   : null,
     cfg.show_kpi_sites           ? { value: fmt(siteStats.length),       label: "Sites actifs" }         : null,
-    // Toutes les personnes ayant participé à la campagne — même valeur que
-    // le KPI "Ventes" (chaque dégustation ou vente normale = un client
-    // rencontré), affichée sous un libellé explicite.
-    cfg.show_kpi_personnes_touchees ? { value: fmt(isVenteCampagne ? totalVentesNormales : totalTastings), label: "Personnes touchées" } : null,
+    cfg.show_kpi_personnes_touchees ? { value: fmt(totalPersonnesTouchees), label: "Personnes touchées" } : null,
   ].filter(Boolean) as { value: string | number; label: string }[];
   if (kpis.length > 0) kpiRow(kpis);
 
@@ -1273,15 +1281,28 @@ function generatePDF({
     );
 
     // Tendance journalière (toute la période avec activité)
+    // Une campagne VENTE n'a pas de dégustations, une campagne DEGUSTATION
+    // n'a pas de ventes — n'afficher que la série pertinente pour ces deux
+    // types (une seule série : pas de légende, le titre suffit). Seule une
+    // campagne DEGUSTATION_VENTE affiche les deux séries.
+    const isDegustationCampagne = campaign.type_campagne === "DEGUSTATION";
     const trend = buildDailyTrend(tastings, sales);
     if (trend.dates.length > 1) {
       guard(20);
-      chartTitle("Tendance journalière — dégustations vs ventes normales");
-      legendRow([{ color: P.primary, label: TASTING_LABEL }, { color: P.mid, label: "Ventes normales" }]);
-      lineChart(trend.dates, [
-        { label: TASTING_LABEL, color: P.primary, values: trend.tastingsPerDay },
-        { label: "Ventes normales", color: P.mid, values: trend.salesPerDay },
-      ]);
+      if (isVenteCampagne) {
+        chartTitle("Tendance journalière — ventes normales");
+        lineChart(trend.dates, [{ label: "Ventes normales", color: P.primary, values: trend.salesPerDay }]);
+      } else if (isDegustationCampagne) {
+        chartTitle(`Tendance journalière — ${TASTING_LABEL.toLowerCase()}`);
+        lineChart(trend.dates, [{ label: TASTING_LABEL, color: P.primary, values: trend.tastingsPerDay }]);
+      } else {
+        chartTitle("Tendance journalière — dégustations vs ventes normales");
+        legendRow([{ color: P.primary, label: TASTING_LABEL }, { color: P.mid, label: "Ventes normales" }]);
+        lineChart(trend.dates, [
+          { label: TASTING_LABEL, color: P.primary, values: trend.tastingsPerDay },
+          { label: "Ventes normales", color: P.mid, values: trend.salesPerDay },
+        ]);
+      }
     }
 
     // Profil des clients (formulaire hôtesse, ou Vente directe pour une campagne VENTE)
