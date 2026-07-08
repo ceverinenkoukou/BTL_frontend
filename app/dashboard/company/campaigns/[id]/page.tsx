@@ -493,6 +493,8 @@ export default function CompanyCampaignDetailPage() {
     created_at: "",
     updated_at: "",
     type_campagne: campaign.type_campagne,
+    note_gout_max: campaign.note_gout_max,
+    note_ambiance_max: campaign.note_ambiance_max,
     company: {
       id: "",
       name: campaign.entreprise_nom,
@@ -519,7 +521,10 @@ export default function CompanyCampaignDetailPage() {
     site_name: t.site_nom,
     product_name: t.produit_nom,
     nom_client: t.nom_client,
+    tranche_age: t.tranche_age,
     tranche_age_display: t.tranche_age_display,
+    genre: t.genre,
+    intention_achat: t.intention_achat,
     intention_achat_display: t.intention_achat_display,
     note_gout: t.note_gout,
     note_ambiance: t.note_ambiance,
@@ -537,17 +542,42 @@ export default function CompanyCampaignDetailPage() {
     validated: true,
     created_at: v.created_at,
     type_vente: v.type_vente,
+    tranche_age: v.tranche_age,
+    genre: v.genre,
+    note_gout: v.note_gout,
+    note_ambiance: v.note_ambiance,
     est_achat_promo: v.est_achat_promo,
+    nom_client: v.nom_client,
+    produit_nom: v.produit_nom,
+    conditionnement_display: v.conditionnement_display,
   })) : [], [ventes, campaign]);
 
-  const teamForReport = useMemo(() => campaign ? campaign.hotesses.map(h => ({
-    id: h.id,
-    campaign_id: campaign.id,
-    user_id: h.id,
-    role: "hostess" as const,
-    assigned_at: "",
-    user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
-  })) : [], [campaign]);
+  // site_id est indispensable aux agrégations par site du rapport (ventes,
+  // dégustations, CA...) — campaign.hotesses ne porte aucune affectation de
+  // site, donc on reconstruit l'équipe à partir des hôtesses de chaque site
+  // (siteDetails, déjà chargé plus haut) plutôt que de la liste globale.
+  const teamForReport = useMemo(() => {
+    if (!campaign) return [];
+    if (siteDetails.length > 0) {
+      return siteDetails.flatMap(site => site.hotesses.map(h => ({
+        id: `${site.id}_${h.id}`,
+        campaign_id: campaign.id,
+        site_id: site.id,
+        user_id: h.id,
+        role: "hostess" as const,
+        assigned_at: "",
+        user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
+      })));
+    }
+    return campaign.hotesses.map(h => ({
+      id: h.id,
+      campaign_id: campaign.id,
+      user_id: h.id,
+      role: "hostess" as const,
+      assigned_at: "",
+      user: { id: h.id, full_name: h.name, email: h.email ?? "", role: "hostess" as const, is_active: true, created_at: "", updated_at: "" },
+    }));
+  }, [campaign, siteDetails]);
 
   const sitesForReport = useMemo(() => (rapport?.sites ?? []).map(s => ({
     id: s.id,
@@ -665,6 +695,7 @@ export default function CompanyCampaignDetailPage() {
               donneesSiteJour={donneesSiteJour}
               livraisons={livraisons}
               gainsGoodies={gainsGoodies}
+              gainsPromotions={gainsPromotions}
               reportConfig={DEFAULT_RAPPORT_CONFIG}
               label="Bilan final"
             />

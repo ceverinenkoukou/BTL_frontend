@@ -362,7 +362,7 @@ export function buildCondensedBulletinHtml(
   if (config.show_ventes_detail && showVenteData && synthRows.length > 0) {
     sections.push(`
       <h2 class="section-title">Synthèse par site et hôtesse</h2>
-      <table><thead><tr><th>Site</th><th>Hôtesse</th><th class="r">Qté achetée</th><th class="r">Qté hors promo</th><th class="r">Offres promo appliquées</th></tr></thead>
+      <table><thead><tr><th>Site</th><th>Hôtesse</th><th class="r">Qtés vendues</th><th class="r">Qtés vendues hors promo</th><th class="r">Offres promo appliquées</th></tr></thead>
       <tbody>${synthRows.map(r => `<tr><td class="b">${esc(r.siteNom)}</td><td>${esc(r.hotesseNom)}</td><td class="r">${r.quantiteAchetee}</td><td class="r">${r.quantiteHorsPromo}</td><td class="r">${r.nbOffresAppliquees}</td></tr>`).join("")}</tbody></table>`);
   }
 

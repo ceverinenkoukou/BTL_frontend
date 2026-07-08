@@ -34,6 +34,10 @@ export async function creerVenteDirecte(payload: {
   conditionnement: TypeConditionnement;
   quantite: number;
   nom_client?: string;
+  tranche_age?: string;
+  genre?: string;
+  note_gout?: number | null;
+  note_ambiance?: number | null;
   // Requis uniquement pour une saisie manuelle par un Admin/Superviseur
   // pour le compte d'une hôtesse.
   hotesse_id?: string;

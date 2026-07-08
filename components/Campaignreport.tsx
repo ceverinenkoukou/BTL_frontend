@@ -33,7 +33,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FileDown, Loader2 } from "lucide-react";
 import type { Campaign, CampaignSite, CampaignTeamMember, Company, Profile, Sale, Tasting, Zone } from "@/lib/types";
-import type { RapportConfig, DonneesSiteJour, LivraisonGoodiesJour, TypeCampagne, GainGoodie } from "@/lib/types/backend";
+import type { RapportConfig, DonneesSiteJour, LivraisonGoodiesJour, TypeCampagne, GainGoodie, GainPromotion, TrancheAge, Genre, IntentionAchat } from "@/lib/types/backend";
 import { DEFAULT_RAPPORT_CONFIG } from "@/lib/types/backend";
 
 type HostessTasting = Tasting & {
@@ -42,7 +42,10 @@ type HostessTasting = Tasting & {
   site_name?: string;
   product_name?: string;
   nom_client?: string | null;
+  tranche_age?: TrancheAge;
   tranche_age_display?: string;
+  genre?: Genre | null;
+  intention_achat?: IntentionAchat;
   intention_achat_display?: string;
   note_gout?: number | null;
   note_ambiance?: number | null;
@@ -66,11 +69,20 @@ type ReportCampaign = Campaign & {
   company?: BrandCompany;
   zone?: Zone;
   type_campagne?: TypeCampagne;
+  note_gout_max?: 5 | 10;
+  note_ambiance_max?: 5 | 10;
 };
 type ReportSale = Sale & {
   notes?: string;
   type_vente?: "NORMAL" | "GRATUIT" | "PROMOTION";
   est_achat_promo?: boolean;
+  tranche_age?: TrancheAge | null;
+  genre?: Genre | null;
+  note_gout?: number | null;
+  note_ambiance?: number | null;
+  nom_client?: string | null;
+  produit_nom?: string;
+  conditionnement_display?: string;
 };
 type HostessStat = {
   id: string;
@@ -122,6 +134,7 @@ type CampaignReportProps = {
   donneesSiteJour?: DonneesSiteJour[];
   livraisons?: LivraisonGoodiesJour[];
   gainsGoodies?: GainGoodie[];
+  gainsPromotions?: GainPromotion[];
   reportConfig?: RapportConfig | null;
   label?: string;
 };
@@ -136,6 +149,7 @@ type GeneratePDFArgs = {
   donneesSiteJour: DonneesSiteJour[];
   livraisons: LivraisonGoodiesJour[];
   gainsGoodies: GainGoodie[];
+  gainsPromotions: GainPromotion[];
   isAdminOrSupervisor: boolean;
   palette: Palette;
   logoBase64: string | null;
@@ -486,10 +500,12 @@ function buildSiteStats(
       promoGains: promoGainsAgg,
       hostesses: sH,
       activeDays,
-      ventesNormales: normalSales.length,
-      offerts: offertSales.length,
-      avgVentesNormalesParJour: Math.round(normalSales.length / activeDays),
-      avgOffertsParJour: Math.round(offertSales.length / activeDays),
+      // Nombre de produits (quantité), pas de lignes de vente — une ligne
+      // peut porter plusieurs unités (ex : 4 canettes en une seule saisie).
+      ventesNormales: normalSales.reduce((a, s) => a + (s.quantity ?? 0), 0),
+      offerts: offertSales.reduce((a, s) => a + (s.quantity ?? 0), 0),
+      avgVentesNormalesParJour: Math.round(normalSales.reduce((a, s) => a + (s.quantity ?? 0), 0) / activeDays),
+      avgOffertsParJour: Math.round(offertSales.reduce((a, s) => a + (s.quantity ?? 0), 0) / activeDays),
     };
   });
 }
@@ -509,13 +525,235 @@ function buildSiteHoraires(horaires: HoraireSite[], siteStats: SiteStat[]): Site
   });
 }
 
+// Ordre fixe (porte le sens de l'échelle) — jamais trié par valeur.
+const AGE_BRACKETS: { code: TrancheAge; label: string }[] = [
+  { code: "MOINS_18", label: "-18 ans" },
+  { code: "18_25", label: "18-25 ans" },
+  { code: "26_35", label: "26-35 ans" },
+  { code: "36_50", label: "36-50 ans" },
+  { code: "PLUS_50", label: "+50 ans" },
+];
+const GENRE_BUCKETS: { code: Genre; label: string }[] = [
+  { code: "HOMME", label: "Hommes" },
+  { code: "FEMME", label: "Femmes" },
+];
+
+/**
+ * Répartition par tranche d'âge du client, ordre d'âge croissant.
+ * Une campagne VENTE n'a aucune dégustation (formulaire hôtesse absent) —
+ * la tranche d'âge n'existe alors que sur la Vente elle-même (saisie au
+ * moment de l'achat) ; on y bascule la source dans ce cas, comme pour le
+ * KPI "Ventes" (isVenteCampagne). Ventes NORMAL uniquement : les lignes
+ * GRATUIT/PROMOTION n'ont pas ces champs renseignés côté backend.
+ */
+function buildAgeDistribution(tastings: HostessTasting[], sales: ReportSale[], isVenteCampagne: boolean) {
+  return AGE_BRACKETS.map(a => ({
+    label: a.label,
+    value: isVenteCampagne
+      ? sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && s.tranche_age === a.code).length
+      : tastings.filter(t => t.tranche_age === a.code).length,
+  }));
+}
+
+/** Répartition par sexe du client — même bascule de source que buildAgeDistribution. */
+function buildGenreDistribution(tastings: HostessTasting[], sales: ReportSale[], isVenteCampagne: boolean) {
+  return GENRE_BUCKETS.map(g => ({
+    label: g.label,
+    value: isVenteCampagne
+      ? sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && s.genre === g.code).length
+      : tastings.filter(t => t.genre === g.code).length,
+  }));
+}
+
+/**
+ * Distribution d'une note (goût ou ambiance) sur son échelle réelle 1–max
+ * (max configurable par campagne, 5 ou 10 — jamais 0, les notes commencent
+ * à 1 sur le formulaire hôtesse), ordre croissant. Même bascule de source
+ * que buildAgeDistribution : une campagne VENTE porte ces notes sur la
+ * Vente elle-même (pas de dégustation).
+ */
+function buildNoteDistribution(
+  tastings: HostessTasting[], sales: ReportSale[], isVenteCampagne: boolean,
+  field: "note_gout" | "note_ambiance", maxValue: number
+) {
+  return Array.from({ length: maxValue }, (_, i) => i + 1).map(n => ({
+    label: String(n),
+    value: isVenteCampagne
+      ? sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && s[field] === n).length
+      : tastings.filter(t => t[field] === n).length,
+  }));
+}
+
+// Ordre fixe (ordinal : faible → élevée) — jamais trié par valeur.
+const INTENTION_BUCKETS: { code: IntentionAchat; label: string }[] = [
+  { code: "FAIBLE", label: "Faible" },
+  { code: "MOYENNE", label: "Moyenne" },
+  { code: "ELEVEE", label: "Élevée" },
+];
+
+/** Répartition des dégustations par intention d'achat déclarée. */
+function buildIntentionDistribution(tastings: HostessTasting[]) {
+  return INTENTION_BUCKETS.map(i => ({
+    label: i.label,
+    value: tastings.filter(t => t.intention_achat === i.code).length,
+  }));
+}
+
+/** Tendance journalière : dégustations et ventes normales par jour, sur toute la période avec activité. */
+function buildDailyTrend(tastings: HostessTasting[], sales: ReportSale[]) {
+  const allDates = new Set<string>();
+  tastings.forEach(t => { const d = t.created_at?.slice(0, 10); if (d) allDates.add(d); });
+  sales.forEach(s => { const d = s.created_at?.slice(0, 10); if (d) allDates.add(d); });
+  const dates = [...allDates].sort();
+  const tastingsPerDay = dates.map(d => tastings.filter(t => t.created_at?.slice(0, 10) === d).length);
+  const salesPerDay = dates.map(d =>
+    sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && s.created_at?.slice(0, 10) === d).length
+  );
+  return { dates, tastingsPerDay, salesPerDay };
+}
+
+/**
+ * Libellé lisible d'une offre promotionnelle. Si promotion_description est
+ * vide ou un nombre pur (anciennes saisies admin), on recompose depuis les
+ * quantités — même logique que le bulletin condensé (condensedBulletinHtml.ts).
+ */
+function formatPromoLabel(g: GainPromotion): string {
+  const desc = (g.promotion_description || "").trim();
+  if (!desc || /^\d+$/.test(desc)) {
+    const req = g.quantite_requise;
+    const off = g.quantite_offerte;
+    if (g.type_promotion === "TIRAGE" || g.type_promotion === "GAGNE") {
+      return `Tirage (${req} acheté${req > 1 ? "s" : ""})`;
+    }
+    return `${req} acheté${req > 1 ? "s" : ""} → ${off} offert${off > 1 ? "s" : ""}`;
+  }
+  return desc;
+}
+
+/** Synthèse par site : pour chaque offre promo réellement appliquée (GainPromotion), combien de fois et combien de boissons offertes. */
+function buildOffresParSite(gainsPromotions: GainPromotion[]) {
+  const map = new Map<string, { site: string; offre: string; fois: number; qtyOfferte: number }>();
+  gainsPromotions.forEach(g => {
+    const offre = formatPromoLabel(g);
+    const key = `${g.site_nom}__${offre}`;
+    if (!map.has(key)) map.set(key, { site: g.site_nom, offre, fois: 0, qtyOfferte: 0 });
+    const e = map.get(key)!;
+    e.fois += 1;
+    e.qtyOfferte += g.quantite_offerte;
+  });
+  return [...map.values()].sort((a, b) =>
+    a.site === b.site ? b.qtyOfferte - a.qtyOfferte : a.site.localeCompare(b.site)
+  );
+}
+
+const OFFER_WINDOW_MS = 10 * 60 * 1000;
+const isPlaceholderClient = (c: string) => c === "—";
+const normalizeClient = (v: string | null | undefined) => (v || "").trim() || "—";
+
+type VenteRow = {
+  time: number; siteId: string; siteName: string; date: string; client: string;
+  produit: string; conditionnement: string; quantiteAchetee: number;
+  offre: string; quantiteOfferte: number; goodieNom: string;
+};
+
+/**
+ * Une ligne par vente NORMAL (achat), enrichie de l'offre promo éventuellement
+ * déclenchée (GainPromotion.vente_achat, lien exact) et du goodie remporté
+ * (GainGoodie, rattaché par proximité site + client + 10 min, comme les ventes
+ * GRATUIT sans lien direct — même heuristique que le bulletin condensé).
+ * Le site est dérivé de l'hôtesse (via siteStats), Vente n'ayant pas de FK site.
+ */
+function buildVenteRows(
+  sales: ReportSale[], siteStats: SiteStat[],
+  gainsPromotions: GainPromotion[], gainsGoodies: GainGoodie[]
+): VenteRow[] {
+  const siteByHostess = new Map<string, { id: string; name: string }>();
+  siteStats.forEach(s => s.hostesses.forEach(h => siteByHostess.set(h.id, { id: s.id, name: s.name })));
+
+  const gainsByVenteId = new Map(
+    gainsPromotions.filter(g => g.vente_achat).map(g => [g.vente_achat as string, g])
+  );
+
+  const rowsMap = new Map<string, VenteRow>();
+
+  sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").forEach(s => {
+    const site = siteByHostess.get(s.hostess_id);
+    if (!site) return;
+    const gain = gainsByVenteId.get(s.id);
+    rowsMap.set(s.id, {
+      time: new Date(s.created_at).getTime(),
+      siteId: site.id, siteName: site.name,
+      date: s.created_at.slice(0, 10),
+      client: normalizeClient(s.nom_client),
+      produit: s.produit_nom ?? "—",
+      conditionnement: s.conditionnement_display ?? "—",
+      quantiteAchetee: s.quantity ?? 0,
+      offre: gain ? formatPromoLabel(gain) : "—",
+      quantiteOfferte: gain?.quantite_offerte ?? 0,
+      goodieNom: "—",
+    });
+  });
+
+  // Ventes GRATUIT : pas de lien direct vers l'achat — rattachement par
+  // proximité (même site, même client si connu, à moins de 10 min d'écart).
+  sales
+    .filter(s => s.type_vente === "GRATUIT")
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .forEach(s => {
+      const site = siteByHostess.get(s.hostess_id);
+      if (!site) return;
+      const time = new Date(s.created_at).getTime();
+      const client = normalizeClient(s.nom_client);
+      const match = [...rowsMap.values()]
+        .filter(row =>
+          row.siteId === site.id &&
+          (row.client === client || isPlaceholderClient(row.client) || isPlaceholderClient(client)) &&
+          Math.abs(row.time - time) <= OFFER_WINDOW_MS
+        )
+        .sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time))[0];
+      if (match) {
+        if (isPlaceholderClient(match.client) && !isPlaceholderClient(client)) match.client = client;
+        match.quantiteOfferte += s.quantity ?? 0;
+        if (match.offre === "—") match.offre = "Offert (goodie)";
+      } else {
+        rowsMap.set(`gratuit-${s.id}`, {
+          time, siteId: site.id, siteName: site.name, date: s.created_at.slice(0, 10), client,
+          produit: s.produit_nom ?? "—", conditionnement: s.conditionnement_display ?? "—",
+          quantiteAchetee: 0, offre: "Offert (goodie)", quantiteOfferte: s.quantity ?? 0, goodieNom: "—",
+        });
+      }
+    });
+
+  // Goodies gagnés (roue / promo) : même heuristique de proximité, pas de FK vente.
+  [...gainsGoodies]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .forEach(g => {
+      const time = new Date(g.created_at).getTime();
+      const client = normalizeClient(g.nom_client);
+      const match = [...rowsMap.values()]
+        .filter(row =>
+          row.siteId === g.site &&
+          (row.client === client || isPlaceholderClient(row.client) || isPlaceholderClient(client)) &&
+          Math.abs(row.time - time) <= OFFER_WINDOW_MS
+        )
+        .sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time))[0];
+      if (match) {
+        match.goodieNom = match.goodieNom === "—" ? g.goodie_nom : `${match.goodieNom}, ${g.goodie_nom}`;
+      }
+    });
+
+  return [...rowsMap.values()].sort((a, b) =>
+    a.siteName === b.siteName ? a.date.localeCompare(b.date) : a.siteName.localeCompare(b.siteName)
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // 6. Construction PDF
 // ─────────────────────────────────────────────────────────────
 
 function generatePDF({
   campaign, user, hostessStats, siteStats, tastings, sales, horaires,
-  donneesSiteJour, livraisons, gainsGoodies,
+  donneesSiteJour, livraisons, gainsGoodies, gainsPromotions,
   isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
 }: GeneratePDFArgs) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -623,7 +861,7 @@ function generatePDF({
       doc.text(`Zone : ${campaign.zone.name}`, M + 8, 93);
 
     // ── Badge rôle ──
-    const roleLabel = isAdminOrSupervisor ? "Rapport Interne" : "Rapport Entreprise";
+    const roleLabel = isAdminOrSupervisor ? "Rapport final" : "Rapport Entreprise";
     doc.setFillColor(...P.primary);
     doc.roundedRect(PW - M - 42, 68, 42, 10, 2, 2, "F");
     doc.setFont("helvetica", "bold");
@@ -691,6 +929,16 @@ function generatePDF({
     return t + "…";
   }
 
+  /** Titre de graphique — gras, plus grand et coloré (teinte marque) pour bien se détacher au-dessus de chaque graphique. */
+  function chartTitle(text: string) {
+    guard(9);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(...P.primary);
+    doc.text(text, M, Y);
+    Y += 6.5;
+  }
+
   /** Légende à puces colorées (obligatoire dès 2 séries). */
   function legendRow(items: { color: RGB; label: string }[]) {
     guard(8);
@@ -743,6 +991,42 @@ function generatePDF({
   }
 
   /**
+   * Barres horizontales à une seule série, ORDRE FIXE (non trié) — pour les
+   * échelles ordinales (tranche d'âge, note 0–10) où l'ordre porte le sens :
+   * une teinte, dégradée du plus sombre (premier élément) au plus clair
+   * (dernier). Passer flatColor:true pour une échelle nominale (ex: sexe)
+   * où tous les éléments portent la même teinte (identité, pas de gradient).
+   */
+  function barChartOrdinal(items: { label: string; value: number }[], opts?: { flatColor?: boolean }) {
+    if (items.length === 0) return;
+    const labelW = 40, valueW = 16;
+    const chartW = CW - labelW - valueW;
+    const barH = 5, gap = 2.2;
+    guard(items.length * (barH + gap) + 10);
+    const maxV = Math.max(1, ...items.map(i => i.value));
+    const baseX = M + labelW;
+    const startY = Y;
+    items.forEach((it, i) => {
+      const y = Y + i * (barH + gap);
+      const ratio = opts?.flatColor ? 0 : (items.length > 1 ? i / (items.length - 1) : 0);
+      const color = mixRgb(P.secondary, lighten(P.primary, 0.55), ratio);
+      const w = Math.max(1.5, (it.value / maxV) * chartW);
+      doc.setFillColor(...color);
+      doc.roundedRect(baseX, y, w, barH, 1, 1, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...P.dark);
+      doc.text(truncateLabel(it.label, labelW - 3), M, y + barH - 1.2);
+      doc.setTextColor(...P.mid);
+      doc.text(fmt(it.value), baseX + w + 2, y + barH - 1.2);
+    });
+    doc.setDrawColor(...P.accentBorder);
+    doc.setLineWidth(0.2);
+    doc.line(baseX, startY - 1, baseX, startY + items.length * (barH + gap) - gap + 1);
+    Y = startY + items.length * (barH + gap) + 8;
+  }
+
+  /**
    * Barres horizontales groupées à deux séries (identité fixe : couleur A / couleur B,
    * jamais permutées). Valeurs directement étiquetées à l'extrémité de chaque barre.
    */
@@ -779,6 +1063,131 @@ function generatePDF({
     Y = startY + items.length * step + 8;
   }
 
+  /**
+   * Dessine un segment d'anneau (donut) entre deux angles, par polygone
+   * (arc extérieur + arc intérieur inversé) — jsPDF n'a pas de primitive
+   * d'arc native. Angles en radians, 0 = droite, sens horaire (repère écran).
+   */
+  function drawDonutSegment(cx: number, cy: number, innerR: number, outerR: number, a0: number, a1: number, color: RGB) {
+    const steps = Math.max(1, Math.ceil((a1 - a0) / (Math.PI / 36))); // ~1 point tous les 5°
+    const outerPts: [number, number][] = [];
+    const innerPts: [number, number][] = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = a0 + (a1 - a0) * (i / steps);
+      outerPts.push([cx + outerR * Math.cos(a), cy + outerR * Math.sin(a)]);
+      innerPts.push([cx + innerR * Math.cos(a), cy + innerR * Math.sin(a)]);
+    }
+    const poly = [...outerPts, ...innerPts.reverse()];
+    const deltas: [number, number][] = [];
+    for (let i = 1; i < poly.length; i++) {
+      deltas.push([poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]]);
+    }
+    doc.setFillColor(...color);
+    doc.lines(deltas, poly[0][0], poly[0][1], [1, 1], "F", true);
+  }
+
+  /** Légende à puces rondes avec valeur en gras (identité + magnitude). */
+  function donutLegend(items: { color: RGB; label: string; value: number }[]) {
+    guard(8);
+    let x = M;
+    items.forEach(it => {
+      doc.setFillColor(...it.color);
+      doc.circle(x + 1.6, Y + 1.6, 1.6, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...P.mid);
+      const labelText = `${it.label} `;
+      doc.text(labelText, x + 4.6, Y + 2.7);
+      const labelW = doc.getTextWidth(labelText);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...P.dark);
+      doc.text(fmt(it.value), x + 4.6 + labelW, Y + 2.7);
+      const valueW = doc.getTextWidth(fmt(it.value));
+      x += 4.6 + labelW + valueW + 7;
+    });
+    Y += 8;
+  }
+
+  /**
+   * Anneau centré avec total au centre et légende (puce + libellé + valeur)
+   * en dessous — identité catégorielle, couleurs fournies par l'appelant
+   * (nominal : teintes fixes ; ordinal : dégradé d'une teinte).
+   */
+  function donutWithLegend(items: { label: string; value: number; color: RGB }[]) {
+    const total = items.reduce((s, i) => s + i.value, 0);
+    if (total <= 0) return;
+    const outerR = 16, innerR = 9;
+    guard(outerR * 2 + 16);
+    const cx = M + CW / 2;
+    const cy = Y + outerR;
+    let angle = -Math.PI / 2;
+    const gapRad = items.filter(i => i.value > 0).length > 1 ? 0.04 : 0;
+    items.forEach(it => {
+      const sweepFull = (it.value / total) * (2 * Math.PI);
+      if (it.value > 0 && sweepFull - gapRad > 0) {
+        drawDonutSegment(cx, cy, innerR, outerR, angle, angle + sweepFull - gapRad, it.color);
+      }
+      angle += sweepFull;
+    });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...P.dark);
+    doc.text(fmt(total), cx, cy + 1, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6);
+    doc.setTextColor(...P.mid);
+    doc.text("total", cx, cy + 4.5, { align: "center" });
+    Y = cy + outerR + 4;
+    donutLegend(items.map(i => ({ color: i.color, label: i.label, value: i.value })));
+  }
+
+  /**
+   * Courbe(s) de tendance — jusqu'à 2 séries, identité fixe (couleur A / B),
+   * légende obligatoire, points ronds sur chaque valeur, axe Y 0→max seulement
+   * (gridlines recessives, pas de grille pleine pour rester léger en PDF).
+   */
+  function lineChart(dates: string[], series: { label: string; color: RGB; values: number[] }[]) {
+    if (dates.length === 0 || series.length === 0) return;
+    const chartH = 32, leftPad = 12;
+    const chartW = CW - leftPad;
+    guard(chartH + 18);
+    const baseX = M + leftPad;
+    const baseY = Y + chartH;
+    const maxV = Math.max(1, ...series.flatMap(s => s.values));
+    doc.setDrawColor(...P.accentBorder);
+    doc.setLineWidth(0.2);
+    doc.line(baseX, Y, baseX, baseY);
+    doc.line(baseX, baseY, baseX + chartW, baseY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6);
+    doc.setTextColor(...P.mid);
+    doc.text(fmt(maxV), M, Y + 2);
+    doc.text("0", M, baseY + 1);
+
+    const stepX = dates.length > 1 ? chartW / (dates.length - 1) : 0;
+    series.forEach(s => {
+      const pts = s.values.map((v, i) => [baseX + i * stepX, baseY - (v / maxV) * chartH] as [number, number]);
+      doc.setDrawColor(...s.color);
+      doc.setLineWidth(0.6);
+      for (let i = 1; i < pts.length; i++) doc.line(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+      doc.setFillColor(...s.color);
+      pts.forEach(p => doc.circle(p[0], p[1], 0.8, "F"));
+    });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6);
+    doc.setTextColor(...P.mid);
+    const idxs = dates.length <= 6
+      ? dates.map((_, i) => i)
+      : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
+    idxs.forEach(i => {
+      const x = baseX + i * stepX;
+      const align = i === 0 ? "left" : i === dates.length - 1 ? "right" : "center";
+      doc.text(fmtDate(dates[i]), x, baseY + 5, { align });
+    });
+    Y = baseY + 9;
+  }
+
   function table(head: string[], body: (string | number)[][]) {
     guard(28);
     autoTable(doc, {
@@ -811,91 +1220,144 @@ function generatePDF({
 
   // Totaux globaux
   const totalTastings = tastings.length;
-  const totalSales    = sales.length;
-  const totalVentesNormales  = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL").length;
-  const totalVentesHorsPromo = sales.filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo).length;
+  // Nombre de produits (quantité), pas de lignes de vente — une ligne peut
+  // porter plusieurs unités (ex : 4 canettes en une seule saisie).
+  const totalVentesNormales  = sales
+    .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL")
+    .reduce((a, s) => a + (s.quantity ?? 0), 0);
+  // "Produits offerts" = quantité réellement offerte (GRATUIT + PROMOTION),
+  // pas un décompte de lignes de vente (qui compterait des clients, pas des produits).
+  const totalProduitsOfferts = sales
+    .filter(s => s.type_vente === "GRATUIT" || s.type_vente === "PROMOTION")
+    .reduce((a, s) => a + (s.quantity ?? 0), 0);
+  const totalVentesHorsPromo = sales
+    .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo)
+    .reduce((a, s) => a + (s.quantity ?? 0), 0);
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
   const totalGoodies  = gainsGoodies.length;
 
   sectionTitle("Synthèse globale");
   const kpis = [
     cfg.show_kpi_degustations    ? { value: fmt(isVenteCampagne ? totalVentesNormales : totalTastings), label: TASTING_LABEL } : null,
-    cfg.show_kpi_ventes          ? { value: fmt(totalSales),             label: OFFERED_LABEL }          : null,
+    cfg.show_kpi_ventes          ? { value: fmt(totalProduitsOfferts),   label: OFFERED_LABEL }          : null,
     cfg.show_kpi_ventes_hors_promo ? { value: fmt(totalVentesHorsPromo), label: "Ventes hors promo" }    : null,
     cfg.show_kpi_ca              ? { value: `${totalRevenue.toFixed(0)} €`, label: "Chiffre d'affaires" } : null,
     cfg.show_kpi_goodies         ? { value: fmt(totalGoodies),           label: "Goodies distribués" }   : null,
     cfg.show_kpi_sites           ? { value: fmt(siteStats.length),       label: "Sites actifs" }         : null,
+    // Toutes les personnes ayant participé à la campagne — même valeur que
+    // le KPI "Ventes" (chaque dégustation ou vente normale = un client
+    // rencontré), affichée sous un libellé explicite.
+    cfg.show_kpi_personnes_touchees ? { value: fmt(isVenteCampagne ? totalVentesNormales : totalTastings), label: "Personnes touchées" } : null,
   ].filter(Boolean) as { value: string | number; label: string }[];
   if (kpis.length > 0) kpiRow(kpis);
 
-  // ── Graphiques de comparaison par site ──────────────────
-  // Métrique : ventes NORMAL (quantités réellement achetées, hors produits
-  // offerts GRATUIT/PROMOTION) rapportées aux jours d'activité réels du site
-  // — comparaison équitable entre sites qui n'ont pas travaillé le même
-  // nombre de jours sur la campagne.
+  // ── Page de synthèse condensée : tous les graphiques regroupés ─────────
+  // Métrique de comparaison par site : ventes NORMAL (quantités réellement
+  // achetées, hors produits offerts GRATUIT/PROMOTION) rapportées aux jours
+  // d'activité réels du site — comparaison équitable entre sites qui n'ont
+  // pas travaillé le même nombre de jours sur la campagne.
   if (cfg.show_section_graphiques && siteStats.length > 0) {
-    sectionTitle("Graphiques — comparaison par site");
+    sectionTitle("Graphiques");
 
+    // Comparaison par site
     guard(6);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(...P.mid);
-    doc.text("Ventes normales par jour actif, par site (du plus élevé au plus faible)", M, Y);
-    Y += 5;
+    chartTitle("Ventes normales par jour actif, par site (du plus élevé au plus faible)");
     barChartSequential(siteStats.map(s => ({ label: s.name, value: s.avgVentesNormalesParJour })));
 
     guard(14);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(...P.mid);
-    doc.text("Ventes normales vs produits offerts, par jour actif et par site", M, Y);
-    Y += 5;
+    chartTitle("Ventes normales vs produits offerts, par jour actif et par site");
     legendRow([{ color: P.primary, label: "Ventes normales" }, { color: P.mid, label: "Produits offerts" }]);
     barChartGrouped2(
       siteStats.map(s => ({ label: s.name, a: s.avgVentesNormalesParJour, b: s.avgOffertsParJour })),
       P.primary, P.mid
     );
+
+    // Tendance journalière (toute la période avec activité)
+    const trend = buildDailyTrend(tastings, sales);
+    if (trend.dates.length > 1) {
+      guard(20);
+      chartTitle("Tendance journalière — dégustations vs ventes normales");
+      legendRow([{ color: P.primary, label: TASTING_LABEL }, { color: P.mid, label: "Ventes normales" }]);
+      lineChart(trend.dates, [
+        { label: TASTING_LABEL, color: P.primary, values: trend.tastingsPerDay },
+        { label: "Ventes normales", color: P.mid, values: trend.salesPerDay },
+      ]);
+    }
+
+    // Profil des clients (formulaire hôtesse, ou Vente directe pour une campagne VENTE)
+    if (cfg.show_col_tranche_age) {
+      const ageDist = buildAgeDistribution(tastings, sales, isVenteCampagne);
+      if (ageDist.some(a => a.value > 0)) {
+        guard(14);
+        chartTitle("Répartition des clients par tranche d'âge");
+        barChartOrdinal(ageDist);
+      }
+    }
+
+    const genreDist = buildGenreDistribution(tastings, sales, isVenteCampagne);
+    if (genreDist.some(g => g.value > 0)) {
+      guard(50);
+      chartTitle("Répartition des clients par sexe");
+      donutWithLegend([
+        { label: "Hommes", value: genreDist[0].value, color: P.primary },
+        { label: "Femmes", value: genreDist[1].value, color: P.mid },
+      ]);
+    }
+
+    if (cfg.show_col_intention_achat) {
+      const intentionDist = buildIntentionDistribution(tastings);
+      if (intentionDist.some(i => i.value > 0)) {
+        guard(50);
+        chartTitle("Intention d'achat déclarée");
+        donutWithLegend(intentionDist.map((it, i) => ({
+          label: it.label,
+          value: it.value,
+          color: mixRgb(P.secondary, lighten(P.primary, 0.55), intentionDist.length > 1 ? i / (intentionDist.length - 1) : 0),
+        })));
+      }
+    }
+
+    // Retours clients (notes sensorielles, si activées sur la campagne)
+    // Échelle réelle 1–max (5 ou 10, configurable par campagne) — jamais 0-10 fixe.
+    if (cfg.inclure_notes_sensorielles) {
+      const goutMax = campaign.note_gout_max ?? 5;
+      const gout = buildNoteDistribution(tastings, sales, isVenteCampagne, "note_gout", goutMax);
+      if (gout.some(n => n.value > 0)) {
+        guard(14);
+        chartTitle(`Note de goût (1-${goutMax})`);
+        barChartOrdinal(gout);
+      }
+
+      const ambianceMax = campaign.note_ambiance_max ?? 5;
+      const ambiance = buildNoteDistribution(tastings, sales, isVenteCampagne, "note_ambiance", ambianceMax);
+      if (ambiance.some(n => n.value > 0)) {
+        guard(14);
+        chartTitle(`Note d'ambiance (1-${ambianceMax})`);
+        barChartOrdinal(ambiance);
+      }
+    }
+
+    // Le détail complet (tableaux) démarre sur une page neuve — la synthèse
+    // condensée (KPIs + graphiques) reste groupée sur les pages précédentes.
+    newPage();
   }
 
-  // ── Offres promotionnelles ──────────────────────────────
+  // ── Synthèse par site (offres promotionnelles réellement appliquées) ───
+  // Basé sur GainPromotion (données réelles), pas sur une mécanique
+  // supposée à partir des ventes — une ligne par (site, offre) : le nom de
+  // l'offre, combien de fois elle a été appliquée, combien de boissons
+  // offertes au total pour cette offre. Pas de colonne hôtesse (agrégé au
+  // niveau site).
   if (cfg.show_section_offres_promo) {
-  sectionTitle("Détail des offres promotionnelles");
-  if (isGMS) {
-    const totalCan   = sales.reduce((a, s) => a + (s.quantity ?? 0), 0);
-    const totalPacks = sales.filter(s => (s.notes ?? "").includes("packs")).reduce((a, s) => a + (s.quantity ?? 0), 0);
-    table(
-      ["Mécanique", "Qté achetée", "Avantage offert", "Total distribué"],
-      [
-        ["4 canettes achetées → 1 canette offerte",     fmt(totalCan),   "Canettes offertes",   fmt(Math.floor(totalCan / 4))],
-        ["6 canettes achetées → 1 ticket tombola",      fmt(totalCan),   "Tickets tombola",     fmt(Math.floor(totalCan / 6))],
-        ["4 packs achetés → 1 pack offert",             fmt(totalPacks), "Packs offerts",       fmt(Math.floor(totalPacks / 4))],
-        ["4 packs achetés → 1 goodie",                  fmt(totalPacks), "Goodies (promo pack)", fmt(Math.floor(totalPacks / 4))],
-      ]
-    );
-  } else if (isCHR) {
-    const totalBout = sales.reduce((a, s) => a + (s.quantity ?? 0), 0);
-    table(
-      ["Mécanique", "Qté achetée", "Avantage offert", "Total distribué"],
-      [
-        ["3 bouteilles achetées → 1 bouteille offerte", fmt(totalBout), "Bouteilles offertes", fmt(Math.floor(totalBout / 3))],
-        ["9 bouteilles achetées → 1 tirage tombola",    fmt(totalBout), "Tirages tombola",     fmt(Math.floor(totalBout / 9))],
-      ]
-    );
-  } else {
-    const prodMap: Record<string, { qty: number; rev: number }> = {};
-    sales.forEach(s => {
-      const k = s.product?.name ?? "—";
-      if (!prodMap[k]) prodMap[k] = { qty: 0, rev: 0 };
-      prodMap[k].qty += s.quantity ?? 0;
-      prodMap[k].rev += s.total_amount ?? 0;
-    });
-    const offresHead = cfg.show_col_ca ? ["Produit", "Qté vendue", "CA (€)"] : ["Produit", "Qté vendue"];
-    table(
-      offresHead,
-      Object.entries(prodMap).map(([n, v]) => cfg.show_col_ca ? [n, fmt(v.qty), v.rev.toFixed(2)] : [n, fmt(v.qty)])
-    );
+    sectionTitle("Synthèse par site");
+    const offresParSite = buildOffresParSite(gainsPromotions);
+    if (offresParSite.length > 0) {
+      table(
+        ["Site", "Offre promo appliquée", "Nb fois appliquée", "Boissons offertes"],
+        offresParSite.map(o => [o.site, o.offre, fmt(o.fois), fmt(o.qtyOfferte)])
+      );
+    }
   }
-  } // end show_section_offres_promo
 
   // ── Gains goodies globaux ──────────────────────────────
   const offrLabel  = isGMS ? "Canettes offertes" : isCHR ? "Bouteilles offertes" : "Offres produit";
@@ -941,12 +1403,15 @@ function generatePDF({
     );
   }
 
-  // ── Boissons offertes par jour d'activité, par site ────
+  // ── Boissons vendues / gratuites par jour d'activité, par site ─────────
   // Saisies indépendantes de l'hôtesse (cf. DonneesSiteJour, une ligne par
-  // site+date) : détail jour par jour du stock disponible et des boissons
-  // offertes gratuitement, avec un total par site en bas de tableau.
+  // site+date). "Boissons vendues" est calculé depuis les ventes NORMAL
+  // réelles (pas depuis stock_boissons, un stock général saisi à part).
+  // Le suivi des boissons GRATUITES (reçu/reporté/restant) suit exactement
+  // la même logique que les UGs goodies : "Reporté" = restant du jour
+  // d'activité précédent pour ce site.
   if (cfg.show_section_stock_boissons && donneesSiteJour.length > 0) {
-    sectionTitle("Boissons offertes par jour d'activité, par site");
+    sectionTitle("Boissons vendues / gratuites par jour d'activité, par site");
 
     const parSite = new Map<string, DonneesSiteJour[]>();
     donneesSiteJour.forEach(d => {
@@ -955,7 +1420,9 @@ function generatePDF({
     });
 
     [...parSite.entries()].forEach(([siteId, entries]) => {
-      const siteName = siteStats.find(s => s.id === siteId)?.name ?? entries[0]?.site_nom ?? "—";
+      const site = siteStats.find(s => s.id === siteId);
+      const siteName = site?.name ?? entries[0]?.site_nom ?? "—";
+      const hIds = site?.hostesses.map(h => h.id) ?? [];
       const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
 
       guard(12);
@@ -965,15 +1432,52 @@ function generatePDF({
       doc.text(siteName, M, Y);
       Y += 5;
 
-      let totalOffertes = 0;
-      const body = sorted.map(d => {
-        const offertes = d.nombre_boissons_gratuites ?? 0;
-        totalOffertes += offertes;
-        return [fmtDate(d.date), d.conditionnement_display, fmt(d.stock_boissons ?? 0), fmt(offertes)];
-      });
-      body.push(["TOTAL", "—", "—", fmt(totalOffertes)]);
+      // "Reçu" = nombre_boissons_gratuites (champ manuel réellement utilisé
+      // sur le terrain pour indiquer le stock de boissons gratuites apporté
+      // sur le site — pas le champ quantite_gratuites_recue, jamais renseigné
+      // en pratique). "Boissons offertes" = quantité réellement offerte via
+      // la mécanique promo (Vente type_vente=PROMOTION, liée aux
+      // GainPromotion). "Restant" est recalculé ici (Reçu − Offertes) pour
+      // que chaque ligne s'additionne correctement.
+      let totalVendues = 0, totalOffertesCumule = 0, totalRecuFraisCumule = 0, totalReporteCumule = 0;
+      let prevRestant: number | null = null;
+      const body = sorted.map((d, i) => {
+        const dateSales = sales.filter(s => hIds.includes(s.hostess_id) && s.created_at?.slice(0, 10) === d.date);
+        const vendues = dateSales
+          .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL")
+          .reduce((a, s) => a + (s.quantity ?? 0), 0);
+        const offertes = dateSales
+          .filter(s => s.type_vente === "PROMOTION")
+          .reduce((a, s) => a + (s.quantity ?? 0), 0);
+        const recu = d.nombre_boissons_gratuites;
+        const reporte = i > 0 ? prevRestant : null;
+        const recuFrais = recu != null ? Math.max(0, recu - (reporte ?? 0)) : null;
+        const restant = recu != null ? Math.max(0, recu - offertes) : null;
 
-      table(["Date", "Conditionnement", "Stock du jour", "Boissons offertes"], body);
+        totalVendues += vendues;
+        totalOffertesCumule += offertes;
+        if (recuFrais != null) totalRecuFraisCumule += recuFrais;
+        if (reporte) totalReporteCumule += reporte;
+        prevRestant = restant;
+
+        return [
+          fmtDate(d.date), d.conditionnement_display, fmt(vendues), fmt(offertes),
+          recuFrais != null ? fmt(recuFrais) : "—",
+          reporte ? fmt(reporte) : "—",
+          restant != null ? fmt(restant) : "—",
+        ];
+      });
+      body.push([
+        "TOTAL", "—", fmt(totalVendues), fmt(totalOffertesCumule),
+        totalRecuFraisCumule > 0 ? fmt(totalRecuFraisCumule) : "—",
+        totalReporteCumule > 0 ? fmt(totalReporteCumule) : "—",
+        prevRestant != null ? fmt(prevRestant) : "—",
+      ]);
+
+      table(
+        ["Date", "Conditionnement", "Boissons vendues", "Boissons offertes", "Reçu (frais)", "Reporté", "Restant"],
+        body
+      );
     });
   }
 
@@ -994,6 +1498,9 @@ function generatePDF({
       parSiteGoodie.get(key)!.jours.push(l);
     });
 
+    // Total par goodie (tous sites confondus), pour le récapitulatif final.
+    const totalParGoodie = new Map<string, { gagne: number; restant: number }>();
+
     [...parSiteGoodie.values()].forEach(({ siteName, goodieNom, jours }) => {
       const sorted = [...jours].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -1012,6 +1519,7 @@ function generatePDF({
         totalGagne += l.gains_du_jour;
         if (reporte > 0) totalReporteCumule += reporte;
         return [
+          goodieNom,
           fmtDate(l.date),
           fmt(recusFrais),
           reporte > 0 ? fmt(reporte) : "—",
@@ -1021,15 +1529,30 @@ function generatePDF({
       });
       const restantFinal = Math.max(0, totalRecusFrais - totalGagne);
       body.push([
-        "TOTAL",
+        goodieNom, "TOTAL",
         fmt(totalRecusFrais),
         totalReporteCumule > 0 ? fmt(totalReporteCumule) : "—",
         fmt(totalGagne),
         fmt(restantFinal),
       ]);
 
-      table(["Date", "Reçus (frais)", "Reporté (veille)", "Gagné", "Restant"], body);
+      const prevTotal = totalParGoodie.get(goodieNom) ?? { gagne: 0, restant: 0 };
+      totalParGoodie.set(goodieNom, { gagne: prevTotal.gagne + totalGagne, restant: prevTotal.restant + restantFinal });
+
+      table(["Goodie", "Date", "Reçus (frais)", "Reporté (veille)", "Gagné", "Restant"], body);
     });
+
+    // Récapitulatif explicite : combien de goodies au total ont été gagnés
+    // par les clients (tous sites confondus, par nom de goodie), et s'il
+    // reste du stock non distribué.
+    if (totalParGoodie.size > 0) {
+      guard(20);
+      sectionTitle("Total des goodies gagnés par les clients");
+      table(
+        ["Goodie", "Total gagné (tous sites)", "Restant (tous sites)"],
+        [...totalParGoodie.entries()].map(([nom, v]) => [nom, fmt(v.gagne), fmt(v.restant)])
+      );
+    }
   }
 
   // ── SECTIONS SELON RÔLE ────────────────────────────────
@@ -1101,23 +1624,22 @@ function generatePDF({
     }
 
     // ── Performances par site ───────────────────────────
+    // Détail transaction par transaction (même niveau que "Détail des ventes"
+    // du bulletin condensé) : achat, offre promo déclenchée, goodie remporté.
+    // Pas de nom de client (contrairement au bulletin) — utilisé en interne
+    // uniquement pour rattacher offres/goodies à la bonne vente.
     if (cfg.show_section_perf_sites) {
       sectionTitle("Performances par site");
-      const siteObj = Math.max(1, Math.ceil(campaign.sales_objective / (siteStats.length || 1)));
-      const sitePerfHead = ["Site", "Localisation", TASTING_LABEL, OFFERED_LABEL,
-        ...(cfg.show_col_performance ? ["Objectif", "Taux"] : []),
-        ...(cfg.show_col_ca ? ["CA (€)"] : []),
-        ...(cfg.show_col_goodies ? ["Goodies"] : []),
-      ];
-      table(
-        sitePerfHead,
-        siteStats.map(s => [
-          s.name, s.location, fmt(s.tastings), fmt(s.sales),
-          ...(cfg.show_col_performance ? [fmt(siteObj), `${pct(s.sales, siteObj)} %`] : []),
-          ...(cfg.show_col_ca ? [s.revenue.toFixed(2)] : []),
-          ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
-        ])
-      );
+      const venteRows = buildVenteRows(sales, siteStats, gainsPromotions, gainsGoodies);
+      if (venteRows.length > 0) {
+        table(
+          ["Site", "Date", "Produit", "Conditionnement", "Qté achetée", "Offre appliquée", "Qté offerte", "Goodie remporté"],
+          venteRows.map(r => [
+            r.siteName, fmtDate(r.date), r.produit, r.conditionnement,
+            r.quantiteAchetee || "—", r.offre, r.quantiteOfferte || "—", r.goodieNom,
+          ])
+        );
+      }
     }
 
     // ── Goodies par site ────────────────────────────────
@@ -1219,6 +1741,7 @@ export default function CampaignReport({
   donneesSiteJour = [],
   livraisons = [],
   gainsGoodies = [],
+  gainsPromotions = [],
   reportConfig,
   label = "Exporter le rapport PDF",
 }: CampaignReportProps) {
@@ -1238,7 +1761,7 @@ export default function CampaignReport({
 
       const doc = generatePDF({
         campaign, user, hostessStats, siteStats, tastings, sales, horaires,
-        donneesSiteJour, livraisons, gainsGoodies,
+        donneesSiteJour, livraisons, gainsGoodies, gainsPromotions,
         isAdminOrSupervisor, palette, logoBase64, logoMimeType, cfg,
       });
 
@@ -1250,7 +1773,7 @@ export default function CampaignReport({
     } finally {
       setLoading(false);
     }
-  }, [campaign, user, tastings, sales, team, sites, horaires, donneesSiteJour, livraisons, gainsGoodies, isAdminOrSupervisor, reportConfig]);
+  }, [campaign, user, tastings, sales, team, sites, horaires, donneesSiteJour, livraisons, gainsGoodies, gainsPromotions, isAdminOrSupervisor, reportConfig]);
 
   return (
     <button

@@ -34,6 +34,7 @@ const SECTIONS: Section[] = [
       { field: "show_kpi_ca",              label: "Chiffre d'affaires" },
       { field: "show_kpi_goodies",         label: "Goodies distribués" },
       { field: "show_kpi_sites",           label: "Nombre de sites actifs" },
+      { field: "show_kpi_personnes_touchees", label: "Personnes touchées", hint: "Tous les clients ayant participé à la campagne" },
     ],
   },
   {
@@ -136,6 +137,7 @@ export default function ReportConfigPanel({ campaignId, onConfigChange }: Props)
         show_kpi_ca: config.show_kpi_ca,
         show_kpi_goodies: config.show_kpi_goodies,
         show_kpi_sites: config.show_kpi_sites,
+        show_kpi_personnes_touchees: config.show_kpi_personnes_touchees,
         show_section_offres_promo: config.show_section_offres_promo,
         show_section_gains_goodies: config.show_section_gains_goodies,
         show_section_perf_hotesses: config.show_section_perf_hotesses,

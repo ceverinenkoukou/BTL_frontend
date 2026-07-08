@@ -76,6 +76,19 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchDashboardData(); }, [user]);
 
+  // Rafraîchit les stats quand l'utilisateur revient sur l'onglet (ex: après
+  // avoir enregistré une vente depuis un autre onglet/fenêtre).
+  useEffect(() => {
+    const onFocus = () => fetchDashboardData();
+    const onVisibility = () => { if (document.visibilityState === "visible") fetchDashboardData(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [user]);
+
   const fetchDashboardData = async () => {
     try {
       const [campRes, tastRes, ventesRes, statsRes, usersRes, gainsRes] = await Promise.all([

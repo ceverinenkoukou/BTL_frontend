@@ -411,6 +411,10 @@ export interface Vente {
   prix_total: string | null;
   type_vente: 'NORMAL' | 'GRATUIT' | 'PROMOTION';
   nom_client: string | null;
+  tranche_age: TrancheAge | null;
+  genre: Genre | null;
+  note_gout: number | null;
+  note_ambiance: number | null;
   est_achat_promo: boolean;
   created_at: string;
 }
@@ -431,6 +435,7 @@ export interface GainGoodie {
   goodie_nom: string;
   hotesse: string | null;
   hotesse_nom: string;
+  nom_client: string | null;
   created_at: string;
 }
 
@@ -604,6 +609,9 @@ export interface DonneesSiteJour {
   conditionnement_display: string;
   stock_boissons: number | null;
   nombre_boissons_gratuites: number | null;
+  quantite_gratuites_recue: number | null;
+  est_report_gratuites: boolean;
+  restants_gratuites_du_jour: number | null;
   enregistre_par: string | null;
   enregistre_par_nom: string | null;
   created_at: string;
@@ -615,6 +623,7 @@ export interface UpsertDonneesSiteJourPayload {
   conditionnement?: TypeConditionnement;
   stock_boissons?: number | null;
   nombre_boissons_gratuites?: number | null;
+  quantite_gratuites_recue?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -712,6 +721,7 @@ export interface RapportConfig {
   show_kpi_ca: boolean;
   show_kpi_goodies: boolean;
   show_kpi_sites: boolean;
+  show_kpi_personnes_touchees: boolean;
   // Sections
   show_section_offres_promo: boolean;
   show_section_gains_goodies: boolean;
@@ -759,6 +769,7 @@ export const DEFAULT_RAPPORT_CONFIG: RapportConfig = {
   show_kpi_ca: true,
   show_kpi_goodies: true,
   show_kpi_sites: true,
+  show_kpi_personnes_touchees: true,
   show_section_offres_promo: true,
   show_section_gains_goodies: true,
   show_section_perf_hotesses: true,
