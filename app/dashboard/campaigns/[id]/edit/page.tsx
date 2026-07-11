@@ -91,6 +91,8 @@ export default function EditCampaignPage() {
     note_ambiance_max:      5 as 5 | 10,
     objectif_degustations:  "",
     objectif_ventes:        "",
+    objectif_gratuites:     "",
+    objectif_goodies:       "",
   });
 
   useEffect(() => {
@@ -117,6 +119,8 @@ export default function EditCampaignPage() {
           note_ambiance_max:     data.note_ambiance_max,
           objectif_degustations: data.objectif_degustations?.toString() ?? "",
           objectif_ventes:       data.objectif_ventes?.toString() ?? "",
+          objectif_gratuites:    data.objectif_gratuites?.toString() ?? "",
+          objectif_goodies:      data.objectif_goodies?.toString() ?? "",
         });
         fetchPlanning();
       } catch {
@@ -150,6 +154,9 @@ export default function EditCampaignPage() {
           ? parseInt(form.objectif_degustations) : null,
         objectif_ventes:       (form.type_campagne !== "DEGUSTATION" && form.objectif_ventes)
           ? parseInt(form.objectif_ventes) : null,
+        objectif_gratuites:    form.objectif_gratuites ? parseInt(form.objectif_gratuites) : null,
+        objectif_goodies:      (form.type_recompense === "GOODIES" && form.objectif_goodies)
+          ? parseInt(form.objectif_goodies) : null,
       });
       invalidateCache("/campagnes");
       invalidateCache("/degustations/mon-site");
@@ -357,6 +364,20 @@ export default function EditCampaignPage() {
                   <Input type="number" min="0" value={form.objectif_ventes}
                     onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))}
                     placeholder="Ex: 100" />
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Boissons gratuites (quantité)</Label>
+                <Input type="number" min="0" value={form.objectif_gratuites}
+                  onChange={e => setForm(f => ({ ...f, objectif_gratuites: e.target.value }))}
+                  placeholder="Ex: 200" />
+              </div>
+              {form.type_recompense === "GOODIES" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Goodies (quantité)</Label>
+                  <Input type="number" min="0" value={form.objectif_goodies}
+                    onChange={e => setForm(f => ({ ...f, objectif_goodies: e.target.value }))}
+                    placeholder="Ex: 50" />
                 </div>
               )}
             </div>

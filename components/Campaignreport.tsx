@@ -71,6 +71,8 @@ type ReportCampaign = Campaign & {
   type_campagne?: TypeCampagne;
   note_gout_max?: 5 | 10;
   note_ambiance_max?: 5 | 10;
+  objectif_gratuites?: number | null;
+  objectif_goodies?: number | null;
 };
 type ReportSale = Sale & {
   notes?: string;
@@ -1239,6 +1241,7 @@ function generatePDF({
     .reduce((a, s) => a + (s.quantity ?? 0), 0);
   const totalRevenue  = sales.reduce((a, s) => a + (s.total_amount ?? 0), 0);
   const totalGoodies  = gainsGoodies.length;
+  const totalGratuites = donneesSiteJour.reduce((a, d) => a + (d.nombre_boissons_gratuites ?? 0), 0);
   // "Personnes touchées" = nombre de CLIENTS (une ligne = une personne),
   // pas une quantité de produits — contrairement à "Ventes" qui somme les
   // quantités. Pour une campagne VENTE, une personne = une ligne de vente
@@ -1258,6 +1261,26 @@ function generatePDF({
     cfg.show_kpi_personnes_touchees ? { value: fmt(totalPersonnesTouchees), label: "Personnes touchées" } : null,
   ].filter(Boolean) as { value: string | number; label: string }[];
   if (kpis.length > 0) kpiRow(kpis);
+
+  // ── Objectifs de la campagne : réalisé vs cible, sur toute la période ──
+  const objectifsRows: (string | number)[][] = [];
+  if (campaign.tasting_objective) {
+    const realise = isVenteCampagne ? totalVentesNormales : totalTastings;
+    objectifsRows.push(["Dégustations", fmt(realise), fmt(campaign.tasting_objective), `${Math.min(100, Math.round((realise / campaign.tasting_objective) * 100))}%`]);
+  }
+  if (campaign.sales_objective) {
+    objectifsRows.push(["Ventes", fmt(totalVentesNormales), fmt(campaign.sales_objective), `${Math.min(100, Math.round((totalVentesNormales / campaign.sales_objective) * 100))}%`]);
+  }
+  if (campaign.objectif_gratuites) {
+    objectifsRows.push(["Boissons gratuites", fmt(totalGratuites), fmt(campaign.objectif_gratuites), `${Math.min(100, Math.round((totalGratuites / campaign.objectif_gratuites) * 100))}%`]);
+  }
+  if (campaign.objectif_goodies) {
+    objectifsRows.push(["Goodies", fmt(totalGoodies), fmt(campaign.objectif_goodies), `${Math.min(100, Math.round((totalGoodies / campaign.objectif_goodies) * 100))}%`]);
+  }
+  if (objectifsRows.length > 0) {
+    sectionTitle("Objectifs de la campagne");
+    table(["Objectif", "Réalisé", "Cible", "Progression"], objectifsRows);
+  }
 
   // ── Page de synthèse condensée : tous les graphiques regroupés ─────────
   // Métrique de comparaison par site : ventes NORMAL (quantités réellement

@@ -131,6 +131,8 @@ export interface CampagneList {
   description: string | null;
   objectif_degustations: number | null;
   objectif_ventes: number | null;
+  objectif_gratuites: number | null;
+  objectif_goodies: number | null;
   note_gout_active: boolean;
   note_gout_max: 5 | 10;
   note_ambiance_active: boolean;
@@ -248,6 +250,8 @@ export interface CreateCampagnePayload {
   note_ambiance_max?: 5 | 10;
   objectif_degustations?: number | null;
   objectif_ventes?: number | null;
+  objectif_gratuites?: number | null;
+  objectif_goodies?: number | null;
 }
 
 export interface CreatePromotionPayload {

@@ -1092,6 +1092,8 @@ export default function CampaignDetailPage() {
     end_date: campaign.date_fin,
     sales_objective: campaign.objectif_ventes ?? 0,
     tasting_objective: campaign.objectif_degustations ?? 0,
+    objectif_gratuites: campaign.objectif_gratuites,
+    objectif_goodies: campaign.objectif_goodies,
     status: "active" as const,
     created_at: "",
     updated_at: "",
@@ -1227,6 +1229,10 @@ export default function CampaignDetailPage() {
   const showDegustationBar = showTasting || (isVenteCampagne && (tastings.length > 0 || !!campaign.objectif_degustations));
   const showWheel    = campaign.type_recompense === "GOODIES";
   const showPromos   = campaign.type_recompense === "PROMOTIONS";
+  const gratuitesCount = donneesSiteJour.reduce((sum, d) => sum + (d.nombre_boissons_gratuites ?? 0), 0);
+  const goodiesGagnesCount = gainsGoodies.length;
+  const showGratuitesBar = !!campaign.objectif_gratuites;
+  const showGoodiesBar = showWheel && !!campaign.objectif_goodies;
 
   return (
     <>
@@ -1402,6 +1408,28 @@ export default function CampaignDetailPage() {
                   </div>
                   <div className="h-3 rounded-full bg-violet-50 overflow-hidden shadow-inner">
                     <div className="h-full bg-gradient-to-r from-violet-500 to-purple-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${campaign.objectif_ventes ? Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100)) : 0}%` }} />
+                  </div>
+                </div>
+              )}
+              {showGratuitesBar && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm"><Package className="w-4 h-4 text-amber-500" /><span className="font-medium text-foreground">Boissons gratuites</span></div>
+                    <div className="flex items-center gap-2 text-sm"><span className="font-bold text-amber-700">{gratuitesCount}</span><span className="text-muted-foreground">/ {campaign.objectif_gratuites ?? 0}</span><span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold">{campaign.objectif_gratuites ? Math.min(100, Math.round((gratuitesCount / campaign.objectif_gratuites) * 100)) : 0}%</span></div>
+                  </div>
+                  <div className="h-3 rounded-full bg-amber-50 overflow-hidden shadow-inner">
+                    <div className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${campaign.objectif_gratuites ? Math.min(100, Math.round((gratuitesCount / campaign.objectif_gratuites) * 100)) : 0}%` }} />
+                  </div>
+                </div>
+              )}
+              {showGoodiesBar && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm"><Gift className="w-4 h-4 text-emerald-500" /><span className="font-medium text-foreground">Goodies</span></div>
+                    <div className="flex items-center gap-2 text-sm"><span className="font-bold text-emerald-700">{goodiesGagnesCount}</span><span className="text-muted-foreground">/ {campaign.objectif_goodies ?? 0}</span><span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-semibold">{campaign.objectif_goodies ? Math.min(100, Math.round((goodiesGagnesCount / campaign.objectif_goodies) * 100)) : 0}%</span></div>
+                  </div>
+                  <div className="h-3 rounded-full bg-emerald-50 overflow-hidden shadow-inner">
+                    <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full shadow-sm transition-all duration-700" style={{ width: `${campaign.objectif_goodies ? Math.min(100, Math.round((goodiesGagnesCount / campaign.objectif_goodies) * 100)) : 0}%` }} />
                   </div>
                 </div>
               )}
@@ -1837,7 +1865,7 @@ export default function CampaignDetailPage() {
               </div>
             </div>
           )}
-          {((showDegustationBar && campaign.objectif_degustations) || (showVente && campaign.objectif_ventes)) && (
+          {((showDegustationBar && campaign.objectif_degustations) || (showVente && campaign.objectif_ventes) || showGratuitesBar || showGoodiesBar) && (
             <div className="pt-3 border-t border-slate-100 grid sm:grid-cols-2 gap-3">
               {showDegustationBar && campaign.objectif_degustations && (
                 <div className="rounded-xl p-3 space-y-1.5" style={{ background: hex(p1, 0.07) }}>
@@ -1857,6 +1885,26 @@ export default function CampaignDetailPage() {
                   </div>
                   <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100))}%`, background: `linear-gradient(to right, ${p2}, ${p1})` }} /></div>
                   <p className="text-xs text-right" style={{ color: p2 }}>{Math.min(100, Math.round((venteNormalCount / campaign.objectif_ventes) * 100))}% atteint</p>
+                </div>
+              )}
+              {showGratuitesBar && (
+                <div className="rounded-xl p-3 space-y-1.5 bg-amber-50">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 text-amber-700"><Package className="w-3.5 h-3.5" /><span className="font-semibold">Objectif boissons gratuites</span></div>
+                    <span className="font-bold tabular-nums text-amber-700">{gratuitesCount} / {campaign.objectif_gratuites}</span>
+                  </div>
+                  <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-amber-500 to-yellow-400" style={{ width: `${Math.min(100, Math.round((gratuitesCount / campaign.objectif_gratuites!) * 100))}%` }} /></div>
+                  <p className="text-xs text-right text-amber-700">{Math.min(100, Math.round((gratuitesCount / campaign.objectif_gratuites!) * 100))}% atteint</p>
+                </div>
+              )}
+              {showGoodiesBar && (
+                <div className="rounded-xl p-3 space-y-1.5 bg-emerald-50">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 text-emerald-700"><Gift className="w-3.5 h-3.5" /><span className="font-semibold">Objectif goodies</span></div>
+                    <span className="font-bold tabular-nums text-emerald-700">{goodiesGagnesCount} / {campaign.objectif_goodies}</span>
+                  </div>
+                  <div className="h-2 bg-white/70 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-emerald-500 to-teal-400" style={{ width: `${Math.min(100, Math.round((goodiesGagnesCount / campaign.objectif_goodies!) * 100))}%` }} /></div>
+                  <p className="text-xs text-right text-emerald-700">{Math.min(100, Math.round((goodiesGagnesCount / campaign.objectif_goodies!) * 100))}% atteint</p>
                 </div>
               )}
             </div>
