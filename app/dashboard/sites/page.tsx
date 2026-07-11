@@ -176,7 +176,8 @@ function SitesPageContent() {
   const [savingStockLivraison, setSavingStockLivraison] = useState(false);
   const [stockDonneesForm, setStockDonneesForm] = useState({
     date: new Date().toISOString().slice(0, 10),
-    conditionnement: "UNITE" as TypeConditionnement,
+    conditionnement_stock: "UNITE" as TypeConditionnement,
+    conditionnement_gratuites: "UNITE" as TypeConditionnement,
     stock_boissons: "", nombre_boissons_gratuites: "",
   });
   const [savingStockDonnees, setSavingStockDonnees] = useState(false);
@@ -229,7 +230,7 @@ function SitesPageContent() {
     setStockLivraisons([]);
     setStockDonnees([]);
     setStockLivraisonForm({ goodie: "", date: new Date().toISOString().slice(0, 10), quantite: 1 });
-    setStockDonneesForm({ date: new Date().toISOString().slice(0, 10), conditionnement: "UNITE", stock_boissons: "", nombre_boissons_gratuites: "" });
+    setStockDonneesForm({ date: new Date().toISOString().slice(0, 10), conditionnement_stock: "UNITE", conditionnement_gratuites: "UNITE", stock_boissons: "", nombre_boissons_gratuites: "" });
     setLoadingStock(true);
     try {
       const [goodiesRes, livrRes, dsjRes] = await Promise.all([
@@ -279,7 +280,8 @@ function SitesPageContent() {
       const res = await api.post<DonneesSiteJour>("/donnees-site-jour/", {
         site: stockSite.id,
         date: stockDonneesForm.date,
-        conditionnement: stockDonneesForm.conditionnement,
+        conditionnement_stock: stockDonneesForm.conditionnement_stock,
+        conditionnement_gratuites: stockDonneesForm.conditionnement_gratuites,
         stock_boissons: stockDonneesForm.stock_boissons === "" ? null : Number(stockDonneesForm.stock_boissons),
         nombre_boissons_gratuites: stockDonneesForm.nombre_boissons_gratuites === "" ? null : Number(stockDonneesForm.nombre_boissons_gratuites),
       });
@@ -1087,14 +1089,18 @@ function SitesPageContent() {
                 {/* Stock de boissons & boissons gratuites */}
                 <div className="space-y-2.5 pt-3 border-t border-slate-100">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Stock de boissons & boissons gratuites</p>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Date</Label>
+                    <Input type="date" className="h-8 text-xs mt-0.5" value={stockDonneesForm.date} onChange={e => setStockDonneesForm(f => ({ ...f, date: e.target.value }))} />
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <Label className="text-xs text-muted-foreground">Date</Label>
-                      <Input type="date" className="h-8 text-xs mt-0.5" value={stockDonneesForm.date} onChange={e => setStockDonneesForm(f => ({ ...f, date: e.target.value }))} />
+                      <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
+                      <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={stockDonneesForm.stock_boissons} onChange={e => setStockDonneesForm(f => ({ ...f, stock_boissons: e.target.value }))} />
                     </div>
                     <div>
-                      <Label className="text-xs text-muted-foreground">Conditionnement</Label>
-                      <Select value={stockDonneesForm.conditionnement} onValueChange={v => setStockDonneesForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
+                      <Label className="text-xs text-muted-foreground">Conditionnement (stock)</Label>
+                      <Select value={stockDonneesForm.conditionnement_stock} onValueChange={v => setStockDonneesForm(f => ({ ...f, conditionnement_stock: v as TypeConditionnement }))}>
                         <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="UNITE">À l&apos;unité</SelectItem>
@@ -1105,12 +1111,18 @@ function SitesPageContent() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
-                      <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={stockDonneesForm.stock_boissons} onChange={e => setStockDonneesForm(f => ({ ...f, stock_boissons: e.target.value }))} />
-                    </div>
-                    <div>
                       <Label className="text-xs text-muted-foreground">Boissons gratuites</Label>
                       <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={stockDonneesForm.nombre_boissons_gratuites} onChange={e => setStockDonneesForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Conditionnement (gratuites)</Label>
+                      <Select value={stockDonneesForm.conditionnement_gratuites} onValueChange={v => setStockDonneesForm(f => ({ ...f, conditionnement_gratuites: v as TypeConditionnement }))}>
+                        <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                          <SelectItem value="PACK">En pack</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                   <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitStockDonnees} disabled={savingStockDonnees}>
@@ -1123,9 +1135,8 @@ function SitesPageContent() {
                         <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 rounded-lg text-xs">
                           <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
                           <div className="flex items-center gap-3 shrink-0">
-                            <span className="text-muted-foreground">{d.conditionnement_display}</span>
-                            <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
-                            <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
+                            <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"} <span className="text-muted-foreground font-normal">({d.conditionnement_stock_display})</span></span>
+                            <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"} <span className="text-muted-foreground font-normal">({d.conditionnement_gratuites_display})</span></span>
                           </div>
                         </div>
                       ))}

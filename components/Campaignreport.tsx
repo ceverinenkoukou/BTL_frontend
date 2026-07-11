@@ -1460,6 +1460,11 @@ function generatePDF({
       // la mécanique promo (Vente type_vente=PROMOTION, liée aux
       // GainPromotion). "Restant" est recalculé ici (Reçu − Offertes) pour
       // que chaque ligne s'additionne correctement.
+      // Stock de boissons du site : uniquement affiché si au moins un jour
+      // a un stock > 1 renseigné (sinon la colonne n'apporte rien : valeur
+      // absente ou triviale).
+      const hasStock = sorted.some(d => (d.stock_boissons ?? 0) > 1);
+
       let totalVendues = 0, totalOffertesCumule = 0, totalRecuFraisCumule = 0, totalReporteCumule = 0;
       let prevRestant: number | null = null;
       const body = sorted.map((d, i) => {
@@ -1482,21 +1487,25 @@ function generatePDF({
         prevRestant = restant;
 
         return [
-          fmtDate(d.date), d.conditionnement_display, fmt(vendues), fmt(offertes),
+          fmtDate(d.date),
+          ...(hasStock ? [(d.stock_boissons ?? 0) > 1 ? fmt(d.stock_boissons!) : "—"] : []),
+          d.conditionnement_gratuites_display, fmt(vendues), fmt(offertes),
           recuFrais != null ? fmt(recuFrais) : "—",
           reporte ? fmt(reporte) : "—",
           restant != null ? fmt(restant) : "—",
         ];
       });
       body.push([
-        "TOTAL", "—", fmt(totalVendues), fmt(totalOffertesCumule),
+        "TOTAL",
+        ...(hasStock ? ["—"] : []),
+        "—", fmt(totalVendues), fmt(totalOffertesCumule),
         totalRecuFraisCumule > 0 ? fmt(totalRecuFraisCumule) : "—",
         totalReporteCumule > 0 ? fmt(totalReporteCumule) : "—",
         prevRestant != null ? fmt(prevRestant) : "—",
       ]);
 
       table(
-        ["Date", "Conditionnement", "Boissons vendues", "Boissons offertes", "Reçu (frais)", "Reporté", "Restant"],
+        ["Date", ...(hasStock ? ["Stock"] : []), "Conditionnement", "Boissons vendues", "Boissons offertes", "Reçu (frais)", "Reporté", "Restant"],
         body
       );
     });

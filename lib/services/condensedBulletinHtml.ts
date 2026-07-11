@@ -169,10 +169,15 @@ export function buildCondensedBulletinHtml(
     goodiesParSite.set(g.site, (goodiesParSite.get(g.site) ?? 0) + 1);
   });
 
-  const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnement: string; gratuites: number }>();
+  const stockParSite = new Map<string, { siteNom: string; stock: number | null; conditionnementStock: string; conditionnementGratuites: string; gratuites: number }>();
   bulletins.forEach(b => {
     if (!stockParSite.has(b.site)) {
-      stockParSite.set(b.site, { siteNom: b.site_nom, stock: b.stock_boissons, conditionnement: b.conditionnement_boissons || "—", gratuites: 0 });
+      stockParSite.set(b.site, {
+        siteNom: b.site_nom, stock: b.stock_boissons,
+        conditionnementStock: b.conditionnement_stock || "—",
+        conditionnementGratuites: b.conditionnement_gratuites || "—",
+        gratuites: 0,
+      });
     }
   });
   // nombre_boissons_gratuites est saisi une fois par (site, jour) — indépendant
@@ -410,13 +415,13 @@ export function buildCondensedBulletinHtml(
     sections.push(`
       <h2 class="section-title">Stock de boissons par site</h2>
       <table><thead><tr><th>Site</th><th class="r">Stock</th><th>Conditionnement</th></tr></thead>
-      <tbody>${[...stockParSite.values()].map(s => `<tr><td class="b">${esc(s.siteNom)}</td><td class="r">${s.stock ?? "—"}</td><td>${esc(s.conditionnement)}</td></tr>`).join("")}</tbody></table>`);
+      <tbody>${[...stockParSite.values()].map(s => `<tr><td class="b">${esc(s.siteNom)}</td><td class="r">${s.stock ?? "—"}</td><td>${esc(s.conditionnementStock)}</td></tr>`).join("")}</tbody></table>`);
   }
   if (config.show_boissons_gratuites && stockParSite.size > 0) {
     sections.push(`
       <h2 class="section-title">Boissons gratuites par site (période)</h2>
-      <table><thead><tr><th>Site</th><th class="r">Boissons gratuites</th></tr></thead>
-      <tbody>${[...stockParSite.values()].map(s => `<tr><td class="b">${esc(s.siteNom)}</td><td class="r">${s.gratuites}</td></tr>`).join("")}</tbody></table>`);
+      <table><thead><tr><th>Site</th><th class="r">Boissons gratuites</th><th>Conditionnement</th></tr></thead>
+      <tbody>${[...stockParSite.values()].map(s => `<tr><td class="b">${esc(s.siteNom)}</td><td class="r">${s.gratuites}</td><td>${esc(s.conditionnementGratuites)}</td></tr>`).join("")}</tbody></table>`);
   }
 
   if (config.show_avis_consommateurs && avis.length > 0) {

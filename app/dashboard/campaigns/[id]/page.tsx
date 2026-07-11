@@ -238,7 +238,8 @@ export default function CampaignDetailPage() {
   const [donneesSiteJour, setDonneesSiteJour] = useState<DonneesSiteJour[]>([]);
   const [donneesSiteForm, setDonneesSiteForm] = useState({
     site: "", date: new Date().toISOString().slice(0, 10),
-    conditionnement: "UNITE" as TypeConditionnement,
+    conditionnement_stock: "UNITE" as TypeConditionnement,
+    conditionnement_gratuites: "UNITE" as TypeConditionnement,
     stock_boissons: "", nombre_boissons_gratuites: "",
   });
   const [savingDonneesSite, setSavingDonneesSite] = useState(false);
@@ -497,7 +498,8 @@ export default function CampaignDetailPage() {
       const res = await api.post<DonneesSiteJour>("/donnees-site-jour/", {
         site: donneesSiteForm.site,
         date: donneesSiteForm.date,
-        conditionnement: donneesSiteForm.conditionnement,
+        conditionnement_stock: donneesSiteForm.conditionnement_stock,
+        conditionnement_gratuites: donneesSiteForm.conditionnement_gratuites,
         stock_boissons: donneesSiteForm.stock_boissons === "" ? null : Number(donneesSiteForm.stock_boissons),
         nombre_boissons_gratuites: donneesSiteForm.nombre_boissons_gratuites === "" ? null : Number(donneesSiteForm.nombre_boissons_gratuites),
       });
@@ -1738,24 +1740,36 @@ export default function CampaignDetailPage() {
                     <Input type="date" className="h-8 text-xs mt-0.5" value={donneesSiteForm.date} onChange={e => setDonneesSiteForm(f => ({ ...f, date: e.target.value }))} />
                   </div>
                 </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Conditionnement</Label>
-                  <Select value={donneesSiteForm.conditionnement} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
-                    <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="UNITE">À l&apos;unité</SelectItem>
-                      <SelectItem value="PACK">En pack</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
                     <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.stock_boissons} onChange={e => setDonneesSiteForm(f => ({ ...f, stock_boissons: e.target.value }))} />
                   </div>
                   <div>
+                    <Label className="text-xs text-muted-foreground">Conditionnement (stock)</Label>
+                    <Select value={donneesSiteForm.conditionnement_stock} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement_stock: v as TypeConditionnement }))}>
+                      <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                        <SelectItem value="PACK">En pack</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
                     <Label className="text-xs text-muted-foreground">Gratuites offertes</Label>
                     <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.nombre_boissons_gratuites} onChange={e => setDonneesSiteForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Conditionnement (gratuites)</Label>
+                    <Select value={donneesSiteForm.conditionnement_gratuites} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement_gratuites: v as TypeConditionnement }))}>
+                      <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                        <SelectItem value="PACK">En pack</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitDonneesSiteJour} disabled={savingDonneesSite}>
@@ -1772,9 +1786,8 @@ export default function CampaignDetailPage() {
                         <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
                       </div>
                       <div className="flex items-center gap-3 shrink-0 text-right">
-                        <span className="text-muted-foreground">{d.conditionnement_display}</span>
-                        <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
-                        <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
+                        <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"} <span className="text-muted-foreground font-normal">({d.conditionnement_stock_display})</span></span>
+                        <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"} <span className="text-muted-foreground font-normal">({d.conditionnement_gratuites_display})</span></span>
                       </div>
                     </div>
                   ))}
@@ -2825,24 +2838,36 @@ export default function CampaignDetailPage() {
                 <Input type="date" className="h-8 text-xs mt-0.5" value={donneesSiteForm.date} onChange={e => setDonneesSiteForm(f => ({ ...f, date: e.target.value }))} />
               </div>
             </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Conditionnement</Label>
-              <Select value={donneesSiteForm.conditionnement} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement: v as TypeConditionnement }))}>
-                <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="UNITE">À l&apos;unité</SelectItem>
-                  <SelectItem value="PACK">En pack</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs text-muted-foreground">Stock de boissons</Label>
                 <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.stock_boissons} onChange={e => setDonneesSiteForm(f => ({ ...f, stock_boissons: e.target.value }))} />
               </div>
               <div>
+                <Label className="text-xs text-muted-foreground">Conditionnement (stock)</Label>
+                <Select value={donneesSiteForm.conditionnement_stock} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement_stock: v as TypeConditionnement }))}>
+                  <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                    <SelectItem value="PACK">En pack</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
                 <Label className="text-xs text-muted-foreground">Gratuites offertes</Label>
                 <Input type="number" min={0} className="h-8 text-xs mt-0.5" value={donneesSiteForm.nombre_boissons_gratuites} onChange={e => setDonneesSiteForm(f => ({ ...f, nombre_boissons_gratuites: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Conditionnement (gratuites)</Label>
+                <Select value={donneesSiteForm.conditionnement_gratuites} onValueChange={v => setDonneesSiteForm(f => ({ ...f, conditionnement_gratuites: v as TypeConditionnement }))}>
+                  <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UNITE">À l&apos;unité</SelectItem>
+                    <SelectItem value="PACK">En pack</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={handleSubmitDonneesSiteJour} disabled={savingDonneesSite}>
@@ -2859,9 +2884,8 @@ export default function CampaignDetailPage() {
                     <p className="text-muted-foreground">{new Date(d.date + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-muted-foreground">{d.conditionnement_display}</span>
-                    <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"}</span>
-                    <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"}</span>
+                    <span className="text-sky-600 font-semibold">Stock {d.stock_boissons ?? "—"} <span className="text-muted-foreground font-normal">({d.conditionnement_stock_display})</span></span>
+                    <span className="text-amber-600 font-semibold">Gratuites {d.nombre_boissons_gratuites ?? "—"} <span className="text-muted-foreground font-normal">({d.conditionnement_gratuites_display})</span></span>
                   </div>
                 </div>
               ))}
