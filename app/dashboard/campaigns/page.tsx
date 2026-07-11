@@ -112,7 +112,7 @@ const makeSite = (): SiteEntry => ({
   nom: "", ville: "Libreville", emplacement_precis: "", superviseurs_ids: [], hotesses_ids: [],
 });
 const EMPTY_REGLE: ReglePromo = { quantite_requise: "", recompense_description: "", type_promotion: "OFFERT" };
-const makeEmptyForm = () => ({ nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, note_gout_active: false, note_gout_max: 5 as 5 | 10, note_ambiance_active: false, note_ambiance_max: 5 as 5 | 10, objectif_degustations: "", objectif_ventes: "", regles_promotions: [] as ReglePromo[], sites: [makeSite()] as SiteEntry[] });
+const makeEmptyForm = () => ({ nom: "", description: "", entreprise: "", date_debut: "", date_fin: "", type_campagne: "DEGUSTATION_VENTE" as TypeCampagne, type_recompense: "AUCUNE" as TypeRecompense, note_gout_active: false, note_gout_max: 5 as 5 | 10, note_ambiance_active: false, note_ambiance_max: 5 as 5 | 10, objectif_degustations: "", objectif_ventes: "", objectif_gratuites: "", objectif_goodies: "", regles_promotions: [] as ReglePromo[], sites: [makeSite()] as SiteEntry[] });
 
 export default function CampaignsPage() {
   const { user } = useAuth();
@@ -176,6 +176,8 @@ export default function CampaignsPage() {
         note_ambiance_max: form.note_ambiance_active ? form.note_ambiance_max : undefined,
         objectif_degustations: (form.type_campagne !== "VENTE" && form.objectif_degustations) ? parseInt(form.objectif_degustations) : null,
         objectif_ventes: (form.type_campagne !== "DEGUSTATION" && form.objectif_ventes) ? parseInt(form.objectif_ventes) : null,
+        objectif_gratuites: form.objectif_gratuites ? parseInt(form.objectif_gratuites) : null,
+        objectif_goodies: (form.type_recompense === "GOODIES" && form.objectif_goodies) ? parseInt(form.objectif_goodies) : null,
       };
       const { data: created } = await api.post<CampagneList>("/campagnes/", payload);
 
@@ -548,6 +550,23 @@ export default function CampaignsPage() {
               <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_ventes} onChange={e => setForm(f => ({ ...f, objectif_ventes: e.target.value }))} placeholder="Ex: 100" />
             </div>
           )}
+
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objectifs période (gratuités & goodies)</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Boissons gratuites (quantité)</Label>
+                <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_gratuites} onChange={e => setForm(f => ({ ...f, objectif_gratuites: e.target.value }))} placeholder="Ex: 200" />
+              </div>
+              {form.type_recompense === "GOODIES" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Goodies (quantité)</Label>
+                  <input type="number" min="0" className="flex h-9 w-full rounded-xl border border-input bg-white px-3 py-1 text-sm shadow-sm" value={form.objectif_goodies} onChange={e => setForm(f => ({ ...f, objectif_goodies: e.target.value }))} placeholder="Ex: 50" />
+                </div>
+              )}
+            </div>
+          </div>
+
 
           {/* ── Notes configurable (goût + ambiance) ── */}
           <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 space-y-3">

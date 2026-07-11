@@ -262,8 +262,10 @@ export default function CompanyCampaignDetailPage() {
       sum + (site.goodies ?? []).reduce((s, g) => s + g.quantite_initiale, 0), 0) ?? 0;
     const gainsPromotions = (rapport?.totaux as { gains_promotions?: number })?.gains_promotions ?? 0;
     const totalPacks = ventes.filter(v => v.conditionnement === "PACK").length;
-    return { totalTastings, totalVentes, totalRevenue, conversionRate, avgRating, goodiesDistribues, totalGoodiesAlloues, gainsPromotions, totalPacks };
-  }, [tastings, ventes, rapport]);
+    const totalGratuites = donneesSiteJour.reduce((s, d) => s + (d.nombre_boissons_gratuites ?? 0), 0);
+    const totalGoodiesGagnes = gainsGoodies.length;
+    return { totalTastings, totalVentes, totalRevenue, conversionRate, avgRating, goodiesDistribues, totalGoodiesAlloues, gainsPromotions, totalPacks, totalGratuites, totalGoodiesGagnes };
+  }, [tastings, ventes, rapport, donneesSiteJour, gainsGoodies]);
 
   const dateInfo = useMemo(() => {
     if (!campaign) return { joursEcoules: 0, joursRestants: 0, dureeJours: 0, nbEquipe: 0 };
@@ -489,6 +491,8 @@ export default function CompanyCampaignDetailPage() {
     end_date: campaign.date_fin,
     sales_objective: campaign.objectif_ventes ?? 0,
     tasting_objective: campaign.objectif_degustations ?? 0,
+    objectif_gratuites: campaign.objectif_gratuites,
+    objectif_goodies: campaign.objectif_goodies,
     status: "active" as const,
     created_at: "",
     updated_at: "",
@@ -845,6 +849,26 @@ export default function CompanyCampaignDetailPage() {
               label="Goodies distribués"
               current={stats.goodiesDistribues}
               total={stats.totalGoodiesAlloues}
+              color={COLORS.success}
+              gradient="from-emerald-500 to-teal-400"
+              icon={Gift}
+            />
+          )}
+          {!!campaign.objectif_gratuites && (
+            <GaugeBar
+              label="Boissons gratuites"
+              current={stats.totalGratuites}
+              total={campaign.objectif_gratuites}
+              color={COLORS.secondary}
+              gradient="from-amber-500 to-yellow-400"
+              icon={Package}
+            />
+          )}
+          {showGoodies && !!campaign.objectif_goodies && (
+            <GaugeBar
+              label="Objectif goodies"
+              current={stats.totalGoodiesGagnes}
+              total={campaign.objectif_goodies}
               color={COLORS.success}
               gradient="from-emerald-500 to-teal-400"
               icon={Gift}
