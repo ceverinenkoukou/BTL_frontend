@@ -636,8 +636,13 @@ function formatPromoLabel(g: GainPromotion): string {
   return desc;
 }
 
-/** Synthèse par site : pour chaque offre promo réellement appliquée (GainPromotion), combien de fois et combien de boissons offertes. */
-function buildOffresParSite(gainsPromotions: GainPromotion[]) {
+/**
+ * Synthèse par site : pour chaque offre promo réellement appliquée (GainPromotion),
+ * combien de fois et combien de boissons offertes. Sites classés du plus grand
+ * nombre de ventes normales au plus petit (siteStats), lignes d'un même site
+ * triées par quantité offerte décroissante.
+ */
+function buildOffresParSite(gainsPromotions: GainPromotion[], siteStats: SiteStat[]) {
   const map = new Map<string, { site: string; offre: string; fois: number; qtyOfferte: number }>();
   gainsPromotions.forEach(g => {
     const offre = formatPromoLabel(g);
@@ -647,8 +652,11 @@ function buildOffresParSite(gainsPromotions: GainPromotion[]) {
     e.fois += 1;
     e.qtyOfferte += g.quantite_offerte;
   });
+  const ventesBySite = new Map(siteStats.map(s => [s.name, s.ventesNormales]));
   return [...map.values()].sort((a, b) =>
-    a.site === b.site ? b.qtyOfferte - a.qtyOfferte : a.site.localeCompare(b.site)
+    a.site === b.site
+      ? b.qtyOfferte - a.qtyOfferte
+      : (ventesBySite.get(b.site) ?? 0) - (ventesBySite.get(a.site) ?? 0)
   );
 }
 
@@ -1394,7 +1402,7 @@ function generatePDF({
   // niveau site).
   if (cfg.show_section_offres_promo) {
     sectionTitle("Synthèse par site");
-    const offresParSite = buildOffresParSite(gainsPromotions);
+    const offresParSite = buildOffresParSite(gainsPromotions, siteStats);
     if (offresParSite.length > 0) {
       table(
         ["Site", "Offre promo appliquée", "Nb fois appliquée", "Boissons offertes"],
