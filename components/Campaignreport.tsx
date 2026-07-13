@@ -1607,8 +1607,16 @@ function generatePDF({
   // "Reporté" = restant du jour d'activité précédent (les goodies non distribués
   // restent physiquement sur site et alimentent le stock disponible du jour suivant),
   // qu'il ait été reporté automatiquement (est_report) ou réapprovisionné manuellement.
-  if (cfg.show_section_ugs_livraisons && livraisons.length > 0) {
-    sectionTitle("UGs (goodies) — reçus / reportés / gagnés / restants par jour d'activité");
+  // Le récapitulatif reçu/gagné/restant par (site, goodie) est calculé
+  // indépendamment de l'affichage du détail jour par jour ci-dessous — il
+  // est aussi utilisé par la table "Goodies distribués par site" plus loin,
+  // qui a son propre interrupteur de config (cfg.show_col_goodies) et ne
+  // doit pas dépendre de cfg.show_section_ugs_livraisons.
+  if (livraisons.length > 0) {
+    const showDetailJournalier = cfg.show_section_ugs_livraisons;
+    if (showDetailJournalier) {
+      sectionTitle("UGs (goodies) — reçus / reportés / gagnés / restants par jour d'activité");
+    }
 
     const parSiteGoodie = new Map<string, { siteName: string; goodieNom: string; jours: LivraisonGoodiesJour[] }>();
     livraisons.forEach(l => {
@@ -1621,13 +1629,6 @@ function generatePDF({
 
     [...parSiteGoodie.values()].forEach(({ siteName, goodieNom, jours }) => {
       const sorted = [...jours].sort((a, b) => a.date.localeCompare(b.date));
-
-      guard(12);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.setTextColor(...P.dark);
-      doc.text(`${siteName} — ${goodieNom}`, M, Y);
-      Y += 5;
 
       let totalRecusFrais = 0, totalGagne = 0, totalReporteCumule = 0;
       const body = sorted.map((l, i) => {
@@ -1656,7 +1657,15 @@ function generatePDF({
 
       goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: totalRecusFrais, gagne: totalGagne, restant: restantFinal });
 
-      table(["Goodie", "Date", "Reçus (frais)", "Reporté (veille)", "Gagné", "Restant"], body);
+      if (showDetailJournalier) {
+        guard(12);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...P.dark);
+        doc.text(`${siteName} — ${goodieNom}`, M, Y);
+        Y += 5;
+        table(["Goodie", "Date", "Reçus (frais)", "Reporté (veille)", "Gagné", "Restant"], body);
+      }
     });
   }
 
