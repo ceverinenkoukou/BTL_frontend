@@ -1791,7 +1791,15 @@ function generatePDF({
         if (goodiesDetail.length > 0) {
           table(
             ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
-            goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
+            [
+              ...goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)]),
+              [
+                "TOTAL", "—",
+                fmt(goodiesDetail.reduce((a, g) => a + g.recu, 0)),
+                fmt(goodiesDetail.reduce((a, g) => a + g.gagne, 0)),
+                fmt(goodiesDetail.reduce((a, g) => a + g.restant, 0)),
+              ],
+            ]
           );
         }
       }
@@ -1844,7 +1852,15 @@ function generatePDF({
         if (goodiesDetailEnt.length > 0) {
           table(
             ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
-            goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
+            [
+              ...goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)]),
+              [
+                "TOTAL", "—",
+                fmt(goodiesDetailEnt.reduce((a, g) => a + g.recu, 0)),
+                fmt(goodiesDetailEnt.reduce((a, g) => a + g.gagne, 0)),
+                fmt(goodiesDetailEnt.reduce((a, g) => a + g.restant, 0)),
+              ],
+            ]
           );
         }
       }
