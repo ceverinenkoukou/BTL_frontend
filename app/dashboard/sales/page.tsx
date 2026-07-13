@@ -578,9 +578,10 @@ function SalesPageContent() {
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const firstSale = companySales[0];
-    const logoUrl = firstSale?.entreprise_logo || "";
-    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46";
-    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
+    const brandCampaign = campaigns.find(c => c.entreprise_nom === entrepriseNom);
+    const logoUrl = brandCampaign?.logo_url || "";
+    const colorPrimary = brandCampaign?.couleur_primaire || firstSale?.entreprise_couleur_primaire || "#065f46";
+    const colorSecondary = brandCampaign?.couleur_secondaire || firstSale?.entreprise_couleur_secondaire || "#0d9488";
 
     const goodiesSiteMap = new Map<string, Map<string, number>>();
     const goodiesTotalsBySite = new Map<string, number>();
@@ -688,9 +689,10 @@ function SalesPageContent() {
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const firstSale = campaignSales[0];
-    const logoUrl = firstSale?.entreprise_logo || "";
-    const colorPrimary = firstSale?.entreprise_couleur_primaire || "#065f46";
-    const colorSecondary = firstSale?.entreprise_couleur_secondaire || "#0d9488";
+    const brandCampaign = campaigns.find(c => c.entreprise_nom === entrepriseNom && c.nom === campagneNom);
+    const logoUrl = brandCampaign?.logo_url || "";
+    const colorPrimary = brandCampaign?.couleur_primaire || firstSale?.entreprise_couleur_primaire || "#065f46";
+    const colorSecondary = brandCampaign?.couleur_secondaire || firstSale?.entreprise_couleur_secondaire || "#0d9488";
 
     const goodiesSiteMap = new Map<string, Map<string, number>>();
     const goodiesTotalsBySite = new Map<string, number>();
