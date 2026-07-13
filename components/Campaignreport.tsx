@@ -662,25 +662,15 @@ function buildOffresParSite(gainsPromotions: GainPromotion[], siteStats: SiteSta
 }
 
 /**
- * Détail des goodies par site et par nom de goodie, sur toute la période de
- * la campagne : quantité reçue sur site (LivraisonGoodiesJour.quantite_apportee,
- * les stocks physiquement apportés) et quantité gagnée par les clients
- * (GainGoodie), côte à côte sur la même ligne. Sites classés du plus grand
- * total reçu au plus petit, lignes d'un même site triées par quantité reçue décroissante.
+ * Trie le récapitulatif goodies par site (recu/gagné/restant, déjà calculé
+ * dans la section UGs à partir des livraisons — net des reports) du plus
+ * grand total reçu au plus petit, lignes d'un même site triées par quantité
+ * reçue décroissante.
  */
-function buildGoodiesDetailParSite(gainsGoodies: GainGoodie[], livraisons: LivraisonGoodiesJour[]) {
-  const map = new Map<string, { site: string; goodie: string; recu: number; gagne: number }>();
-  const entry = (site: string, goodie: string) => {
-    const key = `${site}__${goodie}`;
-    if (!map.has(key)) map.set(key, { site, goodie, recu: 0, gagne: 0 });
-    return map.get(key)!;
-  };
-  livraisons.forEach(l => { entry(l.site_nom, l.goodie_nom).recu += l.quantite_apportee; });
-  gainsGoodies.forEach(g => { entry(g.site_nom, g.goodie_nom).gagne += 1; });
-
+function sortGoodiesRecapDetail(rows: { site: string; goodie: string; recu: number; gagne: number; restant: number }[]) {
   const recuBySite = new Map<string, number>();
-  map.forEach(e => recuBySite.set(e.site, (recuBySite.get(e.site) ?? 0) + e.recu));
-  return [...map.values()].sort((a, b) =>
+  rows.forEach(e => recuBySite.set(e.site, (recuBySite.get(e.site) ?? 0) + e.recu));
+  return [...rows].sort((a, b) =>
     a.site === b.site
       ? b.recu - a.recu
       : (recuBySite.get(b.site) ?? 0) - (recuBySite.get(a.site) ?? 0)
@@ -1531,7 +1521,12 @@ function generatePDF({
       const hasStock = sorted.some(d => (d.stock_boissons ?? 0) > 1);
 
       let totalVendues = 0, totalOffertesCumule = 0, totalRecuFraisCumule = 0, totalReporteCumule = 0;
-      let siteRecuCanettes = 0, siteOffertCanettes = 0;
+      // Solde de canettes gratuites réellement disponibles sur le site, au fil
+      // des jours : ce qui est offert au client ne peut jamais dépasser ce qui
+      // a été reçu (± reporté), même si la saisie terrain enregistre parfois
+      // plus d'offert que de reçu ce jour précis — l'excédent est alors prélevé
+      // sur le solde des jours précédents, jamais créé du néant.
+      let siteRecuCanettes = 0, siteOffertCanettes = 0, soldeCanettes = 0;
       let prevRestant: number | null = null;
       const body = sorted.map((d, i) => {
         const dateSales = sales.filter(s => hIds.includes(s.hostess_id) && s.created_at?.slice(0, 10) === d.date);
@@ -1551,8 +1546,15 @@ function generatePDF({
         if (reporte) totalReporteCumule += reporte;
         prevRestant = restant;
 
-        if (recuFrais != null) siteRecuCanettes += toCanettes(recuFrais, d.conditionnement_gratuites);
-        siteOffertCanettes += offertesSales.reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
+        if (recuFrais != null) {
+          const recuFraisCanettes = toCanettes(recuFrais, d.conditionnement_gratuites);
+          siteRecuCanettes += recuFraisCanettes;
+          soldeCanettes += recuFraisCanettes;
+        }
+        const offertesBrutCanettes = offertesSales.reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
+        const offertesReellesCanettes = Math.min(offertesBrutCanettes, soldeCanettes);
+        siteOffertCanettes += offertesReellesCanettes;
+        soldeCanettes -= offertesReellesCanettes;
 
         return [
           fmtDate(d.date),
@@ -1585,7 +1587,7 @@ function generatePDF({
       const totalOffert = canettesParSite.reduce((a, s) => a + s.offert, 0);
       sectionTitle("Total boissons reçues / offertes (en canettes, 1 pack = 24 canettes)");
       table(
-        ["Site", "Total reçu (canettes)", "Total offert au client (canettes)"],
+        ["Site", "Reçu — stock gratuit (canettes)", "Offert — gagné via offres promo (canettes)"],
         [
           ...canettesParSite.map(s => [s.site, fmt(s.recu), fmt(s.offert)]),
           ["TOTAL", fmt(totalRecu), fmt(totalOffert)],
@@ -1593,6 +1595,12 @@ function generatePDF({
       );
     }
   }
+
+  // Capturé pendant la section UGs ci-dessous (seule source qui calcule un
+  // reçu net des reports, cohérent jour après jour) — réutilisé plus loin
+  // pour la table "Goodies distribués par site", au lieu de recalculer un
+  // reçu/gagné séparément à partir des mêmes données brutes.
+  const goodiesRecapDetail: { site: string; goodie: string; recu: number; gagne: number; restant: number }[] = [];
 
   // ── UGs (goodies) : détail par jour d'activité, par site ─
   // Chaque ligne LivraisonGoodiesJour = un jour d'activité réel pour (site, goodie).
@@ -1610,9 +1618,6 @@ function generatePDF({
       }
       parSiteGoodie.get(key)!.jours.push(l);
     });
-
-    // Total par goodie (tous sites confondus), pour le récapitulatif final.
-    const totalParGoodie = new Map<string, { gagne: number; restant: number }>();
 
     [...parSiteGoodie.values()].forEach(({ siteName, goodieNom, jours }) => {
       const sorted = [...jours].sort((a, b) => a.date.localeCompare(b.date));
@@ -1649,23 +1654,10 @@ function generatePDF({
         fmt(restantFinal),
       ]);
 
-      const prevTotal = totalParGoodie.get(goodieNom) ?? { gagne: 0, restant: 0 };
-      totalParGoodie.set(goodieNom, { gagne: prevTotal.gagne + totalGagne, restant: prevTotal.restant + restantFinal });
+      goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: totalRecusFrais, gagne: totalGagne, restant: restantFinal });
 
       table(["Goodie", "Date", "Reçus (frais)", "Reporté (veille)", "Gagné", "Restant"], body);
     });
-
-    // Récapitulatif explicite : combien de goodies au total ont été gagnés
-    // par les clients (tous sites confondus, par nom de goodie), et s'il
-    // reste du stock non distribué.
-    if (totalParGoodie.size > 0) {
-      guard(20);
-      sectionTitle("Total des goodies gagnés par les clients");
-      table(
-        ["Goodie", "Total gagné (tous sites)", "Restant (tous sites)"],
-        [...totalParGoodie.entries()].map(([nom, v]) => [nom, fmt(v.gagne), fmt(v.restant)])
-      );
-    }
   }
 
   // ── SECTIONS SELON RÔLE ────────────────────────────────
@@ -1776,11 +1768,11 @@ function generatePDF({
           ];
         })
       );
-      const goodiesDetail = buildGoodiesDetailParSite(gainsGoodies, livraisons);
+      const goodiesDetail = sortGoodiesRecapDetail(goodiesRecapDetail);
       if (cfg.show_col_goodies && goodiesDetail.length > 0) {
         table(
-          ["Site", "Goodie", "Reçu sur site (campagne)", "Gagné par les clients (campagne)"],
-          goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne)])
+          ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
+          goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
         );
       }
     }
@@ -1825,11 +1817,11 @@ function generatePDF({
           ];
         })
       );
-      const goodiesDetailEnt = buildGoodiesDetailParSite(gainsGoodies, livraisons);
+      const goodiesDetailEnt = sortGoodiesRecapDetail(goodiesRecapDetail);
       if (cfg.show_col_goodies && goodiesDetailEnt.length > 0) {
         table(
-          ["Site", "Goodie", "Reçu sur site (campagne)", "Gagné par les clients (campagne)"],
-          goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne)])
+          ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
+          goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
         );
       }
     }
