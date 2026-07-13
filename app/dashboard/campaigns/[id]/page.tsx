@@ -1155,6 +1155,7 @@ export default function CampaignDetailPage() {
     est_achat_promo: v.est_achat_promo,
     nom_client: v.nom_client,
     produit_nom: v.produit_nom,
+    conditionnement: v.conditionnement,
     conditionnement_display: v.conditionnement_display,
   })) : [], [ventes, campaign]);
 
