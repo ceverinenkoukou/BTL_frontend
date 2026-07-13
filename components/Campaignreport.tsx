@@ -84,6 +84,7 @@ type ReportSale = Sale & {
   note_ambiance?: number | null;
   nom_client?: string | null;
   produit_nom?: string;
+  conditionnement?: string;
   conditionnement_display?: string;
 };
 type HostessStat = {
@@ -657,6 +658,32 @@ function buildOffresParSite(gainsPromotions: GainPromotion[], siteStats: SiteSta
     a.site === b.site
       ? b.qtyOfferte - a.qtyOfferte
       : (ventesBySite.get(b.site) ?? 0) - (ventesBySite.get(a.site) ?? 0)
+  );
+}
+
+/**
+ * Détail des goodies par site et par nom de goodie, sur toute la période de
+ * la campagne : quantité reçue sur site (LivraisonGoodiesJour.quantite_apportee,
+ * les stocks physiquement apportés) et quantité gagnée par les clients
+ * (GainGoodie), côte à côte sur la même ligne. Sites classés du plus grand
+ * total reçu au plus petit, lignes d'un même site triées par quantité reçue décroissante.
+ */
+function buildGoodiesDetailParSite(gainsGoodies: GainGoodie[], livraisons: LivraisonGoodiesJour[]) {
+  const map = new Map<string, { site: string; goodie: string; recu: number; gagne: number }>();
+  const entry = (site: string, goodie: string) => {
+    const key = `${site}__${goodie}`;
+    if (!map.has(key)) map.set(key, { site, goodie, recu: 0, gagne: 0 });
+    return map.get(key)!;
+  };
+  livraisons.forEach(l => { entry(l.site_nom, l.goodie_nom).recu += l.quantite_apportee; });
+  gainsGoodies.forEach(g => { entry(g.site_nom, g.goodie_nom).gagne += 1; });
+
+  const recuBySite = new Map<string, number>();
+  map.forEach(e => recuBySite.set(e.site, (recuBySite.get(e.site) ?? 0) + e.recu));
+  return [...map.values()].sort((a, b) =>
+    a.site === b.site
+      ? b.recu - a.recu
+      : (recuBySite.get(b.site) ?? 0) - (recuBySite.get(a.site) ?? 0)
   );
 }
 
@@ -1471,6 +1498,13 @@ function generatePDF({
       parSite.get(d.site)!.push(d);
     });
 
+    // 1 pack = 24 canettes — convertit une quantité selon son conditionnement
+    // pour obtenir un total homogène en nombre réel de canettes.
+    const CANETTES_PAR_PACK = 24;
+    const toCanettes = (qty: number, conditionnement: string | null | undefined) =>
+      conditionnement === "PACK" ? qty * CANETTES_PAR_PACK : qty;
+    const canettesParSite: { site: string; recu: number; offert: number }[] = [];
+
     [...parSite.entries()].forEach(([siteId, entries]) => {
       const site = siteStats.find(s => s.id === siteId);
       const siteName = site?.name ?? entries[0]?.site_nom ?? "—";
@@ -1497,15 +1531,15 @@ function generatePDF({
       const hasStock = sorted.some(d => (d.stock_boissons ?? 0) > 1);
 
       let totalVendues = 0, totalOffertesCumule = 0, totalRecuFraisCumule = 0, totalReporteCumule = 0;
+      let siteRecuCanettes = 0, siteOffertCanettes = 0;
       let prevRestant: number | null = null;
       const body = sorted.map((d, i) => {
         const dateSales = sales.filter(s => hIds.includes(s.hostess_id) && s.created_at?.slice(0, 10) === d.date);
         const vendues = dateSales
           .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL")
           .reduce((a, s) => a + (s.quantity ?? 0), 0);
-        const offertes = dateSales
-          .filter(s => s.type_vente === "PROMOTION")
-          .reduce((a, s) => a + (s.quantity ?? 0), 0);
+        const offertesSales = dateSales.filter(s => s.type_vente === "PROMOTION");
+        const offertes = offertesSales.reduce((a, s) => a + (s.quantity ?? 0), 0);
         const recu = d.nombre_boissons_gratuites;
         const reporte = i > 0 ? prevRestant : null;
         const recuFrais = recu != null ? Math.max(0, recu - (reporte ?? 0)) : null;
@@ -1516,6 +1550,9 @@ function generatePDF({
         if (recuFrais != null) totalRecuFraisCumule += recuFrais;
         if (reporte) totalReporteCumule += reporte;
         prevRestant = restant;
+
+        if (recuFrais != null) siteRecuCanettes += toCanettes(recuFrais, d.conditionnement_gratuites);
+        siteOffertCanettes += offertesSales.reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
 
         return [
           fmtDate(d.date),
@@ -1539,7 +1576,22 @@ function generatePDF({
         ["Date", ...(hasStock ? ["Stock"] : []), "Conditionnement", "Boissons vendues", "Boissons offertes", "Reçu (frais)", "Reporté", "Restant"],
         body
       );
+
+      canettesParSite.push({ site: siteName, recu: siteRecuCanettes, offert: siteOffertCanettes });
     });
+
+    if (canettesParSite.length > 0) {
+      const totalRecu = canettesParSite.reduce((a, s) => a + s.recu, 0);
+      const totalOffert = canettesParSite.reduce((a, s) => a + s.offert, 0);
+      sectionTitle("Total boissons reçues / offertes (en canettes, 1 pack = 24 canettes)");
+      table(
+        ["Site", "Total reçu (canettes)", "Total offert au client (canettes)"],
+        [
+          ...canettesParSite.map(s => [s.site, fmt(s.recu), fmt(s.offert)]),
+          ["TOTAL", fmt(totalRecu), fmt(totalOffert)],
+        ]
+      );
+    }
   }
 
   // ── UGs (goodies) : détail par jour d'activité, par site ─
@@ -1724,6 +1776,13 @@ function generatePDF({
           ];
         })
       );
+      const goodiesDetail = buildGoodiesDetailParSite(gainsGoodies, livraisons);
+      if (cfg.show_col_goodies && goodiesDetail.length > 0) {
+        table(
+          ["Site", "Goodie", "Reçu sur site (campagne)", "Gagné par les clients (campagne)"],
+          goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne)])
+        );
+      }
     }
 
   } else {
@@ -1766,6 +1825,13 @@ function generatePDF({
           ];
         })
       );
+      const goodiesDetailEnt = buildGoodiesDetailParSite(gainsGoodies, livraisons);
+      if (cfg.show_col_goodies && goodiesDetailEnt.length > 0) {
+        table(
+          ["Site", "Goodie", "Reçu sur site (campagne)", "Gagné par les clients (campagne)"],
+          goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne)])
+        );
+      }
     }
   }
 
