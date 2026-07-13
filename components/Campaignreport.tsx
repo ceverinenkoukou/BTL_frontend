@@ -1479,8 +1479,11 @@ function generatePDF({
   // Le suivi des boissons GRATUITES (reçu/reporté/restant) suit exactement
   // la même logique que les UGs goodies : "Reporté" = restant du jour
   // d'activité précédent pour ce site.
-  if (cfg.show_section_stock_boissons && donneesSiteJour.length > 0) {
-    sectionTitle("Boissons vendues / gratuites par jour d'activité, par site");
+  if (donneesSiteJour.length > 0) {
+    const showDetailBoissons = cfg.show_section_stock_boissons;
+    if (showDetailBoissons) {
+      sectionTitle("Boissons vendues / gratuites par jour d'activité, par site");
+    }
 
     const parSite = new Map<string, DonneesSiteJour[]>();
     donneesSiteJour.forEach(d => {
@@ -1501,12 +1504,14 @@ function generatePDF({
       const hIds = site?.hostesses.map(h => h.id) ?? [];
       const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
 
-      guard(12);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.setTextColor(...P.dark);
-      doc.text(siteName, M, Y);
-      Y += 5;
+      if (showDetailBoissons) {
+        guard(12);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...P.dark);
+        doc.text(siteName, M, Y);
+        Y += 5;
+      }
 
       // "Reçu" = nombre_boissons_gratuites (champ manuel réellement utilisé
       // sur le terrain pour indiquer le stock de boissons gratuites apporté
@@ -1565,24 +1570,26 @@ function generatePDF({
           restant != null ? fmt(restant) : "—",
         ];
       });
-      body.push([
-        "TOTAL",
-        ...(hasStock ? ["—"] : []),
-        "—", fmt(totalVendues), fmt(totalOffertesCumule),
-        totalRecuFraisCumule > 0 ? fmt(totalRecuFraisCumule) : "—",
-        totalReporteCumule > 0 ? fmt(totalReporteCumule) : "—",
-        prevRestant != null ? fmt(prevRestant) : "—",
-      ]);
+      if (showDetailBoissons) {
+        body.push([
+          "TOTAL",
+          ...(hasStock ? ["—"] : []),
+          "—", fmt(totalVendues), fmt(totalOffertesCumule),
+          totalRecuFraisCumule > 0 ? fmt(totalRecuFraisCumule) : "—",
+          totalReporteCumule > 0 ? fmt(totalReporteCumule) : "—",
+          prevRestant != null ? fmt(prevRestant) : "—",
+        ]);
 
-      table(
-        ["Date", ...(hasStock ? ["Stock"] : []), "Conditionnement", "Boissons vendues", "Boissons offertes", "Reçu (frais)", "Reporté", "Restant"],
-        body
-      );
+        table(
+          ["Date", ...(hasStock ? ["Stock"] : []), "Conditionnement", "Boissons vendues", "Boissons offertes", "Reçu (frais)", "Reporté", "Restant"],
+          body
+        );
+      }
 
       canettesParSite.push({ site: siteName, recu: siteRecuCanettes, offert: siteOffertCanettes });
     });
 
-    if (canettesParSite.length > 0) {
+    if (cfg.show_section_boissons_total && canettesParSite.length > 0) {
       const totalRecu = canettesParSite.reduce((a, s) => a + s.recu, 0);
       const totalOffert = canettesParSite.reduce((a, s) => a + s.offert, 0);
       sectionTitle("Total boissons reçues / offertes (en canettes, 1 pack = 24 canettes)");
@@ -1757,32 +1764,36 @@ function generatePDF({
     }
 
     // ── Goodies par site ────────────────────────────────
-    if (cfg.show_section_goodies_par_site) {
+    if (cfg.show_section_goodies_par_site || cfg.show_section_goodies_detail) {
       sectionTitle("Goodies distribués par site");
-      const goodiesSiteHead = ["Site",
-        ...(cfg.show_col_goodies ? ["Goodies directs"] : []),
-        ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
-        "Total avantages",
-      ];
-      table(
-        goodiesSiteHead,
-        siteStats.map(s => {
-          const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
-          const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
-          return [
-            s.name,
-            ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
-            ...(cfg.show_col_promo_details ? [fmt(offrt), fmt(ticks)] : []),
-            fmt(s.goodies + offrt + ticks),
-          ];
-        })
-      );
-      const goodiesDetail = sortGoodiesRecapDetail(goodiesRecapDetail);
-      if (cfg.show_col_goodies && goodiesDetail.length > 0) {
+      if (cfg.show_section_goodies_par_site) {
+        const goodiesSiteHead = ["Site",
+          ...(cfg.show_col_goodies ? ["Goodies directs"] : []),
+          ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+          "Total avantages",
+        ];
         table(
-          ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
-          goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
+          goodiesSiteHead,
+          siteStats.map(s => {
+            const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
+            const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
+            return [
+              s.name,
+              ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
+              ...(cfg.show_col_promo_details ? [fmt(offrt), fmt(ticks)] : []),
+              fmt(s.goodies + offrt + ticks),
+            ];
+          })
         );
+      }
+      if (cfg.show_section_goodies_detail) {
+        const goodiesDetail = sortGoodiesRecapDetail(goodiesRecapDetail);
+        if (goodiesDetail.length > 0) {
+          table(
+            ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
+            goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
+          );
+        }
       }
     }
 
@@ -1806,32 +1817,36 @@ function generatePDF({
       );
     }
 
-    if (cfg.show_section_goodies_par_site) {
+    if (cfg.show_section_goodies_par_site || cfg.show_section_goodies_detail) {
       sectionTitle("Goodies distribués par site");
-      const entGoodiesHead = ["Site",
-        ...(cfg.show_col_goodies ? ["Goodies distribués"] : []),
-        ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
-        "Total avantages client",
-      ];
-      table(
-        entGoodiesHead,
-        siteStats.map(s => {
-          const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
-          const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
-          return [
-            s.name,
-            ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
-            ...(cfg.show_col_promo_details ? [fmt(offrt), fmt(ticks)] : []),
-            fmt(s.goodies + offrt + ticks),
-          ];
-        })
-      );
-      const goodiesDetailEnt = sortGoodiesRecapDetail(goodiesRecapDetail);
-      if (cfg.show_col_goodies && goodiesDetailEnt.length > 0) {
+      if (cfg.show_section_goodies_par_site) {
+        const entGoodiesHead = ["Site",
+          ...(cfg.show_col_goodies ? ["Goodies distribués"] : []),
+          ...(cfg.show_col_promo_details ? [offrLabel, tickLabel] : []),
+          "Total avantages client",
+        ];
         table(
-          ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
-          goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
+          entGoodiesHead,
+          siteStats.map(s => {
+            const offrt = isGMS ? (s.promoGains.canettesOffertes ?? 0) : isCHR ? (s.promoGains.bouteillesOffertes ?? 0) : 0;
+            const ticks = isGMS ? (s.promoGains.ticketsTombola ?? 0)   : isCHR ? (s.promoGains.tirages ?? 0) : 0;
+            return [
+              s.name,
+              ...(cfg.show_col_goodies ? [fmt(s.goodies)] : []),
+              ...(cfg.show_col_promo_details ? [fmt(offrt), fmt(ticks)] : []),
+              fmt(s.goodies + offrt + ticks),
+            ];
+          })
         );
+      }
+      if (cfg.show_section_goodies_detail) {
+        const goodiesDetailEnt = sortGoodiesRecapDetail(goodiesRecapDetail);
+        if (goodiesDetailEnt.length > 0) {
+          table(
+            ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
+            goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)])
+          );
+        }
       }
     }
   }

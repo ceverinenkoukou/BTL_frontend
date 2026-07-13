@@ -735,10 +735,12 @@ export interface RapportConfig {
   show_section_perf_hotesses: boolean;
   show_section_perf_sites: boolean;
   show_section_goodies_par_site: boolean;
+  show_section_goodies_detail: boolean;
   show_section_offres_par_hotesse: boolean;
   show_section_detail_degustations: boolean;
   show_section_horaires_sites: boolean;
   show_section_stock_boissons: boolean;
+  show_section_boissons_total: boolean;
   show_section_ugs_livraisons: boolean;
   show_section_graphiques: boolean;
   // Colonnes
@@ -782,10 +784,12 @@ export const DEFAULT_RAPPORT_CONFIG: RapportConfig = {
   show_section_perf_hotesses: true,
   show_section_perf_sites: true,
   show_section_goodies_par_site: true,
+  show_section_goodies_detail: true,
   show_section_offres_par_hotesse: true,
   show_section_detail_degustations: false,
   show_section_horaires_sites: true,
   show_section_stock_boissons: true,
+  show_section_boissons_total: true,
   show_section_ugs_livraisons: true,
   show_section_graphiques: true,
   show_col_ca: true,
