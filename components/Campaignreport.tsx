@@ -1609,6 +1609,20 @@ function generatePDF({
   // reçu/gagné séparément à partir des mêmes données brutes.
   const goodiesRecapDetail: { site: string; goodie: string; recu: number; gagne: number; restant: number }[] = [];
 
+  // Gagné par (site, goodie) = compte direct de GainGoodie, indépendant des
+  // jours où une livraison a été enregistrée — un gain client existe même si
+  // personne n'a saisi de livraison ce jour précis pour ce site/goodie.
+  // Recoupe ainsi le KPI global "Goodies distribués" (gainsGoodies.length),
+  // contrairement à une somme de gains_du_jour bornée aux jours de livraison.
+  const gagneParSiteGoodie = new Map<string, { siteName: string; goodieNom: string; count: number }>();
+  gainsGoodies.forEach(g => {
+    const key = `${g.site}__${g.goodie}`;
+    if (!gagneParSiteGoodie.has(key)) {
+      gagneParSiteGoodie.set(key, { siteName: g.site_nom, goodieNom: g.goodie_nom, count: 0 });
+    }
+    gagneParSiteGoodie.get(key)!.count += 1;
+  });
+
   // ── UGs (goodies) : détail par jour d'activité, par site ─
   // Chaque ligne LivraisonGoodiesJour = un jour d'activité réel pour (site, goodie).
   // "Reporté" = restant du jour d'activité précédent (les goodies non distribués
@@ -1634,7 +1648,7 @@ function generatePDF({
       parSiteGoodie.get(key)!.jours.push(l);
     });
 
-    [...parSiteGoodie.values()].forEach(({ siteName, goodieNom, jours }) => {
+    [...parSiteGoodie.entries()].forEach(([key, { siteName, goodieNom, jours }]) => {
       const sorted = [...jours].sort((a, b) => a.date.localeCompare(b.date));
 
       let totalRecusFrais = 0, totalGagne = 0, totalReporteCumule = 0;
@@ -1662,7 +1676,9 @@ function generatePDF({
         fmt(restantFinal),
       ]);
 
-      goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: totalRecusFrais, gagne: totalGagne, restant: restantFinal });
+      const gagneReel = gagneParSiteGoodie.get(key)?.count ?? 0;
+      goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: totalRecusFrais, gagne: gagneReel, restant: Math.max(0, totalRecusFrais - gagneReel) });
+      gagneParSiteGoodie.delete(key);
 
       if (showDetailJournalier) {
         guard(12);
@@ -1675,6 +1691,12 @@ function generatePDF({
       }
     });
   }
+
+  // (site, goodie) avec des gains mais aucune livraison enregistrée du tout —
+  // absents de la boucle ci-dessus, ajoutés ici avec un reçu de 0.
+  gagneParSiteGoodie.forEach(({ siteName, goodieNom, count }) => {
+    goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: 0, gagne: count, restant: 0 });
+  });
 
   // ── SECTIONS SELON RÔLE ────────────────────────────────
   if (isAdminOrSupervisor) {
