@@ -1256,11 +1256,18 @@ function generatePDF({
   const totalVentesNormales  = sales
     .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL")
     .reduce((a, s) => a + (s.quantity ?? 0), 0);
-  // "Produits offerts" = quantité réellement offerte (GRATUIT + PROMOTION),
-  // pas un décompte de lignes de vente (qui compterait des clients, pas des produits).
+  // 1 pack = 24 canettes — convertit une quantité selon son conditionnement
+  // pour obtenir un total homogène en nombre réel de canettes.
+  const CANETTES_PAR_PACK = 24;
+  const toCanettes = (qty: number, conditionnement: string | null | undefined) =>
+    conditionnement === "PACK" ? qty * CANETTES_PAR_PACK : qty;
+  // "Produits offerts" = canettes réellement offertes via une offre promo
+  // (PROMOTION uniquement — pas GRATUIT, offert avec un goodie, mécanique
+  // distincte), converties en canettes réelles (pack = 24) — aligné sur le
+  // tableau "Total boissons reçues / offertes" plus loin dans le rapport.
   const totalProduitsOfferts = sales
-    .filter(s => s.type_vente === "GRATUIT" || s.type_vente === "PROMOTION")
-    .reduce((a, s) => a + (s.quantity ?? 0), 0);
+    .filter(s => s.type_vente === "PROMOTION")
+    .reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
   const totalVentesHorsPromo = sales
     .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo)
     .reduce((a, s) => a + (s.quantity ?? 0), 0);
@@ -1491,12 +1498,7 @@ function generatePDF({
       parSite.get(d.site)!.push(d);
     });
 
-    // 1 pack = 24 canettes — convertit une quantité selon son conditionnement
-    // pour obtenir un total homogène en nombre réel de canettes.
-    const CANETTES_PAR_PACK = 24;
-    const toCanettes = (qty: number, conditionnement: string | null | undefined) =>
-      conditionnement === "PACK" ? qty * CANETTES_PAR_PACK : qty;
-    const canettesParSite: { site: string; recu: number; offert: number }[] = [];
+    const canettesParSite: { site: string; recu: number; offert: number; offertGratuit: number }[] = [];
 
     [...parSite.entries()].forEach(([siteId, entries]) => {
       const site = siteStats.find(s => s.id === siteId);
@@ -1531,7 +1533,7 @@ function generatePDF({
       // a été reçu (± reporté), même si la saisie terrain enregistre parfois
       // plus d'offert que de reçu ce jour précis — l'excédent est alors prélevé
       // sur le solde des jours précédents, jamais créé du néant.
-      let siteRecuCanettes = 0, siteOffertCanettes = 0, soldeCanettes = 0;
+      let siteRecuCanettes = 0, siteOffertCanettes = 0, siteOffertGratuitCanettes = 0, soldeCanettes = 0;
       let prevRestant: number | null = null;
       const body = sorted.map((d, i) => {
         const dateSales = sales.filter(s => hIds.includes(s.hostess_id) && s.created_at?.slice(0, 10) === d.date);
@@ -1540,6 +1542,11 @@ function generatePDF({
           .reduce((a, s) => a + (s.quantity ?? 0), 0);
         const offertesSales = dateSales.filter(s => s.type_vente === "PROMOTION");
         const offertes = offertesSales.reduce((a, s) => a + (s.quantity ?? 0), 0);
+        // GRATUIT ("offert avec un goodie") est une mécanique distincte de
+        // PROMOTION — pas prélevée sur le solde de stock gratuit, donc non
+        // plafonnée par soldeCanettes (contrairement à l'offert via promo).
+        const offertesGratuitSales = dateSales.filter(s => s.type_vente === "GRATUIT");
+        siteOffertGratuitCanettes += offertesGratuitSales.reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
         const recu = d.nombre_boissons_gratuites;
         const reporte = i > 0 ? prevRestant : null;
         const recuFrais = recu != null ? Math.max(0, recu - (reporte ?? 0)) : null;
@@ -1586,18 +1593,19 @@ function generatePDF({
         );
       }
 
-      canettesParSite.push({ site: siteName, recu: siteRecuCanettes, offert: siteOffertCanettes });
+      canettesParSite.push({ site: siteName, recu: siteRecuCanettes, offert: siteOffertCanettes, offertGratuit: siteOffertGratuitCanettes });
     });
 
     if (cfg.show_section_boissons_total && canettesParSite.length > 0) {
       const totalRecu = canettesParSite.reduce((a, s) => a + s.recu, 0);
       const totalOffert = canettesParSite.reduce((a, s) => a + s.offert, 0);
+      const totalOffertGratuit = canettesParSite.reduce((a, s) => a + s.offertGratuit, 0);
       sectionTitle("Total boissons reçues / offertes (en canettes, 1 pack = 24 canettes)");
       table(
-        ["Site", "Reçu — stock gratuit (canettes)", "Offert — gagné via offres promo (canettes)"],
+        ["Site", "Reçu — stock gratuit (canettes)", "Offert — gagné via offres promo (canettes)", "Offert — avec un goodie (canettes)", "Total offert aux clients (canettes)"],
         [
-          ...canettesParSite.map(s => [s.site, fmt(s.recu), fmt(s.offert)]),
-          ["TOTAL", fmt(totalRecu), fmt(totalOffert)],
+          ...canettesParSite.map(s => [s.site, fmt(s.recu), fmt(s.offert), fmt(s.offertGratuit), fmt(s.offert + s.offertGratuit)]),
+          ["TOTAL", fmt(totalRecu), fmt(totalOffert), fmt(totalOffertGratuit), fmt(totalOffert + totalOffertGratuit)],
         ]
       );
     }
