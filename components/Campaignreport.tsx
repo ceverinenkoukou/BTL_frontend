@@ -683,57 +683,23 @@ const normalizeClient = (v: string | null | undefined) => (v || "").trim() || "�
 
 /**
  * Total (toute la campagne, tous sites) des boissons offertes via une offre
- * promo (Vente PROMOTION), converties en canettes et plafonnées par le stock
- * de boissons gratuites disponible jour après jour — même logique que la
- * table "Total boissons reçues / offertes" plus loin dans le rapport, mais
- * calculée ici en amont (juste le total, sans dessin PDF) pour que le KPI
- * "Produits offerts" de la Synthèse globale corresponde exactement à cette
- * table plutôt qu'à une somme brute non plafonnée.
+ * promo (Vente PROMOTION), converties en canettes. Pas de plafonnement par
+ * le stock de boissons gratuites reçu : "offert" vient d'un enregistrement
+ * automatique et fiable à chaque vente, alors que "reçu" (stock gratuit) est
+ * saisi manuellement et peut sous-compter la réalité (ex : le premier jour
+ * de stock souvent non renseigné) — plafonner une donnée fiable par une
+ * donnée potentiellement incomplète cacherait de la vraie activité
+ * promotionnelle. Même logique que la table "Total boissons reçues /
+ * offertes" plus loin dans le rapport, pour que "Produits offerts" de la
+ * Synthèse globale corresponde exactement à cette table.
  */
-function computeOffertPromoCanettesCapped(
-  donneesSiteJour: DonneesSiteJour[], sales: ReportSale[], siteStats: SiteStat[],
+function computeOffertPromoCanettes(
+  sales: ReportSale[],
   toCanettes: (qty: number, conditionnement: string | null | undefined) => number
 ): number {
-  const parSite = new Map<string, DonneesSiteJour[]>();
-  donneesSiteJour.forEach(d => {
-    if (!parSite.has(d.site)) parSite.set(d.site, []);
-    parSite.get(d.site)!.push(d);
-  });
-
-  let total = 0;
-  parSite.forEach((entries, siteId) => {
-    const site = siteStats.find(s => s.id === siteId);
-    const hIds = site?.hostesses.map(h => h.id) ?? [];
-    const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
-
-    // "Reçu" vient uniquement de donneesSiteJour (jour par jour, net des
-    // reports). "Offert brut" est calculé séparément, sur TOUTES les ventes
-    // PROMOTION du site pour toute la campagne — sans la restreindre aux
-    // dates où un DonneesSiteJour existe, sinon une vente un jour où le
-    // stock n'a pas été saisi disparaîtrait silencieusement du total.
-    let siteRecuCanettes = 0;
-    let prevRestant: number | null = null;
-    sorted.forEach((d, i) => {
-      const offertesJour = sales.filter(s =>
-        hIds.includes(s.hostess_id) && s.type_vente === "PROMOTION" && s.created_at?.slice(0, 10) === d.date
-      ).reduce((a, s) => a + (s.quantity ?? 0), 0);
-      const recu = d.nombre_boissons_gratuites;
-      const reporte = i > 0 ? prevRestant : null;
-      const recuFrais = recu != null ? Math.max(0, recu - (reporte ?? 0)) : null;
-      const restant = recu != null ? Math.max(0, recu - offertesJour) : null;
-      prevRestant = restant;
-
-      if (recuFrais != null) siteRecuCanettes += toCanettes(recuFrais, d.conditionnement_gratuites);
-    });
-
-    const offertBrutTotal = sales
-      .filter(s => hIds.includes(s.hostess_id) && s.type_vente === "PROMOTION")
-      .reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
-
-    total += Math.min(offertBrutTotal, siteRecuCanettes);
-  });
-
-  return total;
+  return sales
+    .filter(s => s.type_vente === "PROMOTION")
+    .reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
 }
 
 type VenteRow = {
@@ -1318,12 +1284,11 @@ function generatePDF({
     conditionnement === "PACK" ? qty * CANETTES_PAR_PACK : qty;
   // "Produits offerts" = canettes réellement offertes via une offre promo
   // (PROMOTION uniquement — pas GRATUIT, offert avec un goodie, mécanique
-  // distincte), converties en canettes réelles (pack = 24) et plafonnées par
-  // le stock de boissons gratuites disponible — exactement la même valeur
-  // que "Offert — gagné via offres promo" dans la table "Total boissons
-  // reçues / offertes" plus loin dans le rapport (pas une somme brute non
-  // plafonnée, qui divergerait de cette table).
-  const totalProduitsOfferts = computeOffertPromoCanettesCapped(donneesSiteJour, sales, siteStats, toCanettes);
+  // distincte), converties en canettes réelles (pack = 24), sans
+  // plafonnement — exactement la même valeur que "Offert — gagné via offres
+  // promo" dans la table "Total boissons reçues / offertes" plus loin dans
+  // le rapport.
+  const totalProduitsOfferts = computeOffertPromoCanettes(sales, toCanettes);
   const totalVentesHorsPromo = sales
     .filter(s => (s.type_vente ?? "NORMAL") === "NORMAL" && !s.est_achat_promo)
     .reduce((a, s) => a + (s.quantity ?? 0), 0);
@@ -1588,12 +1553,10 @@ function generatePDF({
       // toute la campagne, pas jour par jour — la saisie étant souvent
       // hebdomadaire, un solde jour par jour plafonnerait à tort des ventes
       // réellement couvertes par le stock du site sur l'ensemble de la période.
-      // "Reçu" reste calculé jour par jour (dépend de donneesSiteJour), mais
       // "Offert" (promo et goodie) est sommé séparément ci-dessous sur TOUTES
       // les ventes du site, sans le restreindre aux dates où un
       // DonneesSiteJour existe — sinon une vente un jour sans saisie de
       // stock disparaîtrait silencieusement du total.
-      let siteRecuCanettes = 0;
       let prevRestant: number | null = null;
       const body = sorted.map((d, i) => {
         const dateSales = sales.filter(s => hIds.includes(s.hostess_id) && s.created_at?.slice(0, 10) === d.date);
@@ -1613,10 +1576,6 @@ function generatePDF({
         if (recuFrais != null) totalRecuFraisCumule += recuFrais;
         if (reporte) totalReporteCumule += reporte;
         prevRestant = restant;
-
-        if (recuFrais != null) {
-          siteRecuCanettes += toCanettes(recuFrais, d.conditionnement_gratuites);
-        }
 
         return [
           fmtDate(d.date),
@@ -1643,6 +1602,15 @@ function generatePDF({
         );
       }
 
+      // "Reçu" = somme des saisies réelles (est_report_gratuites = false),
+      // pas un calcul "net des reports" jour par jour — la saisie du stock
+      // gratuit étant elle aussi souvent périodique (même trou que pour les
+      // livraisons de goodies), le calcul par continuité quotidienne
+      // plafonnait à tort de vraies nouvelles réceptions à 0.
+      const siteRecuCanettes = sorted
+        .filter(d => !d.est_report_gratuites)
+        .reduce((a, d) => a + toCanettes(d.nombre_boissons_gratuites ?? 0, d.conditionnement_gratuites), 0);
+
       const offertBrutTotal = sales
         .filter(s => hIds.includes(s.hostess_id) && s.type_vente === "PROMOTION")
         .reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
@@ -1652,8 +1620,11 @@ function generatePDF({
         .filter(s => hIds.includes(s.hostess_id) && s.type_vente === "GRATUIT")
         .reduce((a, s) => a + toCanettes(s.quantity ?? 0, s.conditionnement), 0);
 
-      const siteOffertCanettes = Math.min(offertBrutTotal, siteRecuCanettes);
-      canettesParSite.push({ site: siteName, recu: siteRecuCanettes, offert: siteOffertCanettes, offertGratuit: siteOffertGratuitCanettes });
+      // Pas de plafonnement par "reçu" : voir le commentaire sur
+      // computeOffertPromoCanettes plus haut dans le fichier — reçu (saisie
+      // manuelle) peut sous-compter la réalité, offert (auto, à la vente) est
+      // la donnée fiable.
+      canettesParSite.push({ site: siteName, recu: siteRecuCanettes, offert: offertBrutTotal, offertGratuit: siteOffertGratuitCanettes });
     });
 
     if (cfg.show_section_boissons_total && canettesParSite.length > 0) {
