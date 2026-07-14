@@ -1651,8 +1651,18 @@ function generatePDF({
     [...parSiteGoodie.entries()].forEach(([key, { siteName, goodieNom, jours }]) => {
       const sorted = [...jours].sort((a, b) => a.date.localeCompare(b.date));
 
+      // Reçu "brut" = somme des livraisons réellement saisies (est_report
+      // false), sans dépendre d'une continuité jour après jour. La saisie
+      // terrain est souvent périodique (hebdomadaire) plutôt que quotidienne
+      // — le calcul "net des reports" ci-dessous suppose une chaîne continue
+      // et plafonne à tort une vraie nouvelle livraison à 0 dès qu'un trou de
+      // plusieurs jours sépare deux entrées. Utilisé pour "Goodies distribués
+      // par site" (recap global) ; le détail jour par jour ci-dessous garde
+      // le calcul net des reports, plus pertinent à l'échelle d'un seul jour.
+      let totalRecuBrut = 0;
       let totalRecusFrais = 0, totalGagne = 0, totalReporteCumule = 0;
       const body = sorted.map((l, i) => {
+        if (!l.est_report) totalRecuBrut += l.quantite_apportee;
         const reporte = i > 0 ? sorted[i - 1].restants_du_jour : 0;
         const recusFrais = Math.max(0, l.quantite_apportee - reporte);
         totalRecusFrais += recusFrais;
@@ -1677,7 +1687,7 @@ function generatePDF({
       ]);
 
       const gagneReel = gagneParSiteGoodie.get(key)?.count ?? 0;
-      goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: totalRecusFrais, gagne: gagneReel, restant: Math.max(0, totalRecusFrais - gagneReel) });
+      goodiesRecapDetail.push({ site: siteName, goodie: goodieNom, recu: totalRecuBrut, gagne: gagneReel, restant: Math.max(0, totalRecuBrut - gagneReel) });
       gagneParSiteGoodie.delete(key);
 
       if (showDetailJournalier) {
@@ -1811,15 +1821,21 @@ function generatePDF({
       if (cfg.show_section_goodies_detail) {
         const goodiesDetail = sortGoodiesRecapDetail(goodiesRecapDetail);
         if (goodiesDetail.length > 0) {
+          const totalRecuG = goodiesDetail.reduce((a, g) => a + g.recu, 0);
+          const totalGagneG = goodiesDetail.reduce((a, g) => a + g.gagne, 0);
           table(
             ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
             [
               ...goodiesDetail.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)]),
               [
                 "TOTAL", "—",
-                fmt(goodiesDetail.reduce((a, g) => a + g.recu, 0)),
-                fmt(goodiesDetail.reduce((a, g) => a + g.gagne, 0)),
-                fmt(goodiesDetail.reduce((a, g) => a + g.restant, 0)),
+                fmt(totalRecuG),
+                fmt(totalGagneG),
+                // Reçu − Gagné, non plafonné : la somme des restants déjà
+                // plafonnés par ligne masquerait un déséquilibre global
+                // (ex : gagné > reçu sur la campagne, signe d'un trou de
+                // saisie sur les livraisons) — ici on le rend visible.
+                fmt(totalRecuG - totalGagneG),
               ],
             ]
           );
@@ -1872,15 +1888,17 @@ function generatePDF({
       if (cfg.show_section_goodies_detail) {
         const goodiesDetailEnt = sortGoodiesRecapDetail(goodiesRecapDetail);
         if (goodiesDetailEnt.length > 0) {
+          const totalRecuGEnt = goodiesDetailEnt.reduce((a, g) => a + g.recu, 0);
+          const totalGagneGEnt = goodiesDetailEnt.reduce((a, g) => a + g.gagne, 0);
           table(
             ["Site", "Goodie", "Reçu (campagne)", "Gagné par les clients (campagne)", "Restant"],
             [
               ...goodiesDetailEnt.map(g => [g.site, g.goodie, fmt(g.recu), fmt(g.gagne), fmt(g.restant)]),
               [
                 "TOTAL", "—",
-                fmt(goodiesDetailEnt.reduce((a, g) => a + g.recu, 0)),
-                fmt(goodiesDetailEnt.reduce((a, g) => a + g.gagne, 0)),
-                fmt(goodiesDetailEnt.reduce((a, g) => a + g.restant, 0)),
+                fmt(totalRecuGEnt),
+                fmt(totalGagneGEnt),
+                fmt(totalRecuGEnt - totalGagneGEnt),
               ],
             ]
           );
